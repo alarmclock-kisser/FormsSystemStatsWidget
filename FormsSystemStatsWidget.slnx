@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="FormsSystemStatsWidget.Core/FormsSystemStatsWidget.Core.csproj" />
+  <Project Path="FormsSystemStatsWidget.Forms/FormsSystemStatsWidget.Forms.csproj" />
+</Solution>
