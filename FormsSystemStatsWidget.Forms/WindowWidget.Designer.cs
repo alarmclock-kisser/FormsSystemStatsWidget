@@ -50,6 +50,8 @@
             label_gpuWatts2 = new Label();
             label_gpuVram2 = new Label();
             progressBar_vram2 = new ProgressBar();
+            trafficThresholdToolStripMenuItem = new ToolStripMenuItem();
+            toolStripTextBox_threshold = new ToolStripTextBox();
             ((System.ComponentModel.ISupportInitialize)pictureBox_cpu).BeginInit();
             contextMenuStrip_widget.SuspendLayout();
             SuspendLayout();
@@ -83,9 +85,9 @@
             // 
             // contextMenuStrip_widget
             // 
-            contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { updateIntervalToolStripMenuItem, selectGPUToolStripMenuItem, diagramColorToolStripMenuItem, showUsageToolStripMenuItem, alwaysOnTopToolStripMenuItem });
+            contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { updateIntervalToolStripMenuItem, selectGPUToolStripMenuItem, diagramColorToolStripMenuItem, showUsageToolStripMenuItem, alwaysOnTopToolStripMenuItem, trafficThresholdToolStripMenuItem });
             contextMenuStrip_widget.Name = "contextMenuStrip_widget";
-            contextMenuStrip_widget.Size = new Size(181, 136);
+            contextMenuStrip_widget.Size = new Size(181, 158);
             contextMenuStrip_widget.Text = "Settings";
             // 
             // updateIntervalToolStripMenuItem
@@ -100,7 +102,8 @@
             toolStripTextBox_interval.Name = "toolStripTextBox_interval";
             toolStripTextBox_interval.Size = new Size(100, 23);
             toolStripTextBox_interval.Text = "420";
-            toolStripTextBox_interval.TextChanged += toolStripTextBox_interval_TextChanged;
+            toolStripTextBox_interval.KeyDown += toolStripTextBox_interval_KeyDown;
+            toolStripTextBox_interval.Leave += toolStripTextBox_interval_Leave;
             // 
             // selectGPUToolStripMenuItem
             // 
@@ -228,6 +231,20 @@
             progressBar_vram2.Size = new Size(240, 12);
             progressBar_vram2.TabIndex = 7;
             // 
+            // trafficThresholdToolStripMenuItem
+            // 
+            trafficThresholdToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { toolStripTextBox_threshold });
+            trafficThresholdToolStripMenuItem.Name = "trafficThresholdToolStripMenuItem";
+            trafficThresholdToolStripMenuItem.Size = new Size(180, 22);
+            trafficThresholdToolStripMenuItem.Text = "Traffic Threshold ...";
+            // 
+            // toolStripTextBox_threshold
+            // 
+            toolStripTextBox_threshold.Name = "toolStripTextBox_threshold";
+            toolStripTextBox_threshold.Size = new Size(100, 23);
+            toolStripTextBox_threshold.Text = "1 MB/s";
+            toolStripTextBox_threshold.TextChanged += toolStripTextBox_threshold_TextChanged;
+            // 
             // WindowWidget
             // 
             AutoScaleDimensions = new SizeF(7F, 15F);
@@ -279,5 +296,7 @@
         private Label label_gpuWatts2;
         private Label label_gpuVram2;
         private ProgressBar progressBar_vram2;
+        private ToolStripMenuItem trafficThresholdToolStripMenuItem;
+        private ToolStripTextBox toolStripTextBox_threshold;
     }
 }

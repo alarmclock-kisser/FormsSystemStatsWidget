@@ -1,4 +1,5 @@
 using FormsSystemStatsWidget.Core;
+using System.Text.RegularExpressions;
 using Timer = System.Windows.Forms.Timer;
 
 namespace FormsSystemStatsWidget.Forms
@@ -12,11 +13,14 @@ namespace FormsSystemStatsWidget.Forms
         private Timer UpdateTimer;
         private GpuStats Gpu;
         private GpuStats? Gpu2 = null;
+        private volatile bool _closing = false;
+        private int _tickInProgress = 0;
 
 
         public WindowWidget()
         {
             this.InitializeComponent();
+            this.DoubleBuffered = true;
 
             this.UpdateTimer = new Timer();
             this.UpdateTimer.Interval = this._updateIntervalMs;
@@ -51,36 +55,140 @@ namespace FormsSystemStatsWidget.Forms
                     this.contextMenuStrip_widget.Show(this, e.Location);
                 }
             };
+
+            try { TrafficStats.Init(); }
+            catch { }
+        }
+
+        private void UpdateTitleWithTraffic()
+        {
+            string up = TrafficStats.FormatBytesPerSecond(TrafficStats.UpBytesPerSecond);
+            string down = TrafficStats.FormatBytesPerSecond(TrafficStats.DownBytesPerSecond);
+            string top = string.Empty;
+            // Only show top talker when both conditions hold:
+            // 1) total network traffic is at or above the configured threshold
+            // 2) the top process IO rate is at or above the configured threshold
+            double netTotal = TrafficStats.UpBytesPerSecond + TrafficStats.DownBytesPerSecond;
+            if (netTotal >= TrafficStats.ThresholdBytesPerSecond && !string.IsNullOrEmpty(TrafficStats.TopTalker) && TrafficStats.ActiveProcesses.Count > 0)
+            {
+                var topEntry = TrafficStats.ActiveProcesses[0];
+                if (topEntry.Name == TrafficStats.TopTalker && topEntry.IoBytesPerSec >= TrafficStats.ThresholdBytesPerSecond)
+                {
+                    top = Ellipsize(TrafficStats.TopTalker, 30);
+                }
+            }
+            this.Text = $"\u2191 {up}  \u2193 {down}  {top}";
+        }
+
+        private static string Ellipsize(string text, int maxLen)
+        {
+            if (string.IsNullOrEmpty(text) || maxLen <= 0)
+                return string.Empty;
+            if (text.Length <= maxLen)
+                return text;
+            if (maxLen <= 3)
+                return text.Substring(0, maxLen);
+            return text.Substring(0, maxLen - 3) + "...";
         }
 
         private async void Timer_Tick(object? sender, EventArgs e)
         {
-            var threads = CpuStats.GetThreadUsages();
-            double ramTotalGb = Math.Round(CpuStats.GetTotalMemoryBytes() / 1_073_741_824.0, 3);
-            double ramUsedGb = Math.Round((CpuStats.GetUsedMemoryBytes()) / 1_073_741_824.0, 3);
+            if (_closing) return;
+            if (Interlocked.Exchange(ref _tickInProgress, 1) == 1) return;
 
-            double gpuUsage = this.Gpu.CurrentLoad01 * 100;
-            double gpuWattage = this.Gpu.CurrentPowerWatts ?? 0;
-            double vramTotalGb = Math.Round(this.Gpu.GetTotalVramBytes() / 1_073_741_824.0, 3);
-            double vramUsedGb = Math.Round(this.Gpu.GetUsedVramBytes() / 1_073_741_824.0, 3);
+            this.UpdateTimer.Stop();
 
-            await Task.WhenAll(
-                this.UpdateCpuUsageAsync(threads),
-                this.UpdateRamUsageAsync(ramTotalGb, ramUsedGb),
-                this.UpdateGpuUsageAsync(gpuUsage, gpuWattage),
-                this.UpdateVramUsageAsync(vramTotalGb, vramUsedGb)
-            );
+            try
+            {
+                var gpuRef = this.Gpu;
+
+                var threadsTask = Task.Run(() => CpuStats.GetThreadUsages());
+                var ramTask = Task.Run(() =>
+                {
+                    double total = Math.Round(CpuStats.GetTotalMemoryBytes() / 1_073_741_824.0, 3);
+                    double used = Math.Round(CpuStats.GetUsedMemoryBytes() / 1_073_741_824.0, 3);
+                    return (total, used);
+                });
+                var gpuTask = Task.Run(() =>
+                {
+                    try
+                    {
+                        double usage = gpuRef.CurrentLoad01 * 100;
+                        double wattage = gpuRef.CurrentPowerWatts ?? 0;
+                        double vramTotal = Math.Round(gpuRef.GetTotalVramBytes() / 1_073_741_824.0, 3);
+                        double vramUsed = Math.Round(gpuRef.GetUsedVramBytes() / 1_073_741_824.0, 3);
+                        return (usage, wattage, vramTotal, vramUsed);
+                    }
+                    catch
+                    {
+                        return (0.0, 0.0, 0.0, 0.0);
+                    }
+                });
+                var trafficTask = Task.Run(() => TrafficStats.Sample(this.UpdateTimer.Interval));
+
+                await Task.WhenAll(threadsTask, ramTask, gpuTask, trafficTask);
+
+                var threads = threadsTask.Result;
+                var (ramTotalGb, ramUsedGb) = ramTask.Result;
+                var (gpuUsage, gpuWattage, vramTotalGb, vramUsedGb) = gpuTask.Result;
+
+                await Task.WhenAll(
+                    this.UpdateCpuUsageAsync(threads),
+                    this.UpdateRamUsageAsync(ramTotalGb, ramUsedGb),
+                    this.UpdateGpuUsageAsync(gpuUsage, gpuWattage),
+                    this.UpdateVramUsageAsync(vramTotalGb, vramUsedGb)
+                );
+
+                if (_closing) return;
+                UpdateTitleWithTraffic();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _tickInProgress, 0);
+                if (!_closing)
+                {
+                    this.UpdateTimer.Start();
+                }
+            }
         }
 
-        private void toolStripTextBox_interval_TextChanged(object sender, EventArgs e)
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            _closing = true;
+            this.UpdateTimer.Stop();
+
+            try { this.Gpu?.Dispose(); } catch { }
+            try { this.Gpu2?.Dispose(); } catch { }
+
+            base.OnFormClosing(e);
+        }
+
+        private void toolStripTextBox_interval_Leave(object? sender, EventArgs e)
+        {
+            this.ApplyIntervalFromText();
+        }
+
+        private void toolStripTextBox_interval_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            this.ApplyIntervalFromText();
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void ApplyIntervalFromText()
         {
             string text = this.toolStripTextBox_interval.Text;
             if (int.TryParse(text, out int interval))
             {
                 this._updateIntervalMs = interval;
-                this.UpdateTimer.Interval = this._updateIntervalMs < 50 ? 50 : this._updateIntervalMs;
             }
 
+            this.UpdateTimer.Interval = this._updateIntervalMs < 50 ? 50 : this._updateIntervalMs;
             this.toolStripTextBox_interval.Text = this._updateIntervalMs.ToString();
         }
 
@@ -88,65 +196,52 @@ namespace FormsSystemStatsWidget.Forms
         private async Task UpdateCpuUsageAsync(float[] usages)
         {
             var bmp = await CpuStats.RenderCoresBitmapAsync(usages, this.pictureBox_cpu.Width, this.pictureBox_cpu.Height, this._diagramColor, (this.showUsageToolStripMenuItem.Enabled ? this._percentageColor : null), CancellationToken.None);
-            this.Invoke((Action)(() =>
-            {
-                this.pictureBox_cpu.Image?.Dispose();
-                this.pictureBox_cpu.Image = bmp;
-            }));
+            if (_closing) { bmp?.Dispose(); return; }
+            this.pictureBox_cpu.Image?.Dispose();
+            this.pictureBox_cpu.Image = bmp;
         }
 
-        private async Task UpdateRamUsageAsync(double totalGb, double usedGb)
+        private Task UpdateRamUsageAsync(double totalGb, double usedGb)
         {
+            if (_closing) return Task.CompletedTask;
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
 
-            this.Invoke((Action)(() =>
-            {
-                this.label_ram.Text = $"RAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
-                this.progressBar_ram.Value = Math.Clamp((int)percentUsed * 10, 0, this.progressBar_ram.Maximum);
-            }));
+            this.label_ram.Text = $"RAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
+            this.progressBar_ram.Value = Math.Clamp((int)percentUsed * 10, 0, this.progressBar_ram.Maximum);
 
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
-        private async Task UpdateGpuUsageAsync(double usagePercent, double wattage)
+        private Task UpdateGpuUsageAsync(double usagePercent, double wattage)
         {
-            this.Invoke((Action)(() =>
-            {
-                this.label_gpuUsage.Text = $"GPU: {usagePercent:0.00}%";
-                this.label_wattage.Text = $"Watts: {wattage:0.00} W";
-            }));
+            if (_closing) return Task.CompletedTask;
+
+            this.label_gpuUsage.Text = $"GPU: {usagePercent:0.00}%";
+            this.label_wattage.Text = $"Watts: {wattage:0.00} W";
 
             if (this.Gpu2 != null)
             {
-                this.Invoke((Action)(() =>
-                {
-                    this.label_gpuLoad2.Text = $"GPU2: {this.Gpu2.CurrentLoad01 * 100:0.00}%";
-                    this.label_gpuWatts2.Text = $"Watts: {this.Gpu2.CurrentPowerWatts ?? 0:0.00} W";
-                }));
+                this.label_gpuLoad2.Text = $"GPU2: {this.Gpu2.CurrentLoad01 * 100:0.00}%";
+                this.label_gpuWatts2.Text = $"Watts: {this.Gpu2.CurrentPowerWatts ?? 0:0.00} W";
             }
 
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
-        private async Task UpdateVramUsageAsync(double totalGb, double usedGb)
+        private Task UpdateVramUsageAsync(double totalGb, double usedGb)
         {
+            if (_closing) return Task.CompletedTask;
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
-            this.Invoke((Action)(() =>
-            {
-                this.label_vram.Text = $"VRAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
-                this.progressBar_vram.Value = Math.Clamp((int)percentUsed * 10, 0, this.progressBar_vram.Maximum);
-            }));
+            this.label_vram.Text = $"VRAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
+            this.progressBar_vram.Value = Math.Clamp((int)percentUsed * 10, 0, this.progressBar_vram.Maximum);
 
             if (this.Gpu2 != null)
             {
-                this.Invoke((Action)(() =>
-                {
-                    this.label_gpuVram2.Text = $"VRAM: {Math.Round(this.Gpu2.GetUsedVramBytes() / 1_073_741_824.0, 3)} GB / {Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0, 3)} GB ({(this.Gpu2.GetTotalVramBytes() > 0 ? (this.Gpu2.GetUsedVramBytes() / this.Gpu2.GetTotalVramBytes()) * 100 : 0):0.00}%)";
-                    this.progressBar_vram2.Value = Math.Clamp((int)((this.Gpu2.GetTotalVramBytes() > 0 ? (this.Gpu2.GetUsedVramBytes() / this.Gpu2.GetTotalVramBytes()) * 100 : 0) * 10), 0, this.progressBar_vram2.Maximum);
-                }));
+                this.label_gpuVram2.Text = $"VRAM: {Math.Round(this.Gpu2.GetUsedVramBytes() / 1_073_741_824.0, 3)} GB / {Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0, 3)} GB ({(this.Gpu2.GetTotalVramBytes() > 0 ? (this.Gpu2.GetUsedVramBytes() / this.Gpu2.GetTotalVramBytes()) * 100 : 0):0.00}%)";
+                this.progressBar_vram2.Value = Math.Clamp((int)((this.Gpu2.GetTotalVramBytes() > 0 ? (this.Gpu2.GetUsedVramBytes() / this.Gpu2.GetTotalVramBytes()) * 100 : 0) * 10), 0, this.progressBar_vram2.Maximum);
             }
 
-            await Task.CompletedTask;
+            return Task.CompletedTask;
         }
 
         private void toolStripComboBox_gpus_SelectedIndexChanged(object sender, EventArgs e)
@@ -227,6 +322,57 @@ namespace FormsSystemStatsWidget.Forms
         private void alwaysOnTopToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
             this.TopMost = this.alwaysOnTopToolStripMenuItem.Checked;
+        }
+
+        private void toolStripTextBox_threshold_TextChanged(object sender, EventArgs e)
+        {
+            string text = this.toolStripTextBox_threshold.Text;
+
+            // Try parsing as traffic speed with optional suffixes (e.g. "10 MB/s", "500 KB/s"), remove all spaces before parsing
+            // Supported suffixes: B/s, kB/s, KB/s, mB/s, MB/s, gB/s, GB/s (kilo, kibi, mega, mebi, giga, giby -Bytes per second) (case-sensitive (!), s/S doesn't matter mean always seconds)
+            text = text.Replace(" ", "");
+
+            Regex regex = new(@"^([0-9]+(?:[.,][0-9]+)?)(?i:([kmg]?b)/(s|m|h|d))$");
+            if (regex.IsMatch(text))
+            {
+                // Consecutive numbers substring with optional decimal point (invariant culture ('.' & ','))
+                double? value = text.StartsWith("0x") && int.TryParse(text.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out int hexVal)
+                    ? hexVal
+                    : double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double numVal)
+                        ? numVal
+                        : (double?)null;
+                if (value == null)
+                {
+                    return;
+                }
+
+                TrafficStats.ThresholdBytesPerSecond = 0; // determine by suffix and value, differentiate between kB/KB, mB/MB, gB/GB (kilo, kibi, mega, mebi, giga, giby -Bytes) (case-sensitive (!))
+                string suffix = regex.Match(text).Groups[2].Value;
+                long multiplier = suffix switch
+                {
+                    "B" => 1,
+                    "kB" or "kib" => 1_000,
+                    "KB"=> 1_024,
+                    "mB" or "mib" => 1_000_000,
+                    "MB" => 1_048_576,
+                    "gB" or "gib" => 1_000_000_000,
+                    "GB" => 1_073_741_824,
+                    _ => 0
+                };
+
+                // Consider time unit suffix (s, m, h, d) for seconds, minutes, hours, days, apply multiplier accordingly
+                string timeSuffix = regex.Match(text).Groups[3].Value.ToLower();
+                multiplier *= timeSuffix switch
+                {
+                    "s" => 1,
+                    "m" => 60,
+                    "h" => 3600,
+                    "d" => 86400,
+                    _ => 1
+                };
+
+                TrafficStats.ThresholdBytesPerSecond = value.Value * multiplier;
+            }
         }
     }
 }

@@ -6,10 +6,35 @@
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>Ressources\FSS_Widget.favicon.ico</ApplicationIcon>
+    <SignAssembly>False</SignAssembly>
+    <Title>FSSW-Widget</Title>
+    <Authors>alarmclock-kisser</Authors>
+    <Company>AKAZUEFFLI</Company>
+    <Product>FSSWidget</Product>
+    <Description>Forms System Statistics Widget</Description>
+    <PackageProjectUrl>https://github.com/alarmclock-kisser/FormsSystemStatsWidget</PackageProjectUrl>
+    <PackageIcon>FSS_Widget.favicon.png</PackageIcon>
+    <RepositoryUrl>https://github.com/alarmclock-kisser/FormsSystemStatsWidget</RepositoryUrl>
+    <PackageTags>statistics; monitor; widget; forms; system;</PackageTags>
+    <NeutralLanguage>en</NeutralLanguage>
+    <AssemblyVersion>1.4.0</AssemblyVersion>
+    <IncludeSymbols>False</IncludeSymbols>
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include="Ressources\FSS_Widget.favicon.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\FormsSystemStatsWidget.Core\FormsSystemStatsWidget.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Ressources\FSS_Widget.favicon.png">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
   </ItemGroup>
 
 </Project>
