@@ -8,6 +8,7 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
+using LibreHardwareMonitor.Hardware;
 
 namespace FormsSystemStatsWidget.Core
 {
@@ -19,6 +20,11 @@ namespace FormsSystemStatsWidget.Core
         private static DateTime _lastSampleUtc = DateTime.MinValue;
         private static float[] _lastUsages = [];
         private static readonly Lock _sampleLock = new();
+        private static readonly TimeSpan _temperatureSamplingInterval = TimeSpan.FromMilliseconds(500);
+        private static readonly Lock _temperatureLock = new();
+        private static readonly Computer _hardwareComputer = CreateHardwareComputer();
+        private static DateTime _lastTemperatureSampleUtc = DateTime.MinValue;
+        private static double? _lastAverageTemperatureCelsius;
 
         private static PerformanceCounter[] CreateCpuCounters()
         {
@@ -34,6 +40,80 @@ namespace FormsSystemStatsWidget.Core
 
             _lastUsages = new float[coreCount];
             return counters;
+        }
+
+        private static Computer CreateHardwareComputer()
+        {
+            var computer = new Computer
+            {
+                IsCpuEnabled = true,
+                IsMotherboardEnabled = true
+            };
+
+            try
+            {
+                computer.Open();
+            }
+            catch
+            {
+                return computer;
+            }
+
+            return computer;
+        }
+
+        private static void EnsureHardwareComputerOpened()
+        {
+            try
+            {
+                if (_hardwareComputer.Hardware.Count == 0)
+                {
+                    _hardwareComputer.Open();
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static void UpdateHardwareRecursive(IHardware hardware)
+        {
+            hardware.Update();
+            foreach (IHardware subHardware in hardware.SubHardware)
+            {
+                UpdateHardwareRecursive(subHardware);
+            }
+        }
+
+        private static void CollectTemperatureSensorsRecursive(IHardware hardware, List<ISensor> sensors)
+        {
+            foreach (ISensor sensor in hardware.Sensors)
+            {
+                if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue)
+                {
+                    sensors.Add(sensor);
+                }
+            }
+
+            foreach (IHardware subHardware in hardware.SubHardware)
+            {
+                CollectTemperatureSensorsRecursive(subHardware, sensors);
+            }
+        }
+
+        private static bool IsLikelyCpuTemperatureSensor(ISensor sensor)
+        {
+            if (sensor.Hardware.HardwareType == HardwareType.Cpu)
+            {
+                return true;
+            }
+
+            string sensorName = sensor.Name ?? string.Empty;
+            return sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -93,6 +173,118 @@ namespace FormsSystemStatsWidget.Core
         public static float[] GetThreadUsages()
             => GetThreadUsagesAsync().GetAwaiter().GetResult();
 
+        private static (int cols, int rows) CalculateCoreGridDimensions(int coreCount, int width, int height)
+        {
+            int count = Math.Max(1, coreCount);
+            double targetAspectRatio = Math.Max(1, width) / (double) Math.Max(1, height);
+
+            int bestCols = count;
+            int bestRows = 1;
+            double bestScore = double.MaxValue;
+
+            for (int rows = 1; rows <= count; rows++)
+            {
+                int cols = (int) Math.Ceiling(count / (double) rows);
+                int emptyCells = (cols * rows) - count;
+
+                int normalizedCols = cols;
+                int normalizedRows = rows;
+
+                if (targetAspectRatio >= 1.0 && normalizedCols < normalizedRows)
+                {
+                    (normalizedCols, normalizedRows) = (normalizedRows, normalizedCols);
+                }
+                else if (targetAspectRatio < 1.0 && normalizedCols > normalizedRows)
+                {
+                    (normalizedCols, normalizedRows) = (normalizedRows, normalizedCols);
+                }
+
+                int balancePenalty = Math.Abs(normalizedCols - normalizedRows) * 10;
+                double aspectPenalty = Math.Abs((normalizedCols / (double) normalizedRows) - targetAspectRatio);
+                double score = (emptyCells * 25) + balancePenalty + aspectPenalty;
+
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    bestCols = normalizedCols;
+                    bestRows = normalizedRows;
+                }
+            }
+
+            return (bestCols, bestRows);
+        }
+
+        /// <summary>
+        /// Liefert die gemittelte CPU-Temperatur in °C aus Hardware-Sensoren (LibreHardwareMonitor).
+        /// Gibt null zurück, wenn keine verwertbaren Temperatursensoren verfügbar sind.
+        /// </summary>
+        public static double? GetAverageCpuTemperatureCelsius()
+        {
+            lock (_temperatureLock)
+            {
+                DateTime nowUtc = DateTime.UtcNow;
+                if ((nowUtc - _lastTemperatureSampleUtc) < _temperatureSamplingInterval)
+                {
+                    return _lastAverageTemperatureCelsius;
+                }
+
+                _lastTemperatureSampleUtc = nowUtc;
+
+                var temperatureValues = new List<double>();
+                var fallbackTemperatureValues = new List<double>();
+
+                try
+                {
+                    EnsureHardwareComputerOpened();
+
+                    foreach (IHardware hardware in _hardwareComputer.Hardware)
+                    {
+                        try
+                        {
+                            UpdateHardwareRecursive(hardware);
+
+                            var sensors = new List<ISensor>();
+                            CollectTemperatureSensorsRecursive(hardware, sensors);
+
+                            foreach (ISensor sensor in sensors)
+                            {
+                                double value = sensor.Value!.Value;
+                                if (value is <= -20d or >= 150d)
+                                {
+                                    continue;
+                                }
+
+                                fallbackTemperatureValues.Add(value);
+                                if (IsLikelyCpuTemperatureSensor(sensor))
+                                {
+                                    temperatureValues.Add(value);
+                                }
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+                catch
+                {
+                    _lastAverageTemperatureCelsius = null;
+                    return _lastAverageTemperatureCelsius;
+                }
+
+                if (temperatureValues.Count > 0)
+                {
+                    _lastAverageTemperatureCelsius = temperatureValues.Average();
+                }
+                else
+                {
+                    _lastAverageTemperatureCelsius = fallbackTemperatureValues.Count > 0 ? fallbackTemperatureValues.Average() : null;
+                }
+
+                return _lastAverageTemperatureCelsius;
+            }
+        }
+
         /// <summary>
         /// Malt die CPU-Auslastung pro Kern als Bitmap. Async, da das Rendern bei vielen Kernen etwas dauern kann.
         /// </summary>
@@ -104,10 +296,7 @@ namespace FormsSystemStatsWidget.Core
                 ct.ThrowIfCancellationRequested();
 
                 int count = Math.Max(1, usages?.Length ?? 1);
-
-                // Compute grid: try to make it as square as possible
-                int cols = (int) Math.Ceiling(Math.Sqrt(count));
-                int rows = (int) Math.Ceiling(count / (double) cols);
+                var (cols, rows) = CalculateCoreGridDimensions(count, width, height);
 
                 var bmp = new Bitmap(Math.Max(1, width), Math.Max(1, height));
                 using (var g = Graphics.FromImage(bmp))
