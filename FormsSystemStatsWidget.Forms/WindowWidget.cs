@@ -237,8 +237,14 @@ namespace FormsSystemStatsWidget.Forms
 
             if (this.Gpu2 != null)
             {
-                this.label_gpuVram2.Text = $"VRAM: {Math.Round(this.Gpu2.GetUsedVramBytes() / 1_073_741_824.0, 3)} GB / {Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0, 3)} GB ({(this.Gpu2.GetTotalVramBytes() > 0 ? (this.Gpu2.GetUsedVramBytes() / this.Gpu2.GetTotalVramBytes()) * 100 : 0):0.00}%)";
-                this.progressBar_vram2.Value = Math.Clamp((int)((this.Gpu2.GetTotalVramBytes() > 0 ? (this.Gpu2.GetUsedVramBytes() / this.Gpu2.GetTotalVramBytes()) * 100 : 0) * 10), 0, this.progressBar_vram2.Maximum);
+                long gpu2TotalBytes = this.Gpu2.GetTotalVramBytes();
+                long gpu2UsedBytes = this.Gpu2.GetUsedVramBytes();
+                double gpu2TotalGb = Math.Round(gpu2TotalBytes / 1_073_741_824.0, 3);
+                double gpu2UsedGb = Math.Round(gpu2UsedBytes / 1_073_741_824.0, 3);
+                double gpu2PercentUsed = gpu2TotalBytes > 0 ? (Math.Max(0.0, gpu2UsedBytes) / gpu2TotalBytes) * 100.0 : 0.0;
+
+                this.label_gpuVram2.Text = $"VRAM: {gpu2UsedGb} GB / {gpu2TotalGb} GB ({gpu2PercentUsed:0.00}%)";
+                this.progressBar_vram2.Value = Math.Clamp((int)(gpu2PercentUsed * 10), 0, this.progressBar_vram2.Maximum);
             }
 
             return Task.CompletedTask;
