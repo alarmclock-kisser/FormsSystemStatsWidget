@@ -8,6 +8,7 @@ using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
+using System.Management;
 using LibreHardwareMonitor.Hardware;
 
 namespace FormsSystemStatsWidget.Core
@@ -15,6 +16,13 @@ namespace FormsSystemStatsWidget.Core
     [SupportedOSPlatform("windows")]
     public static class CpuStats
     {
+        /// <summary>
+        /// Zusammengefasste CPU-Telemetrie aus den verfügbaren Hardware-Sensoren.
+        /// </summary>
+        /// <param name="AverageTemperatureCelsius">Gemittelte CPU-Temperatur in °C, falls verfügbar.</param>
+        /// <param name="PackagePowerWatts">CPU-Leistungsaufnahme in Watt, falls verfügbar.</param>
+        public sealed record CpuTelemetrySnapshot(double? AverageTemperatureCelsius, double? PackagePowerWatts);
+
         private static readonly PerformanceCounter[] _cpuCounters = CreateCpuCounters();
         private static readonly TimeSpan _samplingInterval = TimeSpan.FromMilliseconds(250);
         private static DateTime _lastSampleUtc = DateTime.MinValue;
@@ -24,7 +32,10 @@ namespace FormsSystemStatsWidget.Core
         private static readonly Lock _temperatureLock = new();
         private static readonly Computer _hardwareComputer = CreateHardwareComputer();
         private static DateTime _lastTemperatureSampleUtc = DateTime.MinValue;
-        private static double? _lastAverageTemperatureCelsius;
+        private static CpuTelemetrySnapshot _lastCpuTelemetrySnapshot = new(null, null);
+        private static readonly Lock _processSamplingLock = new();
+        private static DateTime _lastProcessSampleUtc = DateTime.MinValue;
+        private static Dictionary<int, TimeSpan> _lastProcessCpuTimes = new();
 
         private static PerformanceCounter[] CreateCpuCounters()
         {
@@ -47,7 +58,8 @@ namespace FormsSystemStatsWidget.Core
             var computer = new Computer
             {
                 IsCpuEnabled = true,
-                IsMotherboardEnabled = true
+                IsMotherboardEnabled = true,
+                IsControllerEnabled = true
             };
 
             try
@@ -101,6 +113,22 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
+        private static void CollectCpuRelevantSensorsRecursive(IHardware hardware, List<ISensor> sensors)
+        {
+            foreach (ISensor sensor in hardware.Sensors)
+            {
+                if ((sensor.SensorType == SensorType.Temperature || sensor.SensorType == SensorType.Power) && sensor.Value.HasValue)
+                {
+                    sensors.Add(sensor);
+                }
+            }
+
+            foreach (IHardware subHardware in hardware.SubHardware)
+            {
+                CollectCpuRelevantSensorsRecursive(subHardware, sensors);
+            }
+        }
+
         private static bool IsLikelyCpuTemperatureSensor(ISensor sensor)
         {
             if (sensor.Hardware.HardwareType == HardwareType.Cpu)
@@ -109,11 +137,96 @@ namespace FormsSystemStatsWidget.Core
             }
 
             string sensorName = sensor.Name ?? string.Empty;
+            string hardwareName = sensor.Hardware.Name ?? string.Empty;
             return sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
                    || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
                    || sensorName.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("CCD", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+                    || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                    || hardwareName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                    || hardwareName.Contains("Ryzen", StringComparison.OrdinalIgnoreCase)
+                    || hardwareName.Contains("Core", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPreferredCpuTemperatureSensor(ISensor sensor)
+        {
+            string sensorName = sensor.Name ?? string.Empty;
+            return sensor.Hardware.HardwareType == HardwareType.Cpu
+                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
                    || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
                    || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLikelyCpuPowerSensor(ISensor sensor)
+        {
+            if (sensor.SensorType != SensorType.Power)
+            {
+                return false;
+            }
+
+            if (sensor.Hardware.HardwareType == HardwareType.Cpu)
+            {
+                return true;
+            }
+
+            string sensorName = sensor.Name ?? string.Empty;
+            string hardwareName = sensor.Hardware.Name ?? string.Empty;
+            return sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("PPT", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("SoC", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("IA Cores", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("Processor", StringComparison.OrdinalIgnoreCase)
+                    || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                    || hardwareName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                    || hardwareName.Contains("VRM", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPreferredCpuPowerSensor(ISensor sensor)
+        {
+            string sensorName = sensor.Name ?? string.Empty;
+            return sensor.Hardware.HardwareType == HardwareType.Cpu
+                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("PPT", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("IA Cores", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static double? TryGetCpuTemperatureFromWmi()
+        {
+            try
+            {
+                using ManagementObjectSearcher searcher = new ManagementObjectSearcher("root\\WMI", "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+                using ManagementObjectCollection results = searcher.Get();
+
+                List<double> temperatureValues = new List<double>();
+                foreach (ManagementObject result in results.Cast<ManagementObject>())
+                {
+                    try
+                    {
+                        if (result["CurrentTemperature"] is ushort rawValue && rawValue > 0)
+                        {
+                            double celsius = (rawValue / 10d) - 273.15d;
+                            if (celsius is > 0d and < 150d)
+                            {
+                                temperatureValues.Add(celsius);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                return temperatureValues.Count > 0 ? temperatureValues.Average() : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>
@@ -173,6 +286,99 @@ namespace FormsSystemStatsWidget.Core
         public static float[] GetThreadUsages()
             => GetThreadUsagesAsync().GetAwaiter().GetResult();
 
+        /// <summary>
+        /// Liefert die Prozesse mit der höchsten CPU-Last seit der letzten Probe.
+        /// </summary>
+        /// <param name="maxCount">Maximale Anzahl der zurückgegebenen Prozesse.</param>
+        /// <returns>Liste der Prozesse mit CPU-Prozentwerten, absteigend sortiert.</returns>
+        public static IReadOnlyList<(string processName, double cpuPercent)> GetTopCpuProcesses(int maxCount = 4)
+        {
+            lock (_processSamplingLock)
+            {
+                DateTime nowUtc = DateTime.UtcNow;
+                Process[] processes;
+
+                try
+                {
+                    processes = Process.GetProcesses();
+                }
+                catch
+                {
+                    return [];
+                }
+
+                try
+                {
+                    Dictionary<int, TimeSpan> currentProcessCpuTimes = new Dictionary<int, TimeSpan>(processes.Length);
+                    List<(string processName, double cpuPercent)> processUsages = new List<(string processName, double cpuPercent)>();
+
+                    foreach (Process process in processes)
+                    {
+                        try
+                        {
+                            currentProcessCpuTimes[process.Id] = process.TotalProcessorTime;
+                        }
+                        catch
+                        {
+                        }
+                    }
+
+                    if (_lastProcessSampleUtc != DateTime.MinValue)
+                    {
+                        double elapsedSeconds = (nowUtc - _lastProcessSampleUtc).TotalSeconds;
+                        if (elapsedSeconds > 0.05d)
+                        {
+                            foreach (Process process in processes)
+                            {
+                                try
+                                {
+                                    if (!currentProcessCpuTimes.TryGetValue(process.Id, out TimeSpan currentCpuTime)
+                                        || !_lastProcessCpuTimes.TryGetValue(process.Id, out TimeSpan previousCpuTime))
+                                    {
+                                        continue;
+                                    }
+
+                                    double cpuTimeDeltaSeconds = (currentCpuTime - previousCpuTime).TotalSeconds;
+                                    if (cpuTimeDeltaSeconds <= 0)
+                                    {
+                                        continue;
+                                    }
+
+                                    double cpuPercent = (cpuTimeDeltaSeconds / (elapsedSeconds * Environment.ProcessorCount)) * 100d;
+                                    if (cpuPercent < 0.05d)
+                                    {
+                                        continue;
+                                    }
+
+                                    string processName = string.IsNullOrWhiteSpace(process.ProcessName) ? "n/a" : process.ProcessName;
+                                    processUsages.Add((processName, Math.Min(cpuPercent, 100d)));
+                                }
+                                catch
+                                {
+                                }
+                            }
+                        }
+                    }
+
+                    _lastProcessCpuTimes = currentProcessCpuTimes;
+                    _lastProcessSampleUtc = nowUtc;
+
+                    return processUsages
+                        .OrderByDescending(entry => entry.cpuPercent)
+                        .ThenBy(entry => entry.processName, StringComparer.OrdinalIgnoreCase)
+                        .Take(Math.Max(1, maxCount))
+                        .ToArray();
+                }
+                finally
+                {
+                    foreach (Process process in processes)
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+        }
+
         private static (int cols, int rows) CalculateCoreGridDimensions(int coreCount, int width, int height)
         {
             int count = Math.Max(1, coreCount);
@@ -220,18 +426,36 @@ namespace FormsSystemStatsWidget.Core
         /// </summary>
         public static double? GetAverageCpuTemperatureCelsius()
         {
+            return GetCpuTelemetrySnapshot().AverageTemperatureCelsius;
+        }
+
+        /// <summary>
+        /// Liefert die aktuell verfügbare CPU-Leistungsaufnahme in Watt.
+        /// </summary>
+        public static double? GetCpuPackagePowerWatts()
+        {
+            return GetCpuTelemetrySnapshot().PackagePowerWatts;
+        }
+
+        /// <summary>
+        /// Liefert eine gemeinsame CPU-Telemetrieprobe für Temperatur und Leistungsaufnahme.
+        /// </summary>
+        public static CpuTelemetrySnapshot GetCpuTelemetrySnapshot()
+        {
             lock (_temperatureLock)
             {
                 DateTime nowUtc = DateTime.UtcNow;
                 if ((nowUtc - _lastTemperatureSampleUtc) < _temperatureSamplingInterval)
                 {
-                    return _lastAverageTemperatureCelsius;
+                    return _lastCpuTelemetrySnapshot;
                 }
 
                 _lastTemperatureSampleUtc = nowUtc;
 
-                var temperatureValues = new List<double>();
-                var fallbackTemperatureValues = new List<double>();
+                List<double> preferredTemperatureValues = new List<double>();
+                List<double> fallbackTemperatureValues = new List<double>();
+                List<double> preferredPowerValues = new List<double>();
+                List<double> fallbackPowerValues = new List<double>();
 
                 try
                 {
@@ -243,21 +467,43 @@ namespace FormsSystemStatsWidget.Core
                         {
                             UpdateHardwareRecursive(hardware);
 
-                            var sensors = new List<ISensor>();
-                            CollectTemperatureSensorsRecursive(hardware, sensors);
+                            List<ISensor> sensors = new List<ISensor>();
+                            CollectCpuRelevantSensorsRecursive(hardware, sensors);
 
                             foreach (ISensor sensor in sensors)
                             {
                                 double value = sensor.Value!.Value;
-                                if (value is <= -20d or >= 150d)
+                                if (sensor.SensorType == SensorType.Temperature)
                                 {
-                                    continue;
-                                }
+                                    if (value is <= 0d or >= 150d)
+                                    {
+                                        continue;
+                                    }
 
-                                fallbackTemperatureValues.Add(value);
-                                if (IsLikelyCpuTemperatureSensor(sensor))
+                                    if (IsLikelyCpuTemperatureSensor(sensor))
+                                    {
+                                        fallbackTemperatureValues.Add(value);
+                                        if (IsPreferredCpuTemperatureSensor(sensor))
+                                        {
+                                            preferredTemperatureValues.Add(value);
+                                        }
+                                    }
+                                }
+                                else if (sensor.SensorType == SensorType.Power)
                                 {
-                                    temperatureValues.Add(value);
+                                    if (value is <= 0d or >= 500d)
+                                    {
+                                        continue;
+                                    }
+
+                                    if (IsLikelyCpuPowerSensor(sensor))
+                                    {
+                                        fallbackPowerValues.Add(value);
+                                        if (IsPreferredCpuPowerSensor(sensor))
+                                        {
+                                            preferredPowerValues.Add(value);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -268,20 +514,26 @@ namespace FormsSystemStatsWidget.Core
                 }
                 catch
                 {
-                    _lastAverageTemperatureCelsius = null;
-                    return _lastAverageTemperatureCelsius;
+                    _lastCpuTelemetrySnapshot = new CpuTelemetrySnapshot(null, null);
+                    return _lastCpuTelemetrySnapshot;
                 }
 
-                if (temperatureValues.Count > 0)
-                {
-                    _lastAverageTemperatureCelsius = temperatureValues.Average();
-                }
-                else
-                {
-                    _lastAverageTemperatureCelsius = fallbackTemperatureValues.Count > 0 ? fallbackTemperatureValues.Average() : null;
-                }
+                double? averageTemperatureCelsius = preferredTemperatureValues.Count > 0
+                    ? preferredTemperatureValues.Average()
+                    : fallbackTemperatureValues.Count > 0
+                        ? fallbackTemperatureValues.Average()
+                        : null;
 
-                return _lastAverageTemperatureCelsius;
+                averageTemperatureCelsius ??= TryGetCpuTemperatureFromWmi();
+
+                double? packagePowerWatts = preferredPowerValues.Count > 0
+                    ? preferredPowerValues.Average()
+                    : fallbackPowerValues.Count > 0
+                        ? fallbackPowerValues.Average()
+                        : null;
+
+                _lastCpuTelemetrySnapshot = new CpuTelemetrySnapshot(averageTemperatureCelsius, packagePowerWatts);
+                return _lastCpuTelemetrySnapshot;
             }
         }
 

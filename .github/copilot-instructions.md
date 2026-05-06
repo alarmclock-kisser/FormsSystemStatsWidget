@@ -71,7 +71,7 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 - Semantisch aussagekräftige Namen statt sprachspezifischer/typspezifischer Alias-Namen.
 
 ### Typen & Member
-- Schnittstellen beginnen mit `I` (z. B. `IUserRepository`).
+- Schnittstellen beginnen with `I` (z. B. `IUserRepository`).
 - Methoden sind Verben/Verbphrasen (z. B. `CreateReport`).
 - Eigenschaften sind Nomen/Adjektive (z. B. `ReportName`, `IsEnabled`).
 - Collection-Eigenschaften im Plural (z. B. `Orders`, nicht `OrderList`).
@@ -220,7 +220,7 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 ### Architektur für WinForms
 - UI-Code (Form/Control) bleibt dünn: Anzeige, Benutzerinteraktion, einfache Validierung.
 - Fachlogik, IO-Logik und Berechnungen in Services/Klassen auslagern (testbar, DI-fähig).
-- Konstruktor-Injektion bleibt bevorzugt. Falls Designer-Lifecycle es erfordert, sind pragmatische Muster erlaubt (z. B. parameterloser Konstruktor + Initialisierungsmethode), solange Testbarkeit gewahrt bleibt.
+- Konstruktor-Injektion bleibt bevorzugt. Falls Designer-Lifecycle es erfordert, sind pragmatische Muster erlaubt (z. B. parameterloser Konstrukteur + Initialisierungsmethode), solange Testbarkeit gewahrt bleibt.
 
 ### Designer-/Generated-Code-Regeln
 - Dateien wie `*.Designer.cs`, `*.g.cs`, `*.generated.cs` gelten als **generierter Code** und werden nicht manuell stilbereinigt.
@@ -231,6 +231,12 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 - Kommentare weiterhin primär auf Deutsch.
 - WinForms-Eventhandler-Namen dürfen dem projektüblichen Muster folgen (z. B. `buttonStart_Click` oder bestehende Konvention im Repository).
 - Bestehende Benennungsmuster im Projekt haben Vorrang vor erzwungener Umbenennung ohne funktionalen Mehrwert.
+
+### UI-Widgets & Layout
+- Optimiere Widgets für gängige Bildschirmauflösungen und DPI-Einstellungen.
+- Vermeide Überlagerungen durch Limitierung dargestellter Einträge; passe Anzeigen an verfügbare Fläche an.
+- Top-Tasks-Anzeige: Zeige maximal 3 Einträge (statt 4), um Überlagerungen im Widget zu vermeiden.
+- Mache solche Anzeige-Limits konfigurierbar, wenn möglich (Einstellungen/Theme), und dokumentiere die Default-Werte.
 
 ### Logging, ExitCodes, Betrieb
 - ExitCode-Vorgaben sind für Console/Worker zwingend; bei GUI-Anwendungen optional bzw. nur dort, wo sinnvoll (z. B. Launcher/Batch-Integration).

@@ -10,6 +10,8 @@ namespace FormsSystemStatsWidget.Forms
 {
     public partial class WindowWidget : Form
     {
+        private const int MultiGpuClientHeight = 271;
+        private const int SingleGpuClientHeight = 223;
         private int _updateIntervalMs = 420;
         private Color _diagramColor = Color.White;
         private Color? _percentageColor = Color.BlueViolet;
@@ -59,6 +61,8 @@ namespace FormsSystemStatsWidget.Forms
                 this.Gpu2 = new GpuStats(1);
             }
 
+            this.ApplyGpuLayout();
+
             this.MouseDown += (s, e) =>
             {
                 if (e.Button == MouseButtons.Left)
@@ -78,6 +82,23 @@ namespace FormsSystemStatsWidget.Forms
 
             this.PopulateDriveSelections();
             this.ApplyDriveSpeedTestSettingTexts();
+        }
+
+        private void ApplyGpuLayout()
+        {
+            bool hasSecondGpu = this.Gpu2 != null;
+
+            this.label_gpuLoad2.Visible = hasSecondGpu;
+            this.label_gpuWatts2.Visible = hasSecondGpu;
+            this.label_gpuVram2.Visible = hasSecondGpu;
+            this.progressBar_vram2.Visible = hasSecondGpu;
+
+            int clientHeight = hasSecondGpu ? MultiGpuClientHeight : SingleGpuClientHeight;
+            this.ClientSize = new Size(this.ClientSize.Width, clientHeight);
+
+            Size windowSize = new Size(256, clientHeight + 39);
+            this.MinimumSize = windowSize;
+            this.MaximumSize = windowSize;
         }
 
         private void PopulateDriveSelections()
@@ -821,6 +842,7 @@ namespace FormsSystemStatsWidget.Forms
                 var gpuRef = this.Gpu;
 
                 var threadsTask = Task.Run(() => CpuStats.GetThreadUsages());
+                var topTasksTask = Task.Run(() => CpuStats.GetTopCpuProcesses());
                 var ramTask = Task.Run(() =>
                 {
                     double total = Math.Round(CpuStats.GetTotalMemoryBytes() / 1_073_741_824.0, 3);
@@ -844,13 +866,15 @@ namespace FormsSystemStatsWidget.Forms
                 });
                 var trafficTask = Task.Run(() => TrafficStats.Sample(this.UpdateTimer.Interval));
 
-                await Task.WhenAll(threadsTask, ramTask, gpuTask, trafficTask);
+                await Task.WhenAll(threadsTask, topTasksTask, ramTask, gpuTask, trafficTask);
 
                 var threads = threadsTask.Result;
+                var topTasks = topTasksTask.Result;
                 var (ramTotalGb, ramUsedGb) = ramTask.Result;
                 var (gpuUsage, gpuWattage, vramTotalGb, vramUsedGb) = gpuTask.Result;
 
                 this.UpdateAverageCpuLoadAndTemperatureLabel(threads);
+                this.UpdateTopTasksLabel(topTasks);
 
                 await Task.WhenAll(
                     this.UpdateCpuUsageAsync(threads),
@@ -920,21 +944,24 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             double averageLoadPercent = usages.Length > 0 ? usages.Average() * 100d : 0d;
-            double? averageTemperatureCelsius = this.TryGetAverageCpuTemperatureCelsius();
+            CpuStats.CpuTelemetrySnapshot telemetry = CpuStats.GetCpuTelemetrySnapshot();
 
-            if (averageTemperatureCelsius.HasValue)
+            List<string> parts = new List<string>
             {
-                this.label_avgCpuLoadAndTemperature.Text = $"{averageLoadPercent:0.00}% | {averageTemperatureCelsius.Value:0.0} °C";
-            }
-            else
-            {
-                this.label_avgCpuLoadAndTemperature.Text = $"{averageLoadPercent:0.00}%";
-            }
-        }
+                $"{averageLoadPercent:0.00}%"
+            };
 
-        private double? TryGetAverageCpuTemperatureCelsius()
-        {
-            return CpuStats.GetAverageCpuTemperatureCelsius();
+            if (telemetry.AverageTemperatureCelsius.HasValue)
+            {
+                parts.Add($"{telemetry.AverageTemperatureCelsius.Value:0.0} °C");
+            }
+
+            if (telemetry.PackagePowerWatts.HasValue)
+            {
+                parts.Add($"{telemetry.PackagePowerWatts.Value:0.0} W");
+            }
+
+            this.label_avgCpuLoadAndTemperature.Text = string.Join(" | ", parts);
         }
 
 
@@ -944,6 +971,38 @@ namespace FormsSystemStatsWidget.Forms
             if (_closing) { bmp?.Dispose(); return; }
             this.pictureBox_cpu.Image?.Dispose();
             this.pictureBox_cpu.Image = bmp;
+        }
+
+        private void UpdateTopTasksLabel(IReadOnlyList<(string processName, double cpuPercent)> topTasks)
+        {
+            if (_closing)
+            {
+                return;
+            }
+
+            if (topTasks.Count == 0)
+            {
+                this.label_topTasksList.Text = "   -% idle\r\n   -% idle\r\n   -% idle";
+                return;
+            }
+
+            List<string> lines = new List<string>(3);
+            for (int index = 0; index < 3; index++)
+            {
+                if (index < topTasks.Count)
+                {
+                    (string processName, double cpuPercent) = topTasks[index];
+                    string name = Ellipsize(processName, 24);
+                    string percentText = $"{Math.Round(cpuPercent),3:0}%";
+                    lines.Add($"{percentText} {name}");
+                }
+                else
+                {
+                    lines.Add("  0% -");
+                }
+            }
+
+            this.label_topTasksList.Text = string.Join(Environment.NewLine, lines);
         }
 
         private Task UpdateRamUsageAsync(double totalGb, double usedGb)
