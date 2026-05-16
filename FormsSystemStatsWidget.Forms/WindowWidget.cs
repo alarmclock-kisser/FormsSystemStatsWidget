@@ -13,6 +13,10 @@ namespace FormsSystemStatsWidget.Forms
     {
         private const int MultiGpuClientHeight = 271;
         private const int SingleGpuClientHeight = 223;
+        private const long MetricsDirectoryQuotaBytes = 100L * 1024L * 1024L;
+        private const long MetricsCurrentFileSoftQuotaBytes = 96L * 1024L * 1024L;
+        private const int MetricsQuotaCheckSampleCount = 30;
+        private static readonly Encoding RecordingCsvEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
         private int _updateIntervalMs = 420;
         private Color _diagramColor = Color.White;
         private Color? _percentageColor = Color.BlueViolet;
@@ -29,6 +33,10 @@ namespace FormsSystemStatsWidget.Forms
         private int _tickInProgress = 0;
         private CancellationTokenSource? _recordingCancellationTokenSource;
         private Task? _recordingTask;
+        private static readonly TimeSpan TopTasksSamplingInterval = TimeSpan.FromMilliseconds(1200);
+        private IReadOnlyList<(string processName, double cpuPercent)> _cachedTopTasks = Array.Empty<(string processName, double cpuPercent)>();
+        private DateTime _lastTopTasksSampleUtc = DateTime.MinValue;
+        private DateTime _lastTickDiagnosticsUtc = DateTime.MinValue;
 
         private sealed class DriveSelection
         {
@@ -838,14 +846,13 @@ namespace FormsSystemStatsWidget.Forms
             if (_closing) return;
             if (Interlocked.Exchange(ref _tickInProgress, 1) == 1) return;
 
-            this.UpdateTimer.Stop();
-
             try
             {
+                Stopwatch tickStopwatch = Stopwatch.StartNew();
                 var gpuRef = this.Gpu;
 
                 var threadsTask = Task.Run(() => CpuStats.GetThreadUsages());
-                var topTasksTask = Task.Run(() => CpuStats.GetTopCpuProcesses());
+                var topTasksTask = this.GetTopTasksSnapshotAsync();
                 var ramTask = Task.Run(() =>
                 {
                     double total = Math.Round(CpuStats.GetTotalMemoryBytes() / 1_073_741_824.0, 3);
@@ -867,7 +874,7 @@ namespace FormsSystemStatsWidget.Forms
                         return (0.0, 0.0, 0.0, 0.0);
                     }
                 });
-                var trafficTask = Task.Run(() => TrafficStats.Sample(this.UpdateTimer.Interval));
+                var trafficTask = Task.Run(() => TrafficStats.Sample(this._updateIntervalMs));
 
                 await Task.WhenAll(threadsTask, topTasksTask, ramTask, gpuTask, trafficTask);
 
@@ -888,15 +895,52 @@ namespace FormsSystemStatsWidget.Forms
 
                 if (_closing) return;
                 UpdateTitleWithTraffic();
+
+                this.LogTickDurationIfSlow(tickStopwatch.Elapsed);
             }
             finally
             {
                 Interlocked.Exchange(ref _tickInProgress, 0);
-                if (!_closing)
-                {
-                    this.UpdateTimer.Start();
-                }
             }
+        }
+
+        private Task<IReadOnlyList<(string processName, double cpuPercent)>> GetTopTasksSnapshotAsync()
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+            if ((nowUtc - this._lastTopTasksSampleUtc) < TopTasksSamplingInterval)
+            {
+                return Task.FromResult(this._cachedTopTasks);
+            }
+
+            return Task.Run(() =>
+            {
+                IReadOnlyList<(string processName, double cpuPercent)> sampledTopTasks = CpuStats.GetTopCpuProcesses();
+                this._cachedTopTasks = sampledTopTasks;
+                this._lastTopTasksSampleUtc = DateTime.UtcNow;
+                return sampledTopTasks;
+            });
+        }
+
+        private void LogTickDurationIfSlow(TimeSpan tickDuration)
+        {
+            if (!Debugger.IsAttached)
+            {
+                return;
+            }
+
+            if (tickDuration.TotalMilliseconds < this._updateIntervalMs * 1.2)
+            {
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if ((nowUtc - this._lastTickDiagnosticsUtc) < TimeSpan.FromSeconds(3))
+            {
+                return;
+            }
+
+            this._lastTickDiagnosticsUtc = nowUtc;
+            Debug.WriteLine($"[WidgetTick] Slow tick: {tickDuration.TotalMilliseconds:0} ms (target {this._updateIntervalMs} ms)");
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -1347,9 +1391,12 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
-            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            string metricsDirectoryPath = GetMetricsDirectoryPath();
+            EnsureMetricsDirectory(metricsDirectoryPath);
+            PruneMetricsDirectory(metricsDirectoryPath, null);
+
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-            string filePath = Path.Combine(desktopPath, $"SystemStats_{timestamp}.csv");
+            string filePath = Path.Combine(metricsDirectoryPath, $"SystemStats_{timestamp}.csv");
 
             this._recordingCancellationTokenSource = new CancellationTokenSource();
             this.button_recordUsages.ForeColor = Color.Red;
@@ -1359,27 +1406,97 @@ namespace FormsSystemStatsWidget.Forms
         private async Task RecordUsagesToCsvAsync(string filePath, CancellationToken cancellationToken)
         {
             Exception? failure = null;
+            RecordingSummary? finalSummary = null;
+
+            bool hasSecondGpu = this.Gpu2 != null;
+            DateTimeOffset recordingStartedAt = DateTimeOffset.Now;
+            DateTimeOffset previousSampleTimestamp = recordingStartedAt;
+            List<string> csvLines = new List<string>();
+            long currentFileBytes = 0;
+            int sampleCount = 0;
+            double cpuLoadSum = 0d;
+            double cpuPowerSum = 0d;
+            int cpuPowerSamples = 0;
+            double cpuEnergyWh = 0d;
+            double gpuLoadSum = 0d;
+            double gpuPowerSum = 0d;
+            int gpuPowerSamples = 0;
+            double gpuEnergyWh = 0d;
 
             try
             {
-                bool hasSecondGpu = this.Gpu2 != null;
-
-                using StreamWriter writer = new StreamWriter(filePath, false, new UTF8Encoding(true));
-                await writer.WriteLineAsync(BuildRecordingHeader(hasSecondGpu));
+                string header = BuildRecordingHeader(hasSecondGpu);
+                csvLines.Add(header);
+                currentFileBytes += GetRecordingLineByteCount(header);
+                await File.WriteAllTextAsync(filePath, header + Environment.NewLine, RecordingCsvEncoding, cancellationToken).ConfigureAwait(false);
 
                 while (true)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    string line = this.BuildRecordingLine(hasSecondGpu);
-                    await writer.WriteLineAsync(line);
-                    await writer.FlushAsync();
+                    RecordingSample sample = await this.BuildRecordingSampleAsync(hasSecondGpu, previousSampleTimestamp, cancellationToken).ConfigureAwait(false);
+                    string line = sample.CsvLine;
+                    csvLines.Add(line);
+                    currentFileBytes += GetRecordingLineByteCount(line);
 
-                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                    cpuLoadSum += sample.CpuLoadPercent;
+                    if (sample.CpuPackagePowerWatts.HasValue)
+                    {
+                        cpuPowerSum += sample.CpuPackagePowerWatts.Value;
+                        cpuPowerSamples++;
+                        cpuEnergyWh += sample.CpuPackagePowerWatts.Value * sample.ElapsedSecondsSincePrevious / 3600d;
+                    }
+
+                    gpuLoadSum += sample.GpuAverageLoadPercent;
+                    if (sample.GpuAveragePowerWatts.HasValue)
+                    {
+                        gpuPowerSum += sample.GpuAveragePowerWatts.Value;
+                        gpuPowerSamples++;
+                        gpuEnergyWh += sample.GpuAveragePowerWatts.Value * sample.ElapsedSecondsSincePrevious / 3600d;
+                    }
+
+                    await File.AppendAllTextAsync(filePath, line + Environment.NewLine, RecordingCsvEncoding, cancellationToken).ConfigureAwait(false);
+
+                    sampleCount++;
+                    if (sampleCount % MetricsQuotaCheckSampleCount == 0)
+                    {
+                        PruneMetricsDirectory(Path.GetDirectoryName(filePath) ?? GetMetricsDirectoryPath(), filePath);
+                    }
+
+                    if (currentFileBytes > MetricsCurrentFileSoftQuotaBytes)
+                    {
+                        TrimRecordingLines(csvLines, ref currentFileBytes);
+                        await RewriteRecordingFileAsync(filePath, csvLines, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    previousSampleTimestamp = sample.Timestamp;
+
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                finalSummary = CreateRecordingSummary(
+                    recordingStartedAt,
+                    DateTimeOffset.Now,
+                    cpuLoadSum,
+                    cpuPowerSum,
+                    cpuPowerSamples,
+                    cpuEnergyWh,
+                    gpuLoadSum,
+                    gpuPowerSum,
+                    gpuPowerSamples,
+                    gpuEnergyWh,
+                    sampleCount);
+
+                try
+                {
+                    await AppendRecordingSummaryAsync(filePath, csvLines, finalSummary.Value, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                }
             }
             catch (Exception ex)
             {
@@ -1387,9 +1504,167 @@ namespace FormsSystemStatsWidget.Forms
             }
             finally
             {
-                this.CompleteRecording(filePath, failure);
+                this.CompleteRecording(filePath, failure, finalSummary);
             }
         }
+
+        private static string GetMetricsDirectoryPath()
+        {
+            string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return Path.Combine(appDataPath, "FSSWidget");
+        }
+
+        private static void EnsureMetricsDirectory(string directoryPath)
+        {
+            Directory.CreateDirectory(directoryPath);
+        }
+
+        private static long GetRecordingLineByteCount(string line)
+        {
+            return RecordingCsvEncoding.GetByteCount(line) + RecordingCsvEncoding.GetByteCount(Environment.NewLine);
+        }
+
+        private static void TrimRecordingLines(List<string> csvLines, ref long currentFileBytes)
+        {
+            while (csvLines.Count > 1 && currentFileBytes > MetricsCurrentFileSoftQuotaBytes)
+            {
+                string removed = csvLines[1];
+                currentFileBytes -= GetRecordingLineByteCount(removed);
+                csvLines.RemoveAt(1);
+            }
+        }
+
+        private static async Task RewriteRecordingFileAsync(string filePath, List<string> csvLines, CancellationToken cancellationToken)
+        {
+            string tempFilePath = filePath + ".tmp";
+            await File.WriteAllLinesAsync(tempFilePath, csvLines, RecordingCsvEncoding, cancellationToken);
+
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+
+            File.Move(tempFilePath, filePath);
+        }
+
+        private static void PruneMetricsDirectory(string directoryPath, string? preserveFilePath)
+        {
+            try
+            {
+                if (!Directory.Exists(directoryPath))
+                {
+                    return;
+                }
+
+                List<string> files = Directory.EnumerateFiles(directoryPath, "*", SearchOption.TopDirectoryOnly)
+                    .Where(path => !string.Equals(path, preserveFilePath, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                long totalBytes = files.Sum(path => new FileInfo(path).Length);
+                if (totalBytes <= MetricsDirectoryQuotaBytes)
+                {
+                    return;
+                }
+
+                foreach (string filePath in files
+                    .OrderBy(path => File.GetLastWriteTimeUtc(path))
+                    .ThenBy(path => path, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (totalBytes <= MetricsDirectoryQuotaBytes)
+                    {
+                        break;
+                    }
+
+                    try
+                    {
+                        long fileSize = new FileInfo(filePath).Length;
+                        File.Delete(filePath);
+                        totalBytes -= fileSize;
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static RecordingSummary CreateRecordingSummary(
+            DateTimeOffset startedAt,
+            DateTimeOffset endedAt,
+            double cpuLoadSum,
+            double cpuPowerSum,
+            int cpuPowerSamples,
+            double cpuEnergyWh,
+            double gpuLoadSum,
+            double gpuPowerSum,
+            int gpuPowerSamples,
+            double gpuEnergyWh,
+            int sampleCount)
+        {
+            TimeSpan duration = endedAt - startedAt;
+            double safeSampleCount = Math.Max(1, sampleCount);
+            double cpuAverageLoadPercent = cpuLoadSum / safeSampleCount;
+            double? cpuAveragePowerWatts = cpuPowerSamples > 0 ? cpuPowerSum / cpuPowerSamples : null;
+            double gpuAverageLoadPercent = gpuLoadSum / safeSampleCount;
+            double? gpuAveragePowerWatts = gpuPowerSamples > 0 ? gpuPowerSum / gpuPowerSamples : null;
+
+            double? totalAveragePowerWatts = cpuAveragePowerWatts.HasValue || gpuAveragePowerWatts.HasValue
+                ? (cpuAveragePowerWatts ?? 0d) + (gpuAveragePowerWatts ?? 0d)
+                : null;
+
+            double totalEnergyWh = cpuEnergyWh + gpuEnergyWh;
+            return new RecordingSummary(duration, cpuAverageLoadPercent, cpuAveragePowerWatts, cpuEnergyWh, gpuAverageLoadPercent, gpuAveragePowerWatts, gpuEnergyWh, totalAveragePowerWatts, totalEnergyWh);
+        }
+
+        private static async Task AppendRecordingSummaryAsync(string filePath, List<string> csvLines, RecordingSummary summary, CancellationToken cancellationToken)
+        {
+            List<string> summaryLines = BuildRecordingSummaryLines(summary);
+            csvLines.AddRange(summaryLines);
+            await File.AppendAllLinesAsync(filePath, summaryLines, RecordingCsvEncoding, cancellationToken);
+        }
+
+        private static List<string> BuildRecordingSummaryLines(RecordingSummary summary)
+        {
+            List<string> lines = new List<string>
+            {
+                "==========",
+                "Metric;Value",
+                $"Time;{summary.Duration:hh\\:mm\\:ss}",
+                $"CPU Watts (avg);{FormatRecordingNullableNumber(summary.CpuAveragePowerWatts)}",
+                $"CPU Watts (Wh);{summary.CpuEnergyWh:0.000}",
+                $"GPU(s) Watts (avg);{FormatRecordingNullableNumber(summary.GpuAveragePowerWatts)}",
+                $"GPU(s) Watts (Wh);{summary.GpuEnergyWh:0.000}",
+                $"~W/h (CPU+GPU avg);{FormatRecordingNullableNumber(summary.TotalAveragePowerWatts)}",
+                $"~Load (CPU);{summary.CpuAverageLoadPercent:0.00}%",
+                $"~Load (GPU(s));{summary.GpuAverageLoadPercent:0.00}%",
+                $"Total Energy (Wh);{summary.TotalEnergyWh:0.000}"
+            };
+
+            return lines;
+        }
+
+        private readonly record struct RecordingSummary(
+            TimeSpan Duration,
+            double CpuAverageLoadPercent,
+            double? CpuAveragePowerWatts,
+            double CpuEnergyWh,
+            double GpuAverageLoadPercent,
+            double? GpuAveragePowerWatts,
+            double GpuEnergyWh,
+            double? TotalAveragePowerWatts,
+            double TotalEnergyWh);
+
+        private readonly record struct RecordingSample(
+            string CsvLine,
+            double CpuLoadPercent,
+            double? CpuPackagePowerWatts,
+            double GpuAverageLoadPercent,
+            double? GpuAveragePowerWatts,
+            DateTimeOffset Timestamp,
+            double ElapsedSecondsSincePrevious);
 
         private static string BuildRecordingHeader(bool hasSecondGpu)
         {
@@ -1432,14 +1707,27 @@ namespace FormsSystemStatsWidget.Forms
             return string.Join(";", columns.Select(EscapeCsvValue));
         }
 
-        private string BuildRecordingLine(bool hasSecondGpu)
+        private async Task<RecordingSample> BuildRecordingSampleAsync(bool hasSecondGpu, DateTimeOffset previousSampleTimestamp, CancellationToken cancellationToken)
         {
-            float[] cpuThreadUsages = CpuStats.GetThreadUsages();
-            double cpuUsagePercent = cpuThreadUsages.Length > 0 ? cpuThreadUsages.Average() * 100d : 0d;
-            CpuStats.CpuTelemetrySnapshot cpuTelemetry = CpuStats.GetCpuTelemetrySnapshot();
+            DateTimeOffset timestamp = DateTimeOffset.Now;
 
-            double ramTotalGb = Math.Round(CpuStats.GetTotalMemoryBytes() / 1_073_741_824.0, 3);
-            double ramUsedGb = Math.Round(CpuStats.GetUsedMemoryBytes() / 1_073_741_824.0, 3);
+            Task<float[]> cpuTask = Task.Run(() => CpuStats.GetThreadUsages(), cancellationToken);
+            Task<CpuStats.CpuTelemetrySnapshot> cpuTelemetryTask = Task.Run(() => CpuStats.GetCpuTelemetrySnapshot(), cancellationToken);
+            Task<(double ramTotalGb, double ramUsedGb)> ramTask = Task.Run(() =>
+            {
+                double ramTotalGb = Math.Round(CpuStats.GetTotalMemoryBytes() / 1_073_741_824.0, 3);
+                double ramUsedGb = Math.Round(CpuStats.GetUsedMemoryBytes() / 1_073_741_824.0, 3);
+                return (ramTotalGb, ramUsedGb);
+            }, cancellationToken);
+            Task<IReadOnlyList<(string processName, double cpuPercent)>> topTasksTask = Task.Run(() => CpuStats.GetTopCpuProcesses(), cancellationToken);
+
+            await Task.WhenAll(cpuTask, cpuTelemetryTask, ramTask, topTasksTask).ConfigureAwait(false);
+
+            float[] cpuThreadUsages = cpuTask.Result;
+            double cpuUsagePercent = cpuThreadUsages.Length > 0 ? cpuThreadUsages.Average() * 100d : 0d;
+            CpuStats.CpuTelemetrySnapshot cpuTelemetry = cpuTelemetryTask.Result;
+
+            (double ramTotalGb, double ramUsedGb) = ramTask.Result;
             double ramUsagePercent = ramTotalGb > 0d ? (ramUsedGb / ramTotalGb) * 100d : 0d;
 
             double gpu1UsagePercent = 0d;
@@ -1479,11 +1767,12 @@ namespace FormsSystemStatsWidget.Forms
 
             double gpuTotalPowerWatts = gpu1PowerWatts + gpu2PowerWatts;
             double totalTrackedPowerWatts = (cpuTelemetry.PackagePowerWatts ?? 0d) + gpuTotalPowerWatts;
+            double gpuAverageLoadPercent = hasSecondGpu ? (gpu1UsagePercent + gpu2UsagePercent) / 2d : gpu1UsagePercent;
 
-            IReadOnlyList<(string processName, double cpuPercent)> topTasks = CpuStats.GetTopCpuProcesses();
+            IReadOnlyList<(string processName, double cpuPercent)> topTasks = topTasksTask.Result;
             List<string> values = new List<string>
             {
-                DateTimeOffset.Now.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
+                timestamp.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
                 FormatRecordingNumber(cpuUsagePercent),
                 FormatRecordingNullableNumber(cpuTelemetry.AverageTemperatureCelsius),
                 FormatRecordingNullableNumber(cpuTelemetry.PackagePowerWatts),
@@ -1517,10 +1806,19 @@ namespace FormsSystemStatsWidget.Forms
                 });
             }
 
-            return string.Join(";", values.Select(EscapeCsvValue));
+            double elapsedSeconds = Math.Max(0.05d, (timestamp - previousSampleTimestamp).TotalSeconds);
+
+            return new RecordingSample(
+                string.Join(";", values.Select(EscapeCsvValue)),
+                cpuUsagePercent,
+                cpuTelemetry.PackagePowerWatts,
+                gpuAverageLoadPercent,
+                gpuTotalPowerWatts > 0d ? gpuTotalPowerWatts : null,
+                timestamp,
+                elapsedSeconds);
         }
 
-        private void CompleteRecording(string filePath, Exception? failure)
+        private void CompleteRecording(string filePath, Exception? failure, RecordingSummary? finalSummary)
         {
             if (this.IsDisposed || this.Disposing)
             {
@@ -1532,7 +1830,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (this.InvokeRequired)
             {
-                this.BeginInvoke(new Action(() => this.CompleteRecording(filePath, failure)));
+                this.BeginInvoke(new Action(() => this.CompleteRecording(filePath, failure, finalSummary)));
                 return;
             }
 
@@ -1547,10 +1845,27 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
+            string summaryText = BuildRecordingCompletionText(filePath, finalSummary);
+
             if (!this._closing)
             {
-                MessageBox.Show(this, $"Die Aufzeichnung wurde beendet.\n\nCSV-Datei:\n{filePath}", "Aufzeichnung beendet", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, summaryText, "Aufzeichnung beendet", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        private string BuildRecordingCompletionText(string filePath, RecordingSummary? finalSummary)
+        {
+            if (!finalSummary.HasValue)
+            {
+                return $"Die Aufzeichnung wurde beendet.\n\nCSV-Datei:\n{filePath}";
+            }
+
+            RecordingSummary summary = finalSummary.Value;
+            string cpuWatts = FormatRecordingNullableNumber(summary.CpuAveragePowerWatts);
+            string gpuWatts = FormatRecordingNullableNumber(summary.GpuAveragePowerWatts);
+            string wattsPerHour = FormatRecordingNullableNumber(summary.TotalAveragePowerWatts);
+
+            return $"Die Aufzeichnung wurde beendet.\n\nCSV-Datei:\n{filePath}\n\nZusammenfassung:\n• Time: {summary.Duration:hh\\:mm\\:ss}\n• CPU Watts: {cpuWatts}\n• GPU(s) Watts: {gpuWatts}\n• ~W/h: {wattsPerHour}\n• ~Load (CPU): {summary.CpuAverageLoadPercent:0.00}%\n• ~Load (GPU(s)): {summary.GpuAverageLoadPercent:0.00}%";
         }
 
         private static string GetTopTaskName(IReadOnlyList<(string processName, double cpuPercent)> topTasks, int index)

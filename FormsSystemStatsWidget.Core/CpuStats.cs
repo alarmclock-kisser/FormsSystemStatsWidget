@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Text;
 using System.Management;
 using LibreHardwareMonitor.Hardware;
+using OhmHardware = OpenHardwareMonitor.Hardware;
 
 namespace FormsSystemStatsWidget.Core
 {
@@ -33,9 +34,214 @@ namespace FormsSystemStatsWidget.Core
         private static readonly Computer _hardwareComputer = CreateHardwareComputer();
         private static DateTime _lastTemperatureSampleUtc = DateTime.MinValue;
         private static CpuTelemetrySnapshot _lastCpuTelemetrySnapshot = new(null, null);
+        private static readonly Lock _openHardwareMonitorLock = new();
+        private static readonly TimeSpan _openHardwareMonitorSamplingInterval = TimeSpan.FromMilliseconds(800);
+        private static DateTime _lastOpenHardwareMonitorSampleUtc = DateTime.MinValue;
+        private static double? _lastOpenHardwareMonitorPackagePowerWatts;
+        private static OhmHardware.Computer? _openHardwareMonitorComputer;
+        private static bool _openHardwareMonitorOpened;
+        private static bool _openHardwareMonitorUnavailable;
+        private static double? _lastCpuEnergySensorReading;
+        private static DateTime _lastCpuEnergySampleUtc = DateTime.MinValue;
         private static readonly Lock _processSamplingLock = new();
         private static DateTime _lastProcessSampleUtc = DateTime.MinValue;
         private static Dictionary<int, TimeSpan> _lastProcessCpuTimes = new();
+
+        private static bool EnsureOpenHardwareMonitorOpened()
+        {
+            if (_openHardwareMonitorUnavailable)
+            {
+                return false;
+            }
+
+            try
+            {
+                if (_openHardwareMonitorComputer == null)
+                {
+                    _openHardwareMonitorComputer = new OhmHardware.Computer
+                    {
+                        IsCpuEnabled = true
+                    };
+                }
+
+                if (!_openHardwareMonitorOpened)
+                {
+                    _openHardwareMonitorComputer.Open(false);
+                    _openHardwareMonitorOpened = true;
+                }
+
+                return true;
+            }
+            catch
+            {
+                _openHardwareMonitorUnavailable = true;
+                _lastOpenHardwareMonitorPackagePowerWatts = null;
+                return false;
+            }
+        }
+
+        private static (double? temperatureCelsius, double? packagePowerWatts) TryGetCpuTelemetryFromOpenHardwareMonitor()
+        {
+            lock (_openHardwareMonitorLock)
+            {
+                DateTime nowUtc = DateTime.UtcNow;
+                if ((nowUtc - _lastOpenHardwareMonitorSampleUtc) < _openHardwareMonitorSamplingInterval)
+                {
+                    return (null, _lastOpenHardwareMonitorPackagePowerWatts);
+                }
+
+                _lastOpenHardwareMonitorSampleUtc = nowUtc;
+
+                if (!EnsureOpenHardwareMonitorOpened() || _openHardwareMonitorComputer == null)
+                {
+                    _lastOpenHardwareMonitorPackagePowerWatts = null;
+                    return (null, null);
+                }
+
+                List<double> preferredTemperatureValues = new List<double>();
+                List<double> fallbackTemperatureValues = new List<double>();
+                List<double> preferredPowerValues = new List<double>();
+                List<double> fallbackPowerValues = new List<double>();
+
+                try
+                {
+                    foreach (OhmHardware.IHardware hardware in _openHardwareMonitorComputer.Hardware)
+                    {
+                        CollectOpenHardwareMonitorSensorsRecursive(
+                            hardware,
+                            preferredTemperatureValues,
+                            fallbackTemperatureValues,
+                            preferredPowerValues,
+                            fallbackPowerValues);
+                    }
+                }
+                catch
+                {
+                    _lastOpenHardwareMonitorPackagePowerWatts = null;
+                    return (null, null);
+                }
+
+                double? temperatureCelsius = preferredTemperatureValues.Count > 0
+                    ? preferredTemperatureValues.Average()
+                    : fallbackTemperatureValues.Count > 0
+                        ? fallbackTemperatureValues.Average()
+                        : null;
+
+                _lastOpenHardwareMonitorPackagePowerWatts = preferredPowerValues.Count > 0
+                    ? preferredPowerValues.Average()
+                    : fallbackPowerValues.Count > 0
+                        ? fallbackPowerValues.Average()
+                        : null;
+
+                return (temperatureCelsius, _lastOpenHardwareMonitorPackagePowerWatts);
+            }
+        }
+
+        private static void CollectOpenHardwareMonitorSensorsRecursive(
+            OhmHardware.IHardware hardware,
+            List<double> preferredTemperatureValues,
+            List<double> fallbackTemperatureValues,
+            List<double> preferredPowerValues,
+            List<double> fallbackPowerValues)
+        {
+            hardware.Update();
+
+            foreach (OhmHardware.ISensor sensor in hardware.Sensors)
+            {
+                if (sensor.SensorType != OhmHardware.SensorType.Power || !sensor.Value.HasValue)
+                {
+                    continue;
+                }
+
+                double value = sensor.Value.Value;
+                if (value is <= 0d or >= 500d)
+                {
+                    continue;
+                }
+
+                string sensorName = sensor.Name ?? string.Empty;
+                string hardwareName = sensor.Hardware.Name ?? string.Empty;
+
+                bool isCpuScoped = sensor.Hardware.HardwareType == OhmHardware.HardwareType.Cpu
+                                   || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                                   || sensorName.Contains("IA", StringComparison.OrdinalIgnoreCase)
+                                   || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                                   || hardwareName.Contains("Intel", StringComparison.OrdinalIgnoreCase);
+
+                if (!isCpuScoped)
+                {
+                    continue;
+                }
+
+                if (sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("CPU Total", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("CPU Cores", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("IA Cores", StringComparison.OrdinalIgnoreCase))
+                {
+                    preferredPowerValues.Add(value);
+                }
+                else
+                {
+                    fallbackPowerValues.Add(value);
+                }
+            }
+
+            foreach (OhmHardware.ISensor sensor in hardware.Sensors)
+            {
+                if (sensor.SensorType != OhmHardware.SensorType.Temperature || !sensor.Value.HasValue)
+                {
+                    continue;
+                }
+
+                double value = sensor.Value.Value;
+                if (value is <= 0d or >= 130d)
+                {
+                    continue;
+                }
+
+                string sensorName = sensor.Name ?? string.Empty;
+                string hardwareName = sensor.Hardware.Name ?? string.Empty;
+
+                bool isCpuScoped = sensor.Hardware.HardwareType == OhmHardware.HardwareType.Cpu
+                                   || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                                   || sensorName.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                                   || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                                   || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+                                   || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                                   || hardwareName.Contains("Intel", StringComparison.OrdinalIgnoreCase);
+
+                if (!isCpuScoped)
+                {
+                    continue;
+                }
+
+                if (sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("Core Max", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                    || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase))
+                {
+                    preferredTemperatureValues.Add(value);
+                }
+                else
+                {
+                    fallbackTemperatureValues.Add(value);
+                }
+            }
+
+            foreach (OhmHardware.IHardware subHardware in hardware.SubHardware)
+            {
+                CollectOpenHardwareMonitorSensorsRecursive(
+                    subHardware,
+                    preferredTemperatureValues,
+                    fallbackTemperatureValues,
+                    preferredPowerValues,
+                    fallbackPowerValues);
+            }
+        }
 
         private static PerformanceCounter[] CreateCpuCounters()
         {
@@ -117,7 +323,11 @@ namespace FormsSystemStatsWidget.Core
         {
             foreach (ISensor sensor in hardware.Sensors)
             {
-                if ((sensor.SensorType == SensorType.Temperature || sensor.SensorType == SensorType.Power) && sensor.Value.HasValue)
+                if ((sensor.SensorType == SensorType.Temperature
+                    || sensor.SensorType == SensorType.Power
+                    || sensor.SensorType == SensorType.Voltage
+                    || sensor.SensorType == SensorType.Current
+                    || sensor.SensorType == SensorType.Energy) && sensor.Value.HasValue)
                 {
                     sensors.Add(sensor);
                 }
@@ -193,6 +403,127 @@ namespace FormsSystemStatsWidget.Core
                    || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
                    || sensorName.Contains("PPT", StringComparison.OrdinalIgnoreCase)
                    || sensorName.Contains("IA Cores", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLikelyCpuVoltageSensor(ISensor sensor)
+        {
+            if (sensor.SensorType != SensorType.Voltage)
+            {
+                return false;
+            }
+
+            string sensorName = sensor.Name ?? string.Empty;
+            string hardwareName = sensor.Hardware.Name ?? string.Empty;
+            return sensor.Hardware.HardwareType == HardwareType.Cpu
+                || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("IA", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("Vcore", StringComparison.OrdinalIgnoreCase)
+                || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                || hardwareName.Contains("VRM", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLikelyCpuCurrentSensor(ISensor sensor)
+        {
+            if (sensor.SensorType != SensorType.Current)
+            {
+                return false;
+            }
+
+            string sensorName = sensor.Name ?? string.Empty;
+            string hardwareName = sensor.Hardware.Name ?? string.Empty;
+            return sensor.Hardware.HardwareType == HardwareType.Cpu
+                || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("IA", StringComparison.OrdinalIgnoreCase)
+                || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                || hardwareName.Contains("VRM", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLikelyCpuEnergySensor(ISensor sensor)
+        {
+            if (sensor.SensorType != SensorType.Energy)
+            {
+                return false;
+            }
+
+            string sensorName = sensor.Name ?? string.Empty;
+            string hardwareName = sensor.Hardware.Name ?? string.Empty;
+            return sensor.Hardware.HardwareType == HardwareType.Cpu
+                || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("IA", StringComparison.OrdinalIgnoreCase)
+                || sensorName.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static double? TryCalculatePowerFromVoltageAndCurrent(
+            List<double> preferredVoltages,
+            List<double> fallbackVoltages,
+            List<double> preferredCurrents,
+            List<double> fallbackCurrents)
+        {
+            double? voltage = preferredVoltages.Count > 0
+                ? preferredVoltages.Average()
+                : fallbackVoltages.Count > 0
+                    ? fallbackVoltages.Average()
+                    : null;
+
+            double? current = preferredCurrents.Count > 0
+                ? preferredCurrents.Average()
+                : fallbackCurrents.Count > 0
+                    ? fallbackCurrents.Average()
+                    : null;
+
+            if (!voltage.HasValue || !current.HasValue)
+            {
+                return null;
+            }
+
+            double watts = voltage.Value * current.Value;
+            return watts is > 0d and < 500d ? watts : null;
+        }
+
+        private static double? TryCalculatePowerFromEnergySensor(double currentEnergyReading, DateTime nowUtc)
+        {
+            if (!_lastCpuEnergySensorReading.HasValue || _lastCpuEnergySampleUtc == DateTime.MinValue)
+            {
+                _lastCpuEnergySensorReading = currentEnergyReading;
+                _lastCpuEnergySampleUtc = nowUtc;
+                return null;
+            }
+
+            double previousEnergyReading = _lastCpuEnergySensorReading.Value;
+            DateTime previousTimestamp = _lastCpuEnergySampleUtc;
+            _lastCpuEnergySensorReading = currentEnergyReading;
+            _lastCpuEnergySampleUtc = nowUtc;
+
+            double delta = currentEnergyReading - previousEnergyReading;
+            double elapsedSeconds = (nowUtc - previousTimestamp).TotalSeconds;
+
+            if (delta <= 0d || elapsedSeconds < 0.2d)
+            {
+                return null;
+            }
+
+            double[] candidates =
+            [
+                delta / elapsedSeconds,
+                (delta * 3600d) / elapsedSeconds,
+                (delta * 3.6d) / elapsedSeconds
+            ];
+
+            foreach (double candidate in candidates)
+            {
+                if (candidate is > 0d and < 500d)
+                {
+                    return candidate;
+                }
+            }
+
+            return null;
         }
 
         private static double? TryGetCpuTemperatureFromWmi()
@@ -456,6 +787,12 @@ namespace FormsSystemStatsWidget.Core
                 List<double> fallbackTemperatureValues = new List<double>();
                 List<double> preferredPowerValues = new List<double>();
                 List<double> fallbackPowerValues = new List<double>();
+                List<double> preferredVoltageValues = new List<double>();
+                List<double> fallbackVoltageValues = new List<double>();
+                List<double> preferredCurrentValues = new List<double>();
+                List<double> fallbackCurrentValues = new List<double>();
+                List<double> preferredEnergyValues = new List<double>();
+                List<double> fallbackEnergyValues = new List<double>();
 
                 try
                 {
@@ -505,6 +842,54 @@ namespace FormsSystemStatsWidget.Core
                                         }
                                     }
                                 }
+                                else if (sensor.SensorType == SensorType.Voltage)
+                                {
+                                    if (value is <= 0d or >= 3d)
+                                    {
+                                        continue;
+                                    }
+
+                                    if (IsLikelyCpuVoltageSensor(sensor))
+                                    {
+                                        fallbackVoltageValues.Add(value);
+                                        if (sensor.Hardware.HardwareType == HardwareType.Cpu || (sensor.Name ?? string.Empty).Contains("Package", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            preferredVoltageValues.Add(value);
+                                        }
+                                    }
+                                }
+                                else if (sensor.SensorType == SensorType.Current)
+                                {
+                                    if (value is <= 0d or >= 250d)
+                                    {
+                                        continue;
+                                    }
+
+                                    if (IsLikelyCpuCurrentSensor(sensor))
+                                    {
+                                        fallbackCurrentValues.Add(value);
+                                        if (sensor.Hardware.HardwareType == HardwareType.Cpu || (sensor.Name ?? string.Empty).Contains("Package", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            preferredCurrentValues.Add(value);
+                                        }
+                                    }
+                                }
+                                else if (sensor.SensorType == SensorType.Energy)
+                                {
+                                    if (value <= 0d)
+                                    {
+                                        continue;
+                                    }
+
+                                    if (IsLikelyCpuEnergySensor(sensor))
+                                    {
+                                        fallbackEnergyValues.Add(value);
+                                        if (sensor.Hardware.HardwareType == HardwareType.Cpu || (sensor.Name ?? string.Empty).Contains("Package", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            preferredEnergyValues.Add(value);
+                                        }
+                                    }
+                                }
                             }
                         }
                         catch
@@ -531,6 +916,33 @@ namespace FormsSystemStatsWidget.Core
                     : fallbackPowerValues.Count > 0
                         ? fallbackPowerValues.Average()
                         : null;
+
+                packagePowerWatts ??= TryCalculatePowerFromVoltageAndCurrent(
+                    preferredVoltageValues,
+                    fallbackVoltageValues,
+                    preferredCurrentValues,
+                    fallbackCurrentValues);
+
+                if (!packagePowerWatts.HasValue)
+                {
+                    double? energyValue = preferredEnergyValues.Count > 0
+                        ? preferredEnergyValues.Average()
+                        : fallbackEnergyValues.Count > 0
+                            ? fallbackEnergyValues.Average()
+                            : null;
+
+                    if (energyValue.HasValue)
+                    {
+                        packagePowerWatts = TryCalculatePowerFromEnergySensor(energyValue.Value, nowUtc);
+                    }
+                }
+
+                if (!averageTemperatureCelsius.HasValue || !packagePowerWatts.HasValue)
+                {
+                    (double? ohmTemperatureCelsius, double? ohmPackagePowerWatts) = TryGetCpuTelemetryFromOpenHardwareMonitor();
+                    averageTemperatureCelsius ??= ohmTemperatureCelsius;
+                    packagePowerWatts ??= ohmPackagePowerWatts;
+                }
 
                 _lastCpuTelemetrySnapshot = new CpuTelemetrySnapshot(averageTemperatureCelsius, packagePowerWatts);
                 return _lastCpuTelemetrySnapshot;

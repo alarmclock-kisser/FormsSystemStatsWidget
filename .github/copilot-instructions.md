@@ -118,6 +118,14 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 
 ---
 
+## Hardware-Messung & Telemetrie
+- Bei CPU-Watt-Ermittlung: Bevorzuge die OpenHardwareMonitor-Library als primäre Datenquelle; nutze sie auch als Fallback, falls andere Quellen nicht verfügbar sind.
+- Kapsle Hardwarezugriff hinter eine Abstraktion (z. B. `IHardwarePowerMeter`) und injiziere die Implementierung per DI.
+- Biete Test-Double-Implementierungen für Unit-Tests; vermeide direkte Abhängigkeiten von OpenHardwareMonitor in Fachlogik.
+- Prüfe Lizenzkompatibilität der Library vor Einsatz und behandle fehlende/ungültige Messwerte robust (Null-/Fehlerfälle, Retry/Caching).
+
+---
+
 ## Fehlerbehandlung & Robustheit
 - Keine leeren `catch`-Blöcke.
 - Nicht „blind“ weiterreichen; spezifische Exceptions nutzen.
@@ -221,6 +229,12 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 - UI-Code (Form/Control) bleibt dünn: Anzeige, Benutzerinteraktion, einfache Validierung.
 - Fachlogik, IO-Logik und Berechnungen in Services/Klassen auslagern (testbar, DI-fähig).
 - Konstruktor-Injektion bleibt bevorzugt. Falls Designer-Lifecycle es erfordert, sind pragmatische Muster erlaubt (z. B. parameterloser Konstrukteur + Initialisierungsmethode), solange Testbarkeit gewahrt bleibt.
+- Recording- oder andere langlaufende UI-Operationen non-blocking/asynchron implementieren, um UI-Lags zu vermeiden:
+  - Verwende Task-basierte async/await für IO- und langlaufende Aufgaben.
+  - Unterstütze Abbruch über CancellationToken und melde Fortschritt über IProgress/Events.
+  - Offloade CPU-intensive Arbeit auf Threadpool/Task.Run oder dedizierte Background-Worker/HostedService.
+  - Nutze asynchrone Streams/Buffering (z. B. Stream.ReadAsync/WriteAsync, Channels) für kontinuierliche Datenflüsse.
+  - Vermeide blockierende Aufrufe im UI-Thread und synchronen IO-Wartezyklen.
 
 ### Designer-/Generated-Code-Regeln
 - Dateien wie `*.Designer.cs`, `*.g.cs`, `*.generated.cs` gelten als **generierter Code** und werden nicht manuell stilbereinigt.
@@ -234,7 +248,7 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 
 ### UI-Widgets & Layout
 - Optimiere Widgets für gängige Bildschirmauflösungen und DPI-Einstellungen.
-- Vermeide Überlagerungen durch Limitierung dargestellter Einträge; passe Anzeigen an verfügbare Fläche an.
+- Vermeide Überlagerungen durch Limitierung dargeststellter Einträge; passe Anzeigen an verfügbare Fläche an.
 - Top-Tasks-Anzeige: Zeige maximal 3 Einträge (statt 4), um Überlagerungen im Widget zu vermeiden.
 - Mache solche Anzeige-Limits konfigurierbar, wenn möglich (Einstellungen/Theme), und dokumentiere die Default-Werte.
 
@@ -249,4 +263,4 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 
 ### Migrations-/Modernisierungsinterpretation
 - „Modernes .NET“ bedeutet auch für WinForms: aktuelles .NET (inkl. aktuellem Ziel-Framework des Repos) ist valide.
-- Migrationen sollen den bestehenden App-Typ respektieren; eine erzwungene Umstellung von WinForms auf Web ist **nicht** Teil der Standardanforderung.
+- Migrationen sollen den bestehenden App-Typ respektieren und nicht zu grundlegenden Änderungen der App-Struktur führen, es sei denn, dies wird ausdrücklich als Upgrade oder Neuausrichtung der App kommuniziert.

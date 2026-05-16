@@ -32,6 +32,11 @@ namespace FormsSystemStatsWidget.Core
         private static long _lastTotalReceived;
         private static Dictionary<int, (string Name, ulong Read, ulong Write)> _prevSnapshot = new();
         private static bool _initialized;
+        private static readonly TimeSpan NetworkInterfacesRefreshInterval = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan ProcessIoSamplingInterval = TimeSpan.FromMilliseconds(1200);
+        private static DateTime _lastNetworkInterfacesRefreshUtc = DateTime.MinValue;
+        private static NetworkInterface[] _cachedNetworkInterfaces = Array.Empty<NetworkInterface>();
+        private static DateTime _lastProcessIoSampleUtc = DateTime.MinValue;
 
         // ── public state ────────────────────────────────────────────────
         public static double UpBytesPerSecond { get; private set; }
@@ -56,9 +61,11 @@ namespace FormsSystemStatsWidget.Core
         public static void Init(double thresholdBytesPerSec = 10 * 1024)
         {
             ThresholdBytesPerSecond = thresholdBytesPerSec;
-            _lastTotalSent = GetTotalBytesSent();
-            _lastTotalReceived = GetTotalBytesReceived();
+            _cachedNetworkInterfaces = GetNetworkInterfacesSnapshot(forceRefresh: true);
+            _lastTotalSent = GetTotalBytesSent(_cachedNetworkInterfaces);
+            _lastTotalReceived = GetTotalBytesReceived(_cachedNetworkInterfaces);
             _prevSnapshot = SnapshotProcessIo();
+            _lastProcessIoSampleUtc = DateTime.UtcNow;
             _initialized = true;
         }
 
@@ -73,8 +80,11 @@ namespace FormsSystemStatsWidget.Core
 
             try
             {
-                long totalSent = GetTotalBytesSent();
-                long totalReceived = GetTotalBytesReceived();
+                DateTime nowUtc = DateTime.UtcNow;
+                _cachedNetworkInterfaces = GetNetworkInterfacesSnapshot(forceRefresh: false);
+
+                long totalSent = GetTotalBytesSent(_cachedNetworkInterfaces);
+                long totalReceived = GetTotalBytesReceived(_cachedNetworkInterfaces);
 
                 double factor = 1000.0 / Math.Max(1, intervalMs);
                 UpBytesPerSecond   = Math.Max(0, totalSent     - _lastTotalSent)     * factor;
@@ -83,18 +93,25 @@ namespace FormsSystemStatsWidget.Core
                 _lastTotalSent     = totalSent;
                 _lastTotalReceived = totalReceived;
 
-                try
+                if ((nowUtc - _lastProcessIoSampleUtc) >= ProcessIoSamplingInterval)
                 {
-                    var current = SnapshotProcessIo();
-                    var (topName, activeList) = ComputeRates(_prevSnapshot, current, factor);
-                    _prevSnapshot   = current;
-                    TopTalker       = topName ?? string.Empty;
-                    ActiveProcesses = activeList;
-                }
-                catch
-                {
-                    TopTalker       = string.Empty;
-                    ActiveProcesses = Array.Empty<(string, double)>();
+                    try
+                    {
+                        var current = SnapshotProcessIo();
+                        double processElapsedSeconds = Math.Max(0.001d, (nowUtc - _lastProcessIoSampleUtc).TotalSeconds);
+                        double processFactor = 1.0d / processElapsedSeconds;
+                        var (topName, activeList) = ComputeRates(_prevSnapshot, current, processFactor);
+                        _prevSnapshot = current;
+                        _lastProcessIoSampleUtc = nowUtc;
+                        TopTalker = topName ?? string.Empty;
+                        ActiveProcesses = activeList;
+                    }
+                    catch
+                    {
+                        _lastProcessIoSampleUtc = nowUtc;
+                        TopTalker = string.Empty;
+                        ActiveProcesses = Array.Empty<(string, double)>();
+                    }
                 }
             }
             catch
@@ -104,10 +121,36 @@ namespace FormsSystemStatsWidget.Core
         }
 
         // ── NIC helpers ─────────────────────────────────────────────────
-        private static long GetTotalBytesSent()
+        private static NetworkInterface[] GetNetworkInterfacesSnapshot(bool forceRefresh)
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+            if (!forceRefresh
+                && _cachedNetworkInterfaces.Length > 0
+                && (nowUtc - _lastNetworkInterfacesRefreshUtc) < NetworkInterfacesRefreshInterval)
+            {
+                return _cachedNetworkInterfaces;
+            }
+
+            try
+            {
+                _cachedNetworkInterfaces = NetworkInterface.GetAllNetworkInterfaces();
+                _lastNetworkInterfacesRefreshUtc = nowUtc;
+            }
+            catch
+            {
+                if (_cachedNetworkInterfaces.Length == 0)
+                {
+                    _cachedNetworkInterfaces = Array.Empty<NetworkInterface>();
+                }
+            }
+
+            return _cachedNetworkInterfaces;
+        }
+
+        private static long GetTotalBytesSent(IReadOnlyList<NetworkInterface> networkInterfaces)
         {
             long total = 0;
-            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            foreach (NetworkInterface ni in networkInterfaces)
             {
                 try { total += ni.GetIPv4Statistics().BytesSent; }
                 catch { }
@@ -115,10 +158,10 @@ namespace FormsSystemStatsWidget.Core
             return total;
         }
 
-        private static long GetTotalBytesReceived()
+        private static long GetTotalBytesReceived(IReadOnlyList<NetworkInterface> networkInterfaces)
         {
             long total = 0;
-            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            foreach (NetworkInterface ni in networkInterfaces)
             {
                 try { total += ni.GetIPv4Statistics().BytesReceived; }
                 catch { }
