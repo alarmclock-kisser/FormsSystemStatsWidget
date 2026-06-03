@@ -56,6 +56,8 @@
             this.threadsToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripTextBox_testThreads = new ToolStripTextBox();
             this.writeThroughToolStripMenuItem = new ToolStripMenuItem();
+            this.toolStripSeparator1 = new ToolStripSeparator();
+            this.rerouteAPILlamacppOllamaToolStripMenuItem = new ToolStripMenuItem();
             this.label_vram = new Label();
             this.progressBar_vram = new ProgressBar();
             this.label_wattage = new Label();
@@ -67,6 +69,10 @@
             this.label_avgCpuLoadAndTemperature = new Label();
             this.label_topTasksList = new Label();
             this.button_recordUsages = new Button();
+            this.llamacppPortToolStripMenuItem = new ToolStripMenuItem();
+            this.ollamaPortToolStripMenuItem = new ToolStripMenuItem();
+            this.toolStripTextBox_llamacppPort = new ToolStripTextBox();
+            this.toolStripTextBox_ollamaPort = new ToolStripTextBox();
             ((System.ComponentModel.ISupportInitialize) this.pictureBox_cpu).BeginInit();
             this.contextMenuStrip_widget.SuspendLayout();
             this.SuspendLayout();
@@ -101,16 +107,16 @@
             // 
             // contextMenuStrip_widget
             // 
-            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.selectGPUToolStripMenuItem, this.diagramColorToolStripMenuItem, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.driveSpeedTestToolStripMenuItem });
+            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.selectGPUToolStripMenuItem, this.diagramColorToolStripMenuItem, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.rerouteAPILlamacppOllamaToolStripMenuItem });
             this.contextMenuStrip_widget.Name = "contextMenuStrip_widget";
-            this.contextMenuStrip_widget.Size = new Size(177, 158);
+            this.contextMenuStrip_widget.Size = new Size(254, 208);
             this.contextMenuStrip_widget.Text = "Settings";
             // 
             // updateIntervalToolStripMenuItem
             // 
             this.updateIntervalToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_interval });
             this.updateIntervalToolStripMenuItem.Name = "updateIntervalToolStripMenuItem";
-            this.updateIntervalToolStripMenuItem.Size = new Size(176, 22);
+            this.updateIntervalToolStripMenuItem.Size = new Size(253, 22);
             this.updateIntervalToolStripMenuItem.Text = "Update Interval ...";
             // 
             // toolStripTextBox_interval
@@ -125,7 +131,7 @@
             // 
             this.selectGPUToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripComboBox_gpus });
             this.selectGPUToolStripMenuItem.Name = "selectGPUToolStripMenuItem";
-            this.selectGPUToolStripMenuItem.Size = new Size(176, 22);
+            this.selectGPUToolStripMenuItem.Size = new Size(253, 22);
             this.selectGPUToolStripMenuItem.Text = "Select GPU ...";
             // 
             // toolStripComboBox_gpus
@@ -139,7 +145,7 @@
             // 
             this.diagramColorToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_diagramColor });
             this.diagramColorToolStripMenuItem.Name = "diagramColorToolStripMenuItem";
-            this.diagramColorToolStripMenuItem.Size = new Size(176, 22);
+            this.diagramColorToolStripMenuItem.Size = new Size(253, 22);
             this.diagramColorToolStripMenuItem.Text = "Diagram Color ...";
             // 
             // toolStripTextBox_diagramColor
@@ -157,7 +163,7 @@
             this.showUsageToolStripMenuItem.CheckState = CheckState.Checked;
             this.showUsageToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_percentageColor });
             this.showUsageToolStripMenuItem.Name = "showUsageToolStripMenuItem";
-            this.showUsageToolStripMenuItem.Size = new Size(176, 22);
+            this.showUsageToolStripMenuItem.Size = new Size(253, 22);
             this.showUsageToolStripMenuItem.Text = "Show Per Core % ...";
             // 
             // toolStripTextBox_percentageColor
@@ -173,7 +179,7 @@
             // 
             this.alwaysOnTopToolStripMenuItem.CheckOnClick = true;
             this.alwaysOnTopToolStripMenuItem.Name = "alwaysOnTopToolStripMenuItem";
-            this.alwaysOnTopToolStripMenuItem.Size = new Size(176, 22);
+            this.alwaysOnTopToolStripMenuItem.Size = new Size(253, 22);
             this.alwaysOnTopToolStripMenuItem.Text = "Always on Top";
             this.alwaysOnTopToolStripMenuItem.CheckedChanged += this.alwaysOnTopToolStripMenuItem_CheckedChanged;
             // 
@@ -181,7 +187,7 @@
             // 
             this.trafficThresholdToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_threshold });
             this.trafficThresholdToolStripMenuItem.Name = "trafficThresholdToolStripMenuItem";
-            this.trafficThresholdToolStripMenuItem.Size = new Size(176, 22);
+            this.trafficThresholdToolStripMenuItem.Size = new Size(253, 22);
             this.trafficThresholdToolStripMenuItem.Text = "Traffic Threshold ...";
             // 
             // toolStripTextBox_threshold
@@ -195,7 +201,7 @@
             // 
             this.driveSpeedTestToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripComboBox_drives, this.testSettingsToolStripMenuItem });
             this.driveSpeedTestToolStripMenuItem.Name = "driveSpeedTestToolStripMenuItem";
-            this.driveSpeedTestToolStripMenuItem.Size = new Size(176, 22);
+            this.driveSpeedTestToolStripMenuItem.Size = new Size(253, 22);
             this.driveSpeedTestToolStripMenuItem.Text = "Drive Speed Test ...";
             this.driveSpeedTestToolStripMenuItem.DropDownOpening += this.driveSpeedTestToolStripMenuItem_DropDownOpening;
             this.driveSpeedTestToolStripMenuItem.Click += this.driveSpeedTestToolStripMenuItem_Click;
@@ -282,6 +288,20 @@
             this.writeThroughToolStripMenuItem.Name = "writeThroughToolStripMenuItem";
             this.writeThroughToolStripMenuItem.Size = new Size(163, 22);
             this.writeThroughToolStripMenuItem.Text = "Write Through";
+            // 
+            // toolStripSeparator1
+            // 
+            this.toolStripSeparator1.Name = "toolStripSeparator1";
+            this.toolStripSeparator1.Size = new Size(250, 6);
+            // 
+            // rerouteAPILlamacppOllamaToolStripMenuItem
+            // 
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.CheckOnClick = true;
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.llamacppPortToolStripMenuItem, this.ollamaPortToolStripMenuItem });
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.Name = "rerouteAPILlamacppOllamaToolStripMenuItem";
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.Size = new Size(253, 22);
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.Text = "Re-route API llama.cpp -> Ollama";
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.CheckedChanged += this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
             // 
             // label_vram
             // 
@@ -389,6 +409,32 @@
             this.button_recordUsages.UseVisualStyleBackColor = true;
             this.button_recordUsages.Click += this.button_recordUsages_Click;
             // 
+            // llamacppPortToolStripMenuItem
+            // 
+            this.llamacppPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_llamacppPort });
+            this.llamacppPortToolStripMenuItem.Name = "llamacppPortToolStripMenuItem";
+            this.llamacppPortToolStripMenuItem.Size = new Size(180, 22);
+            this.llamacppPortToolStripMenuItem.Text = "llama.cpp Port";
+            // 
+            // ollamaPortToolStripMenuItem
+            // 
+            this.ollamaPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_ollamaPort });
+            this.ollamaPortToolStripMenuItem.Name = "ollamaPortToolStripMenuItem";
+            this.ollamaPortToolStripMenuItem.Size = new Size(180, 22);
+            this.ollamaPortToolStripMenuItem.Text = "Ollama Port";
+            // 
+            // toolStripTextBox_llamacppPort
+            // 
+            this.toolStripTextBox_llamacppPort.Name = "toolStripTextBox_llamacppPort";
+            this.toolStripTextBox_llamacppPort.Size = new Size(100, 23);
+            this.toolStripTextBox_llamacppPort.Text = "8080";
+            // 
+            // toolStripTextBox_ollamaPort
+            // 
+            this.toolStripTextBox_ollamaPort.Name = "toolStripTextBox_ollamaPort";
+            this.toolStripTextBox_ollamaPort.Size = new Size(100, 23);
+            this.toolStripTextBox_ollamaPort.Text = "11434";
+            // 
             // WindowWidget
             // 
             this.AutoScaleDimensions = new SizeF(7F, 15F);
@@ -460,5 +506,11 @@
         private Label label_avgCpuLoadAndTemperature;
         private Label label_topTasksList;
         private Button button_recordUsages;
+        private ToolStripSeparator toolStripSeparator1;
+        private ToolStripMenuItem rerouteAPILlamacppOllamaToolStripMenuItem;
+        private ToolStripMenuItem llamacppPortToolStripMenuItem;
+        private ToolStripTextBox toolStripTextBox_llamacppPort;
+        private ToolStripMenuItem ollamaPortToolStripMenuItem;
+        private ToolStripTextBox toolStripTextBox_ollamaPort;
     }
 }

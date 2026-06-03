@@ -76,7 +76,10 @@ namespace FormsSystemStatsWidget.Core
         /// </summary>
         public static void Sample(int intervalMs)
         {
-            if (!_initialized) return;
+            if (!_initialized)
+            {
+                return;
+            }
 
             try
             {
@@ -182,7 +185,9 @@ namespace FormsSystemStatsWidget.Core
                 try
                 {
                     if (GetProcessIoCounters(p.Handle, out var c))
+                    {
                         result[p.Id] = (p.ProcessName, c.ReadTransferCount, c.WriteTransferCount);
+                    }
                 }
                 catch { }
                 finally { p.Dispose(); }
@@ -201,8 +206,15 @@ namespace FormsSystemStatsWidget.Core
 
             foreach (var (pid, cur) in curr)
             {
-                if (!prev.TryGetValue(pid, out var prv)) continue;
-                if (prv.Name != cur.Name) continue;
+                if (!prev.TryGetValue(pid, out var prv))
+                {
+                    continue;
+                }
+
+                if (prv.Name != cur.Name)
+                {
+                    continue;
+                }
 
                 double deltaRead  = cur.Read  >= prv.Read  ? (cur.Read  - prv.Read)  : 0;
                 double deltaWrite = cur.Write >= prv.Write ? (cur.Write - prv.Write) : 0;
@@ -214,7 +226,9 @@ namespace FormsSystemStatsWidget.Core
                     topName  = cur.Name;
                 }
                 if (rate >= ThresholdBytesPerSecond)
+                {
                     active.Add((cur.Name, rate));
+                }
             }
 
             active.Sort((a, b) => b.Item2.CompareTo(a.Item2));
@@ -229,7 +243,9 @@ namespace FormsSystemStatsWidget.Core
         public static string FormatBytesPerSecond(double bytesPerSec)
         {
             if (double.IsNaN(bytesPerSec) || double.IsInfinity(bytesPerSec))
+            {
                 return "0.0 B/s";
+            }
 
             double val = bytesPerSec;
             string[] units = ["B/s", "KB/s", "MB/s", "GB/s", "TB/s"];

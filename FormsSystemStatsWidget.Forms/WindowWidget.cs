@@ -43,7 +43,7 @@ namespace FormsSystemStatsWidget.Forms
             public required string RootPath { get; init; }
             public required string DisplayName { get; init; }
 
-            public override string ToString() => DisplayName;
+            public override string ToString() => this.DisplayName;
         }
 
 
@@ -475,7 +475,7 @@ namespace FormsSystemStatsWidget.Forms
                 while (remainingBytes > 0)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    int chunk = (int)Math.Min(buffer.Length, remainingBytes);
+                    int chunk = (int) Math.Min(buffer.Length, remainingBytes);
                     await writeStream.WriteAsync(buffer.AsMemory(0, chunk), cancellationToken);
                     remainingBytes -= chunk;
                     progressBytesCallback?.Invoke(chunk);
@@ -612,7 +612,7 @@ namespace FormsSystemStatsWidget.Forms
             while (remainingBytes > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                int chunk = (int)Math.Min(buffer.Length, remainingBytes);
+                int chunk = (int) Math.Min(buffer.Length, remainingBytes);
                 await stream.WriteAsync(buffer.AsMemory(0, chunk), cancellationToken);
                 remainingBytes -= chunk;
                 progressBytesCallback?.Invoke(chunk);
@@ -639,7 +639,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private async Task<string> RunDriveSpeedTestAndBuildReportAsync(string rootPath, CancellationToken cancellationToken)
         {
-            long fileSizeBytes = checked((long)this._driveTestFileSizeMb * 1024L * 1024L);
+            long fileSizeBytes = checked((long) this._driveTestFileSizeMb * 1024L * 1024L);
             int blockSizeBytes = checked(this._driveTestBlockSizeKb * 1024);
             int passes = this._driveTestPasses;
 
@@ -676,7 +676,7 @@ namespace FormsSystemStatsWidget.Forms
                 void ReportProgress(long processedBytes)
                 {
                     long totalProcessed = Interlocked.Add(ref completedBytes, Math.Max(0, processedBytes));
-                    double progressPercent = Math.Min(100.0, (totalProcessed / (double)totalExpectedBytes) * 100.0);
+                    double progressPercent = Math.Min(100.0, (totalProcessed / (double) totalExpectedBytes) * 100.0);
                     TimeSpan elapsed = totalStopwatch.Elapsed;
                     string title = BuildDriveTestWindowTitle(rootPath, elapsed, progressPercent);
                     this.TrySetWindowTitleSafe(title);
@@ -833,18 +833,34 @@ namespace FormsSystemStatsWidget.Forms
         private static string Ellipsize(string text, int maxLen)
         {
             if (string.IsNullOrEmpty(text) || maxLen <= 0)
+            {
                 return string.Empty;
+            }
+
             if (text.Length <= maxLen)
+            {
                 return text;
+            }
+
             if (maxLen <= 3)
+            {
                 return text.Substring(0, maxLen);
+            }
+
             return text.Substring(0, maxLen - 3) + "...";
         }
 
         private async void Timer_Tick(object? sender, EventArgs e)
         {
-            if (_closing) return;
-            if (Interlocked.Exchange(ref _tickInProgress, 1) == 1) return;
+            if (this._closing)
+            {
+                return;
+            }
+
+            if (Interlocked.Exchange(ref this._tickInProgress, 1) == 1)
+            {
+                return;
+            }
 
             try
             {
@@ -893,14 +909,18 @@ namespace FormsSystemStatsWidget.Forms
                     this.UpdateVramUsageAsync(vramTotalGb, vramUsedGb)
                 );
 
-                if (_closing) return;
-                UpdateTitleWithTraffic();
+                if (this._closing)
+                {
+                    return;
+                }
+
+                this.UpdateTitleWithTraffic();
 
                 this.LogTickDurationIfSlow(tickStopwatch.Elapsed);
             }
             finally
             {
-                Interlocked.Exchange(ref _tickInProgress, 0);
+                Interlocked.Exchange(ref this._tickInProgress, 0);
             }
         }
 
@@ -945,7 +965,7 @@ namespace FormsSystemStatsWidget.Forms
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            _closing = true;
+            this._closing = true;
             this.UpdateTimer.Stop();
 
             try { this.Gpu?.Dispose(); } catch { }
@@ -985,7 +1005,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private void UpdateAverageCpuLoadAndTemperatureLabel(float[] usages)
         {
-            if (_closing)
+            if (this._closing)
             {
                 return;
             }
@@ -1015,14 +1035,14 @@ namespace FormsSystemStatsWidget.Forms
         private async Task UpdateCpuUsageAsync(float[] usages)
         {
             var bmp = await CpuStats.RenderCoresBitmapAsync(usages, this.pictureBox_cpu.Width, this.pictureBox_cpu.Height, this._diagramColor, (this.showUsageToolStripMenuItem.Enabled ? this._percentageColor : null), CancellationToken.None);
-            if (_closing) { bmp?.Dispose(); return; }
+            if (this._closing) { bmp?.Dispose(); return; }
             this.pictureBox_cpu.Image?.Dispose();
             this.pictureBox_cpu.Image = bmp;
         }
 
         private void UpdateTopTasksLabel(IReadOnlyList<(string processName, double cpuPercent)> topTasks)
         {
-            if (_closing)
+            if (this._closing)
             {
                 return;
             }
@@ -1054,18 +1074,25 @@ namespace FormsSystemStatsWidget.Forms
 
         private Task UpdateRamUsageAsync(double totalGb, double usedGb)
         {
-            if (_closing) return Task.CompletedTask;
+            if (this._closing)
+            {
+                return Task.CompletedTask;
+            }
+
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
 
             this.label_ram.Text = $"RAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
-            this.progressBar_ram.Value = Math.Clamp((int)percentUsed * 10, 0, this.progressBar_ram.Maximum);
+            this.progressBar_ram.Value = Math.Clamp((int) percentUsed * 10, 0, this.progressBar_ram.Maximum);
 
             return Task.CompletedTask;
         }
 
         private Task UpdateGpuUsageAsync(double usagePercent, double wattage)
         {
-            if (_closing) return Task.CompletedTask;
+            if (this._closing)
+            {
+                return Task.CompletedTask;
+            }
 
             this.label_gpuUsage.Text = $"GPU: {usagePercent:0.00}%";
             this.label_wattage.Text = $"Watts: {wattage:0.00} W";
@@ -1081,10 +1108,14 @@ namespace FormsSystemStatsWidget.Forms
 
         private Task UpdateVramUsageAsync(double totalGb, double usedGb)
         {
-            if (_closing) return Task.CompletedTask;
+            if (this._closing)
+            {
+                return Task.CompletedTask;
+            }
+
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
             this.label_vram.Text = $"VRAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
-            this.progressBar_vram.Value = Math.Clamp((int)percentUsed * 10, 0, this.progressBar_vram.Maximum);
+            this.progressBar_vram.Value = Math.Clamp((int) percentUsed * 10, 0, this.progressBar_vram.Maximum);
 
             if (this.Gpu2 != null)
             {
@@ -1095,7 +1126,7 @@ namespace FormsSystemStatsWidget.Forms
                 double gpu2PercentUsed = gpu2TotalBytes > 0 ? (Math.Max(0.0, gpu2UsedBytes) / gpu2TotalBytes) * 100.0 : 0.0;
 
                 this.label_gpuVram2.Text = $"VRAM: {gpu2UsedGb} GB / {gpu2TotalGb} GB ({gpu2PercentUsed:0.00}%)";
-                this.progressBar_vram2.Value = Math.Clamp((int)(gpu2PercentUsed * 10), 0, this.progressBar_vram2.Maximum);
+                this.progressBar_vram2.Value = Math.Clamp((int) (gpu2PercentUsed * 10), 0, this.progressBar_vram2.Maximum);
             }
 
             return Task.CompletedTask;
@@ -1113,7 +1144,7 @@ namespace FormsSystemStatsWidget.Forms
             if (hex.Length == 6 && int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out int rgb))
             {
                 // rgb is RRGGBB; ensure the color is created opaque by adding alpha 0xFF
-                this._diagramColor = Color.FromArgb(unchecked((int)0xFF000000 | rgb));
+                this._diagramColor = Color.FromArgb(unchecked((int) 0xFF000000 | rgb));
             }
         }
 
@@ -1123,7 +1154,7 @@ namespace FormsSystemStatsWidget.Forms
             if (hex.Length == 6 && int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out int rgb))
             {
                 // rgb is RRGGBB; construct an opaque Color (add alpha byte)
-                this._percentageColor = Color.FromArgb(unchecked((int)0xFF000000 | rgb));
+                this._percentageColor = Color.FromArgb(unchecked((int) 0xFF000000 | rgb));
             }
             else
             {
@@ -1197,7 +1228,7 @@ namespace FormsSystemStatsWidget.Forms
                     ? hexVal
                     : double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double numVal)
                         ? numVal
-                        : (double?)null;
+                        : (double?) null;
                 if (value == null)
                 {
                     return;
@@ -1289,7 +1320,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.UseWaitCursor = false;
                 this.driveSpeedTestToolStripMenuItem.Enabled = true;
                 this._driveTestInProgress = false;
-                if (!_closing && timerWasEnabled)
+                if (!this._closing && timerWasEnabled)
                 {
                     this.UpdateTimer.Start();
                 }
@@ -1371,7 +1402,7 @@ namespace FormsSystemStatsWidget.Forms
                 DriveInfo driveInfo = new DriveInfo(drive.RootPath);
                 const long reservedBytes = 512L * 1024L * 1024L;
                 long safeBytes = Math.Max(512L * 1024L * 1024L, driveInfo.AvailableFreeSpace - reservedBytes);
-                int maxAllowedMb = (int)Math.Clamp(safeBytes / (1024L * 1024L), 512L, 65_536L);
+                int maxAllowedMb = (int) Math.Clamp(safeBytes / (1024L * 1024L), 512L, 65_536L);
                 if (this._driveTestFileSizeMb > maxAllowedMb)
                 {
                     this._driveTestFileSizeMb = maxAllowedMb;
@@ -1845,7 +1876,7 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
-            string summaryText = BuildRecordingCompletionText(filePath, finalSummary);
+            string summaryText = this.BuildRecordingCompletionText(filePath, finalSummary);
 
             if (!this._closing)
             {
@@ -1900,6 +1931,43 @@ namespace FormsSystemStatsWidget.Forms
             return value.Contains(';') || value.Contains('"') || value.Contains('\r') || value.Contains('\n')
                 ? $"\"{value}\""
                 : value;
+        }
+
+        private async void rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged(object? sender, EventArgs e)
+        {
+            var menuItem = (ToolStripMenuItem?) sender;
+            if (menuItem == null)
+            {
+                return;
+            }
+            menuItem.Enabled = false;
+
+            if (menuItem.Checked)
+            {
+                int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;
+                int ollamaPort = int.TryParse(this.toolStripTextBox_ollamaPort.Text.Trim(), out int parsedOllamaPort) ? parsedOllamaPort : 11434;
+
+                bool isStarted = await LlamaOllamaBridge.StartAsync(llamaPort, ollamaPort);
+
+                if (isStarted)
+                {
+                    MessageBox.Show($"Success! Proxy routes localhost:{llamaPort} to localhost:{ollamaPort}.", "API Bridge Active", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    menuItem.CheckedChanged -= this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
+                    menuItem.Checked = false;
+                    menuItem.CheckedChanged += this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
+
+                    MessageBox.Show($"Connection to llama-server (Port {llamaPort}) failed or Port {ollamaPort} is blocked!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else
+            {
+                LlamaOllamaBridge.Stop(); // Keine asynchrone Task mehr nötig beim Stoppen
+            }
+
+            menuItem.Enabled = true;
         }
     }
 }
