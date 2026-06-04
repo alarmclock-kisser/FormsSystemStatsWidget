@@ -8,41 +8,49 @@ namespace FormsSystemStatsWidget.Core
 {
     public static class LlamaServerStats
     {
-        // Eigener HttpClient mit extrem kurzem Timeout, damit der UI-Timer bei Server-Offline niemals blockiert
-        private static readonly HttpClient _statsClient = new HttpClient { Timeout = TimeSpan.FromMilliseconds(250) };
+        // Timeout deutlich erhöht! 250ms war viel zu kurz für einen ausgelasteten KI-Server.
+        private static readonly HttpClient _statsClient = new() { Timeout = TimeSpan.FromMilliseconds(2500) };
 
         private static int _lastTaskId = -1;
         private static int _lastNDecoded = 0;
         private static DateTime _lastCheckTime = DateTime.MinValue;
+        private static DateTime _lastPollTime = DateTime.MinValue;
         private static float _currentTps = 0f;
+        private static readonly TimeSpan IdlePollingInterval = TimeSpan.FromSeconds(2);
 
-        /// <summary>
-        /// Fragt den llama-server Slots-Endpunkt ab und errechnet die aktuellen Tokens pro Sekunde (t/s).
-        /// Gibt 'null' zurück, wenn der Server offline ist, und '0', wenn er idle ist.
-        /// </summary>
+        // Zähler für kurzzeitige Aussetzer bei hoher Systemlast
+        private static int _errorCount = 0;
+
         public static async Task<float?> GetCurrentLlamaServerGenerationStatsAsync(int llamacppPort = 8080)
         {
+            DateTime now = DateTime.UtcNow;
+
+            if (_lastTaskId == -1 && (now - _lastPollTime) < IdlePollingInterval)
+            {
+                return _currentTps;
+            }
+
             try
             {
-                // 1. Slots-Status vom llama-server abrufen
+                _lastPollTime = now;
+
                 var response = await _statsClient.GetAsync($"http://localhost:{llamacppPort}/slots");
                 if (!response.IsSuccessStatusCode)
                 {
-                    return null; // Server antwortet fehlerhaft -> Als Offline werten
+                    return null;
                 }
 
                 var content = await response.Content.ReadAsStringAsync();
                 var slotsArray = JsonNode.Parse(content)?.AsArray();
                 if (slotsArray == null || slotsArray.Count == 0)
                 {
-                    return 0f; // Keine Slots aktiv -> 0 t/s
+                    return 0f;
                 }
 
                 bool anySlotActive = false;
                 int activeTaskId = -1;
                 int currentNDecoded = 0;
 
-                // 2. Slots durchscannen und aktive Generation-Tasks aggregieren
                 foreach (var slotNode in slotsArray)
                 {
                     if (slotNode == null)
@@ -50,14 +58,40 @@ namespace FormsSystemStatsWidget.Core
                         continue;
                     }
 
-                    // id_task ist -1 wenn der Slot schläft (idle), ansonsten steht dort die Task-ID vom Copilot
-                    var idTaskNode = slotNode["id_task"];
-                    if (idTaskNode != null && int.TryParse(idTaskNode.ToString(), out int idTask) && idTask != -1)
+                    bool isProcessing = false;
+
+                    var stateNode = slotNode["state"];
+                    if (stateNode != null)
+                    {
+                        string stateStr = stateNode.ToString().ToLower();
+                        if (stateStr == "1" || stateStr == "processing")
+                        {
+                            isProcessing = true;
+                        }
+                    }
+
+                    var isProcNode = slotNode["is_processing"];
+                    if (isProcNode != null)
+                    {
+                        string procStr = isProcNode.ToString().ToLower();
+                        if (procStr == "true" || procStr == "1")
+                        {
+                            isProcessing = true;
+                        }
+                    }
+
+                    if (isProcessing)
                     {
                         anySlotActive = true;
-                        activeTaskId = idTask;
+                        if (slotNode["id_task"] != null && int.TryParse(slotNode["id_task"]?.ToString(), out int idt))
+                        {
+                            activeTaskId = idt;
+                        }
+                        else
+                        {
+                            activeTaskId = 1;
+                        }
 
-                        // n_decoded enthält die Anzahl der für diese laufende Task generierten Tokens
                         var nDecodedNode = slotNode["n_decoded"];
                         if (nDecodedNode != null && int.TryParse(nDecodedNode.ToString(), out int nDecoded))
                         {
@@ -66,7 +100,8 @@ namespace FormsSystemStatsWidget.Core
                     }
                 }
 
-                // 3. Wenn alle Slots idle sind -> Sofort 0 t/s zurückgeben
+                _errorCount = 0; // Fehler-Zähler zurücksetzen bei erfolgreichem Pull
+
                 if (!anySlotActive)
                 {
                     _lastTaskId = -1;
@@ -75,20 +110,14 @@ namespace FormsSystemStatsWidget.Core
                     return 0f;
                 }
 
-                DateTime now = DateTime.UtcNow;
-
-                // 4. Wenn eine brandneue Task gestartet wurde, initialisieren wir die Tracker für den nächsten Tick
                 if (activeTaskId != _lastTaskId)
                 {
                     _lastTaskId = activeTaskId;
                     _lastNDecoded = currentNDecoded;
                     _lastCheckTime = now;
-
-                    // Liefert beim allerersten Token-Anlauf entweder den letzten Wert oder fängt bei 0 an
                     return _currentTps > 0 ? _currentTps : 0f;
                 }
 
-                // 5. Zeit- und Token-Delta berechnen seit dem letzten Timer-Tick (~420ms)
                 int deltaTokens = currentNDecoded - _lastNDecoded;
                 double deltaSeconds = (now - _lastCheckTime).TotalSeconds;
 
@@ -96,19 +125,23 @@ namespace FormsSystemStatsWidget.Core
                 {
                     if (deltaTokens > 0)
                     {
-                        // Errechnung der echten Tokens/Sec über die Delta-Zeit
                         _currentTps = (float) (deltaTokens / deltaSeconds);
                         _lastNDecoded = currentNDecoded;
                         _lastCheckTime = now;
                     }
                     else
                     {
-                        // Falls der Timer schneller tickt als das Modell ein Token auswirft (Prefill-Phase oder Generation-Verzögerung),
-                        // nutzen wir ein leichtes Decay (Dämpfung), damit die UI-Anzeige geschmeidig bleibt und nicht flackert.
-                        _currentTps *= 0.85f;
-                        if (_currentTps < 0.1f)
+                        if (currentNDecoded == 0)
                         {
-                            _currentTps = 0f;
+                            _currentTps = 0.001f; // Evaluating Prompt (Umgeht die UI Idle-Prüfung)
+                        }
+                        else
+                        {
+                            _currentTps *= 0.85f;
+                            if (_currentTps < 0.001f)
+                            {
+                                _currentTps = 0.001f; // Prevent Idle status while actively processing
+                            }
                         }
                     }
                 }
@@ -117,8 +150,19 @@ namespace FormsSystemStatsWidget.Core
             }
             catch
             {
-                // Connection Refused oder Timeout -> Llama-Server läuft zurzeit gar nicht
-                return null;
+                _errorCount++;
+
+                // Wenn der Server gerade hart rechnet, blockiert der HTTP-Thread desllama-server 
+                // manchmal massiv. Wir buffern nun bis zu 15 Timeouts (~30-37s) ab!
+                if (_errorCount > 15)
+                {
+                    _lastTaskId = -1;
+                    _lastNDecoded = 0;
+                    _currentTps = 0f;
+                    return null;
+                }
+
+                return _currentTps > 0 ? _currentTps : 0.001f;
             }
         }
     }

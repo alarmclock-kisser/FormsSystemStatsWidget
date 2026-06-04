@@ -35,7 +35,7 @@ namespace FormsSystemStatsWidget.Core
         private static readonly TimeSpan NetworkInterfacesRefreshInterval = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan ProcessIoSamplingInterval = TimeSpan.FromMilliseconds(1200);
         private static DateTime _lastNetworkInterfacesRefreshUtc = DateTime.MinValue;
-        private static NetworkInterface[] _cachedNetworkInterfaces = Array.Empty<NetworkInterface>();
+        private static NetworkInterface[] _cachedNetworkInterfaces = [];
         private static DateTime _lastProcessIoSampleUtc = DateTime.MinValue;
 
         // ── public state ────────────────────────────────────────────────
@@ -143,7 +143,7 @@ namespace FormsSystemStatsWidget.Core
             {
                 if (_cachedNetworkInterfaces.Length == 0)
                 {
-                    _cachedNetworkInterfaces = Array.Empty<NetworkInterface>();
+                    _cachedNetworkInterfaces = [];
                 }
             }
 

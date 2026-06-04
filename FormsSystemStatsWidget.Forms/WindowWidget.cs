@@ -27,7 +27,7 @@ namespace FormsSystemStatsWidget.Forms
         private bool _driveTestInProgress = false;
 
         private Timer UpdateTimer;
-        private GpuStats Gpu;
+        private GpuStats? Gpu;
         private GpuStats? Gpu2 = null;
         private volatile bool _closing = false;
         private int _tickInProgress = 0;
@@ -37,6 +37,21 @@ namespace FormsSystemStatsWidget.Forms
         private IReadOnlyList<(string processName, double cpuPercent)> _cachedTopTasks = Array.Empty<(string processName, double cpuPercent)>();
         private DateTime _lastTopTasksSampleUtc = DateTime.MinValue;
         private DateTime _lastTickDiagnosticsUtc = DateTime.MinValue;
+        private DebugConsoleForm? _debugConsoleForm;
+        private bool _explicitWidgetCloseRequested;
+
+        private const int WmSysCommand = 0x0112;
+        private const int ScClose = 0xF060;
+
+        private void HandleLoggerMessageLogged(string text)
+        {
+            if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
+            {
+                return;
+            }
+
+            this._debugConsoleForm.AppendLogLine(text);
+        }
 
         private sealed class DriveSelection
         {
@@ -51,6 +66,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             this.InitializeComponent();
             this.DoubleBuffered = true;
+            Logger.MessageLogged += this.HandleLoggerMessageLogged;
 
             this.UpdateTimer = new Timer();
             this.UpdateTimer.Interval = this._updateIntervalMs;
@@ -93,6 +109,32 @@ namespace FormsSystemStatsWidget.Forms
 
             this.PopulateDriveSelections();
             this.ApplyDriveSpeedTestSettingTexts();
+            this.toolStripComboBox_ggufModels.Items.Clear();
+            this.toolStripComboBox_ggufModels.Items.AddRange(LlamaCppModelLoader.ModelFilePaths.Select(path => System.IO.Path.GetFileNameWithoutExtension(path)).ToArray());
+            if (this.toolStripComboBox_ggufModels.Items.Count > 0)
+            {
+                this.toolStripComboBox_ggufModels.SelectedIndex = 0;
+            }
+            this.toolStripComboBox_splitMode.SelectedIndex = 0;
+            // If > 1 GPUs available, default to row (index 2)
+            if (this.toolStripComboBox_gpus.Items.Count > 1)
+            {
+                this.toolStripComboBox_splitMode.SelectedIndex = 2;
+                this.toolStripMenuItem_tensorSplit.Enabled = true;
+                this.toolStripTextBox_tensorSplit.Enabled = true;
+
+                // Get GPUs VRAM capacities in int rounded GB, set default tensor split config to gpu1_vram, gpu2_vram, ...
+                long gpu1VramGb = this.Gpu != null ? (long) Math.Round(this.Gpu.GetTotalVramBytes() / 1_073_741_824.0) : 0;
+                long gpu2VramGb = this.Gpu2 != null ? (long) Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0) : 0;
+                if (gpu1VramGb > 0 && gpu2VramGb > 0)
+                {
+                    this.toolStripTextBox_tensorSplit.Text = $"{gpu1VramGb},{gpu2VramGb}";
+                }
+                else
+                {
+                    this.toolStripTextBox_tensorSplit.Text = "";
+                }
+            }
         }
 
         private void ApplyGpuLayout()
@@ -107,7 +149,7 @@ namespace FormsSystemStatsWidget.Forms
             int clientHeight = hasSecondGpu ? MultiGpuClientHeight : SingleGpuClientHeight;
             this.ClientSize = new Size(this.ClientSize.Width, clientHeight);
 
-            Size windowSize = new Size(256, clientHeight + 39);
+            Size windowSize = new(256, clientHeight + 39);
             this.MinimumSize = windowSize;
             this.MaximumSize = windowSize;
         }
@@ -264,7 +306,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private static string BuildDriveEnvironmentInfoBlock(string rootPath)
         {
-            StringBuilder infoBuilder = new StringBuilder();
+            StringBuilder infoBuilder = new();
 
             infoBuilder.AppendLine("Environment:");
             infoBuilder.AppendLine($"  OS: {RuntimeInformation.OSDescription}");
@@ -275,7 +317,7 @@ namespace FormsSystemStatsWidget.Forms
 
             try
             {
-                DriveInfo driveInfo = new DriveInfo(rootPath);
+                DriveInfo driveInfo = new(rootPath);
                 infoBuilder.AppendLine("Logical Drive:");
                 infoBuilder.AppendLine($"  Name: {driveInfo.Name}");
                 infoBuilder.AppendLine($"  Type: {driveInfo.DriveType}");
@@ -293,7 +335,7 @@ namespace FormsSystemStatsWidget.Forms
             string driveId = (Path.GetPathRoot(rootPath) ?? rootPath).TrimEnd('\\').ToUpperInvariant();
             try
             {
-                using ManagementObjectSearcher logicalDiskSearcher = new ManagementObjectSearcher($"SELECT * FROM Win32_LogicalDisk WHERE DeviceID='{driveId}'");
+                using ManagementObjectSearcher logicalDiskSearcher = new($"SELECT * FROM Win32_LogicalDisk WHERE DeviceID='{driveId}'");
                 using ManagementObjectCollection logicalDisks = logicalDiskSearcher.Get();
 
                 infoBuilder.AppendLine("WMI Logical Disk:");
@@ -308,18 +350,18 @@ namespace FormsSystemStatsWidget.Forms
                     infoBuilder.AppendLine($"  SupportsFileBasedCompression: {GetSafePropertyValue(logicalDisk, "SupportsFileBasedCompression")}");
                 }
 
-                HashSet<string> diskDeviceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                List<ManagementObject> diskDrives = new List<ManagementObject>();
+                HashSet<string> diskDeviceIds = new(StringComparer.OrdinalIgnoreCase);
+                List<ManagementObject> diskDrives = new();
 
                 foreach (ManagementObject logicalDisk in logicalDisks.Cast<ManagementObject>())
                 {
                     string logicalDiskPath = logicalDisk.Path.RelativePath;
-                    using ManagementObjectSearcher partitionSearcher = new ManagementObjectSearcher($"ASSOCIATORS OF {{{logicalDiskPath}}} WHERE AssocClass = Win32_LogicalDiskToPartition");
+                    using ManagementObjectSearcher partitionSearcher = new($"ASSOCIATORS OF {{{logicalDiskPath}}} WHERE AssocClass = Win32_LogicalDiskToPartition");
                     using ManagementObjectCollection partitions = partitionSearcher.Get();
                     foreach (ManagementObject partition in partitions.Cast<ManagementObject>())
                     {
                         string partitionPath = partition.Path.RelativePath;
-                        using ManagementObjectSearcher diskSearcher = new ManagementObjectSearcher($"ASSOCIATORS OF {{{partitionPath}}} WHERE AssocClass = Win32_DiskDriveToDiskPartition");
+                        using ManagementObjectSearcher diskSearcher = new($"ASSOCIATORS OF {{{partitionPath}}} WHERE AssocClass = Win32_DiskDriveToDiskPartition");
                         using ManagementObjectCollection disks = diskSearcher.Get();
                         foreach (ManagementObject disk in disks.Cast<ManagementObject>())
                         {
@@ -432,7 +474,7 @@ namespace FormsSystemStatsWidget.Forms
             string userTempPath = Path.GetTempPath();
             string userTempRoot = Path.GetPathRoot(userTempPath) ?? string.Empty;
 
-            List<string> candidates = new List<string>();
+            List<string> candidates = new();
             if (string.Equals(userTempRoot, normalizedRootPath, StringComparison.OrdinalIgnoreCase))
             {
                 candidates.Add(Path.Combine(userTempPath, "FormsSystemStatsWidget", "DriveSpeedTest"));
@@ -451,7 +493,7 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     Directory.CreateDirectory(candidate);
                     string probeFilePath = Path.Combine(candidate, $".fssw-probe-{Guid.NewGuid():N}.tmp");
-                    await using FileStream probe = new FileStream(probeFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.DeleteOnClose);
+                    await using FileStream probe = new(probeFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.DeleteOnClose);
                     await probe.WriteAsync(new byte[] { 0xAA }, cancellationToken);
                     return candidate;
                 }
@@ -519,7 +561,7 @@ namespace FormsSystemStatsWidget.Forms
             long maxPosition = Math.Max(0, fileSizeBytes - blockSizeBytes);
 
             var writeStopwatch = Stopwatch.StartNew();
-            await using (FileStream writeStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, blockSizeBytes, options))
+            await using (FileStream writeStream = new(filePath, FileMode.Create, FileAccess.Write, FileShare.None, blockSizeBytes, options))
             {
                 writeStream.SetLength(fileSizeBytes);
                 for (long index = 0; index < operationCount; index++)
@@ -537,7 +579,7 @@ namespace FormsSystemStatsWidget.Forms
             writeStopwatch.Stop();
 
             var readStopwatch = Stopwatch.StartNew();
-            await using (FileStream readStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, blockSizeBytes, FileOptions.RandomAccess))
+            await using (FileStream readStream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, blockSizeBytes, FileOptions.RandomAccess))
             {
                 for (long index = 0; index < operationCount; index++)
                 {
@@ -607,7 +649,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private static async Task WriteWorkerFileAsync(string path, long fileSizeBytes, byte[] buffer, int blockSizeBytes, FileOptions options, CancellationToken cancellationToken, Action<long>? progressBytesCallback = null)
         {
-            await using FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, blockSizeBytes, options);
+            await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None, blockSizeBytes, options);
             long remainingBytes = fileSizeBytes;
             while (remainingBytes > 0)
             {
@@ -623,7 +665,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private static async Task ReadWorkerFileAsync(string path, byte[] buffer, int blockSizeBytes, CancellationToken cancellationToken, Action<long>? progressBytesCallback = null)
         {
-            await using FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, blockSizeBytes, FileOptions.SequentialScan);
+            await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, blockSizeBytes, FileOptions.SequentialScan);
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -750,7 +792,7 @@ namespace FormsSystemStatsWidget.Forms
             var (parWriteAvg, parWriteMin, parWriteMax) = CalculateMetrics(parallelWriteResults);
             var (parReadAvg, parReadMin, parReadMax) = CalculateMetrics(parallelReadResults);
 
-            StringBuilder reportBuilder = new StringBuilder();
+            StringBuilder reportBuilder = new();
             reportBuilder.AppendLine("Drive Speed Test Report");
             reportBuilder.AppendLine(new string('-', 32));
             reportBuilder.AppendLine($"Drive: {rootPath}");
@@ -785,9 +827,9 @@ namespace FormsSystemStatsWidget.Forms
 
         private void ShowDriveSpeedReportDialog(string report)
         {
-            TaskDialogButton copyButton = new TaskDialogButton("Copy Report");
+            TaskDialogButton copyButton = new("Copy Report");
             TaskDialogButton closeButton = TaskDialogButton.Close;
-            TaskDialogPage page = new TaskDialogPage
+            TaskDialogPage page = new()
             {
                 Caption = "Drive Speed Test",
                 Heading = "Benchmark finished",
@@ -850,6 +892,11 @@ namespace FormsSystemStatsWidget.Forms
             return string.Concat(text.AsSpan(0, maxLen - 3), "...");
         }
 
+        /// <summary>
+        /// TIMER TICK : Main Update-Loop for HW Stats and UI.
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private async void Timer_Tick(object? sender, EventArgs e)
         {
             if (this._closing)
@@ -879,10 +926,10 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     try
                     {
-                        double usage = gpuRef.CurrentLoad01 * 100;
-                        double wattage = gpuRef.CurrentPowerWatts ?? 0;
-                        double vramTotal = Math.Round(gpuRef.GetTotalVramBytes() / 1_073_741_824.0, 3);
-                        double vramUsed = Math.Round(gpuRef.GetUsedVramBytes() / 1_073_741_824.0, 3);
+                        double usage = gpuRef?.CurrentLoad01 * 100 ?? 0;
+                        double wattage = gpuRef?.CurrentPowerWatts ?? 0;
+                        double vramTotal = Math.Round(gpuRef?.GetTotalVramBytes() / 1_073_741_824.0 ?? 0, 3);
+                        double vramUsed = Math.Round(gpuRef?.GetUsedVramBytes() / 1_073_741_824.0 ?? 0, 3);
                         return (usage, wattage, vramTotal, vramUsed);
                     }
                     catch
@@ -931,25 +978,44 @@ namespace FormsSystemStatsWidget.Forms
             {
                 return;
             }
-            float genSpeed = await LlamaServerStats.GetCurrentLlamaServerGenerationStatsAsync() ?? 0f;
-            if (genSpeed > 0)
+
+            int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;
+
+            // Die erste Zeile (Ports) sicher extrahieren und erhalten
+            string baseText = this.label_routingPortsInfo.Text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)[0];
+
+            // Fallback, falls das Label leer war oder überschrieben wurde
+            if (string.IsNullOrWhiteSpace(baseText) || !baseText.StartsWith("Port"))
             {
-                // Invoke on UI thread to update the label
-                if (this.InvokeRequired)
-                {
-                    this.BeginInvoke(new Action(() =>
-                    {
-                        if (!this.IsDisposed && !this.Disposing)
-                        {
-                            this.label_routingPortsInfo.Text = this.label_routingPortsInfo.Text + $"\n {genSpeed:0.000} tokens/s";
-                        }
-                    }));
-                }
-                else
-                {
-                    this.label_routingPortsInfo.Text = this.label_routingPortsInfo.Text + $"\n {genSpeed:0.000} tokens/s";
-                }
+                baseText = $"Port {llamaPort} to {this.toolStripTextBox_ollamaPort.Text.Trim()}";
             }
+
+            // Geschwindigkeit abrufen
+            float genSpeed = await LlamaServerStats.GetCurrentLlamaServerGenerationStatsAsync(llamaPort) ?? 0f;
+
+            // FIX: Den Speed-String immer formatieren, auch bei Idle (0f). Das verhindert Flackern.
+            string speedString = genSpeed > 0f ? $"{genSpeed:0.000} tokens/s" : "Idle (0.000 tokens/s)";
+            string nextText = $"{baseText}{Environment.NewLine}{speedString}";
+
+            if (this.InvokeRequired)
+            {
+                this.BeginInvoke(new Action(() =>
+                {
+                    if (!this.IsDisposed && !this.Disposing)
+                    {
+                        this.label_routingPortsInfo.Text = nextText;
+
+                        // Optional: Logs nur schreiben, wenn auch wirklich was generiert wird
+                        if (genSpeed > 0f && this.toolStripMenuItem_logGenerationSpeed.Checked)
+                        {
+                            Logger.Log($" --- Llama server generation speed: {genSpeed:0.000} tokens/s");
+                        }
+                    }
+                }));
+                return;
+            }
+
+            this.label_routingPortsInfo.Text = nextText;
         }
 
         private Task<IReadOnlyList<(string processName, double cpuPercent)>> GetTopTasksSnapshotAsync()
@@ -993,13 +1059,41 @@ namespace FormsSystemStatsWidget.Forms
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if (e.CloseReason != CloseReason.WindowsShutDown && !this._explicitWidgetCloseRequested)
+            {
+                e.Cancel = true;
+                Logger.Log("[WindowWidget] Unerwartetes FormClosing wurde blockiert.");
+                return;
+            }
+
             this._closing = true;
             this.UpdateTimer.Stop();
+            Logger.MessageLogged -= this.HandleLoggerMessageLogged;
+
+            if (this._debugConsoleForm != null)
+            {
+                try { this._debugConsoleForm.Close(); } catch { }
+                this._debugConsoleForm = null;
+            }
 
             try { this.Gpu?.Dispose(); } catch { }
             try { this.Gpu2?.Dispose(); } catch { }
 
             base.OnFormClosing(e);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WmSysCommand)
+            {
+                long command = m.WParam.ToInt64() & 0xFFF0;
+                if (command == ScClose)
+                {
+                    this._explicitWidgetCloseRequested = true;
+                }
+            }
+
+            base.WndProc(ref m);
         }
 
         private void toolStripTextBox_interval_Leave(object? sender, EventArgs e)
@@ -1039,24 +1133,31 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             double averageLoadPercent = usages.Length > 0 ? usages.Average() * 100d : 0d;
-            CpuStats.CpuTelemetrySnapshot telemetry = CpuStats.GetCpuTelemetrySnapshot();
 
-            List<string> parts = new List<string>
-            {
-                $"{averageLoadPercent:0.00}%"
-            };
+            // No thermal or wattage getting here, since it always fails and causes frequent Exceptions, just set avg. load to label
+            this.label_avgCpuLoadAndTemperature.Text = averageLoadPercent.ToString("0.000") + "%";
+            return;
 
-            if (telemetry.AverageTemperatureCelsius.HasValue)
-            {
-                parts.Add($"{telemetry.AverageTemperatureCelsius.Value:0.0} °C");
-            }
 
-            if (telemetry.PackagePowerWatts.HasValue)
-            {
-                parts.Add($"{telemetry.PackagePowerWatts.Value:0.0} W");
-            }
+            // NON-EFFECTIVE CODE (CUT-OFF, NEVER REACHED (for a reason (!)))
+            //CpuStats.CpuTelemetrySnapshot telemetry = CpuStats.GetCpuTelemetrySnapshot();
 
-            this.label_avgCpuLoadAndTemperature.Text = string.Join(" | ", parts);
+            //List<string> parts = new()
+            //{
+            //    $"{averageLoadPercent:0.00}%"
+            //};
+
+            //if (telemetry.AverageTemperatureCelsius.HasValue)
+            //{
+            //    parts.Add($"{telemetry.AverageTemperatureCelsius.Value:0.0} °C");
+            //}
+
+            //if (telemetry.PackagePowerWatts.HasValue)
+            //{
+            //    parts.Add($"{telemetry.PackagePowerWatts.Value:0.0} W");
+            //}
+
+            //this.label_avgCpuLoadAndTemperature.Text = string.Join(" | ", parts);
         }
 
 
@@ -1081,7 +1182,7 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
-            List<string> lines = new List<string>(3);
+            List<string> lines = new(3);
             for (int index = 0; index < 3; index++)
             {
                 if (index < topTasks.Count)
@@ -1203,7 +1304,7 @@ namespace FormsSystemStatsWidget.Forms
         private void toolStripTextBox_diagramColor_DoubleClick(object sender, EventArgs e)
         {
             // Color picker dialog
-            using (ColorDialog colorDialog = new ColorDialog())
+            using (ColorDialog colorDialog = new())
             {
                 colorDialog.AllowFullOpen = true;
                 colorDialog.AnyColor = true;
@@ -1220,7 +1321,7 @@ namespace FormsSystemStatsWidget.Forms
         private void toolStripTextBox_percentageColor_DoubleClick(object sender, EventArgs e)
         {
             // Color picker dialog
-            using (ColorDialog colorDialog = new ColorDialog())
+            using (ColorDialog colorDialog = new())
             {
                 colorDialog.AllowFullOpen = true;
                 colorDialog.AnyColor = true;
@@ -1427,7 +1528,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             try
             {
-                DriveInfo driveInfo = new DriveInfo(drive.RootPath);
+                DriveInfo driveInfo = new(drive.RootPath);
                 const long reservedBytes = 512L * 1024L * 1024L;
                 long safeBytes = Math.Max(512L * 1024L * 1024L, driveInfo.AvailableFreeSpace - reservedBytes);
                 int maxAllowedMb = (int) Math.Clamp(safeBytes / (1024L * 1024L), 512L, 65_536L);
@@ -1470,7 +1571,7 @@ namespace FormsSystemStatsWidget.Forms
             bool hasSecondGpu = this.Gpu2 != null;
             DateTimeOffset recordingStartedAt = DateTimeOffset.Now;
             DateTimeOffset previousSampleTimestamp = recordingStartedAt;
-            List<string> csvLines = new List<string>();
+            List<string> csvLines = new();
             long currentFileBytes = 0;
             int sampleCount = 0;
             double cpuLoadSum = 0d;
@@ -1687,7 +1788,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private static List<string> BuildRecordingSummaryLines(RecordingSummary summary)
         {
-            List<string> lines = new List<string>
+            List<string> lines = new()
             {
                 "==========",
                 "Metric;Value",
@@ -1727,7 +1828,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private static string BuildRecordingHeader(bool hasSecondGpu)
         {
-            List<string> columns = new List<string>
+            List<string> columns = new()
             {
                 "Timestamp",
                 "CPU Usage (%)",
@@ -1829,7 +1930,7 @@ namespace FormsSystemStatsWidget.Forms
             double gpuAverageLoadPercent = hasSecondGpu ? (gpu1UsagePercent + gpu2UsagePercent) / 2d : gpu1UsagePercent;
 
             IReadOnlyList<(string processName, double cpuPercent)> topTasks = topTasksTask.Result;
-            List<string> values = new List<string>
+            List<string> values = new()
             {
                 timestamp.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
                 FormatRecordingNumber(cpuUsagePercent),
@@ -2015,28 +2116,206 @@ namespace FormsSystemStatsWidget.Forms
 
         private void openDebugConsoleToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (NativeMethods.GetConsoleWindow() == IntPtr.Zero)
+            if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
             {
-                NativeMethods.AllocConsole();
-                Console.WriteLine("Console opened.");
+                this._debugConsoleForm = new DebugConsoleForm();
+                this._debugConsoleForm.FormClosed += (_, _) => this._debugConsoleForm = null;
+
+                Point openPosition = new(this.Left + this.Width + 8, this.Top);
+                this._debugConsoleForm.Location = openPosition;
+                this._debugConsoleForm.Show();
+
+                this._debugConsoleForm.ClearLogs();
+                string[] recentEntries = Logger.GetRecentEntries();
+                foreach (string recentEntry in recentEntries)
+                {
+                    this._debugConsoleForm.AppendLogLine(recentEntry);
+                }
+
+                this._debugConsoleForm.AppendLogLine("Debug-Console opened. (Formatted Logging: " + LlamaOllamaBridge.EnableFormattedLogging + ", Raw Chunk Logging: " + LlamaOllamaBridge.EnableRawChunkLogging + ", Log Generation Speed: " + this.toolStripMenuItem_logGenerationSpeed.Checked + ")");
             }
             else
             {
-                NativeMethods.FreeConsole();
+                this._debugConsoleForm.Close();
+                this._debugConsoleForm = null;
             }
         }
-    }
 
-    internal static class NativeMethods
-    {
-        [DllImport("kernel32.dll")]
-        public static extern bool AllocConsole();
+        private void toolStripMenuItem_visuallyFormatLog_Click(object sender, EventArgs e)
+        {
+            LlamaOllamaBridge.EnableFormattedLogging = this.toolStripMenuItem_visuallyFormatLog.Checked;
+        }
 
-        [DllImport("kernel32.dll")]
-        public static extern bool FreeConsole();
+        private void toolStripMenuItem_includeRawChunksLog_Click(object sender, EventArgs e)
+        {
+            LlamaOllamaBridge.EnableRawChunkLogging = this.toolStripMenuItem_includeRawChunksLog.Checked;
+        }
 
-        [DllImport("kernel32.dll")]
-        public static extern IntPtr GetConsoleWindow();
+        private void toolStripTextBox_modelsDirectory_Leave(object sender, EventArgs e)
+        {
+            // Validate the path and update the setting if it's a valid directory
+            string path = this.toolStripTextBox_modelsDirectory.Text.Trim();
+            if (Directory.Exists(path))
+            {
+                LlamaCppModelLoader.GgufModelsDirectory = Path.GetFullPath(path);
+            }
+            else
+            {
+                MessageBox.Show(this, "The specified directory does not exist. Please enter a valid path.", "Invalid Directory", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_modelsDirectory.Text = LlamaCppModelLoader.GgufModelsDirectory;
+            }
+        }
+
+
+        // Load llama-server.exe GGUF model
+        private void toolStripMenuItem_loadLlamaCppServer_Click(object sender, EventArgs e)
+        {
+            string? selectedModel = this.toolStripComboBox_ggufModels.SelectedItem as string;
+            if (selectedModel == null)
+            {
+                MessageBox.Show(this, "No model selected. Please select a model from the dropdown list.", "No Model Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!File.Exists(selectedModel))
+            {
+                // Try to find the model file name with or without extension in the specified models directory
+                selectedModel = LlamaCppModelLoader.ModelFilePaths.FirstOrDefault(path => path.Contains(selectedModel, StringComparison.OrdinalIgnoreCase));
+                if (!File.Exists(selectedModel))
+                {
+                    MessageBox.Show(this, $"The selected model file does not exist:\n{selectedModel}", "Model File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+            }
+
+            string? mmprojFilePath = this.toolStripMenuItem_loadMmproj.Checked ? LlamaCppModelLoader.GetModelMmprojFilePath(selectedModel) : null;
+
+            int contextSize = this.toolStripTextBox_contextSize.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_contextSize.Text.Trim(), out int parsedContextSize) ? parsedContextSize : 8192;
+            int batchSize = this.toolStripTextBox_batchSize.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_batchSize.Text.Trim(), out int parsedBatchSize) ? parsedBatchSize : 1024;
+            string splitMode = this.toolStripComboBox_splitMode.SelectedItem as string ?? "none";
+            // Parse tensor split configuration from x, y, z, ... format into int[] (if mode is none => [])
+            int[] tensorSplit = splitMode != "none" && this.toolStripTextBox_tensorSplit.Text.Trim() != "" ? this.toolStripTextBox_tensorSplit.Text.Trim().Split(',').Select(s => int.TryParse(s.Trim(), out int value) ? value : 0).Where(v => v > 0).ToArray() : [];
+            bool flashAttention = this.toolStripMenuItem_flashAttention.Checked;
+            int gpuLayersCount = this.toolStripTextBox_gpuLayersCount.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_gpuLayersCount.Text.Trim(), out int parsedGpuLayerCount) ? parsedGpuLayerCount : 0;
+            int numParallelSlots = this.toolStripTextBox_numberParallelSlots.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_numberParallelSlots.Text.Trim(), out int parsedParallelSlots) ? parsedParallelSlots : 1;
+            bool noWarmup = this.toolStripMenuItem_noWarmup.Checked;
+            bool KvOffload = this.KVoffload_ToolStripMenuItem.Checked;
+            bool fitMode = this.toolStripMenuItem_fitMode.Checked;
+
+            // Aggregate CMD call
+            var sb = new StringBuilder();
+            sb.Append($"llama-server ");
+            sb.Append($"-m \"{selectedModel}\" ");
+            if (mmprojFilePath != null)
+            {
+                sb.Append($"--mmproj \"{mmprojFilePath}\" ");
+            }
+            sb.Append($"-c {contextSize} ");
+            sb.Append($"-b {batchSize} ");
+            if (splitMode != "none")
+            {
+                sb.Append($"-sm {splitMode} ");
+                if (tensorSplit.Length > 0)
+                {
+                    sb.Append($"-ts {string.Join(",", tensorSplit)} ");
+                }
+            }
+            sb.Append("-fa " + (flashAttention ? "on " : "off "));
+            sb.Append("-ngl " + gpuLayersCount + " ");
+            sb.Append("-np " + numParallelSlots + " ");
+            if (noWarmup)
+            {
+                sb.Append("--no-warmup ");
+            }
+            if (KvOffload)
+            {
+                sb.Append("--kv-offload ");
+            }
+            else
+            {
+                sb.Append("--no-kv-offload ");
+            }
+            sb.Append("-fit " + (fitMode ? "on " : "off "));
+
+            // Get multiline string, split at every arg (starting with " -" or " --")
+            string command = sb.ToString().Trim();
+            command = ArgsSplitRegex().Replace(command, Environment.NewLine + " ");
+
+            // Show the aggregated command in a MessageBox for confirmation
+            DialogResult result = MessageBox.Show(this, $"The following command will be executed to start llama-server with the selected model and options:\n\n{command}\n\nDo you want to proceed?", "Confirm Command", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (result == DialogResult.Yes)
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "cmd.exe",
+                        Arguments = $"/c {sb}",
+                        UseShellExecute = true,
+                        CreateNoWindow = false,
+                        WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+                    });
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(this, $"Failed to start llama-server with the selected model. Error: {ex.Message}", "Error Starting Server", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void toolStripComboBox_splitMode_SelectedChanged(object sender, EventArgs e)
+        {
+            string? selectedSplitMode = this.toolStripComboBox_splitMode.SelectedItem as string;
+            if (selectedSplitMode == null || selectedSplitMode == "none")
+            {
+                this.toolStripMenuItem_tensorSplit.Enabled = false;
+                this.toolStripTextBox_tensorSplit.Enabled = false;
+                this.toolStripTextBox_tensorSplit.Text = "";
+            }
+            else
+            {
+                this.toolStripMenuItem_tensorSplit.Enabled = true;
+                this.toolStripTextBox_tensorSplit.Enabled = true;
+
+                // Get GPUs VRAM capacities in int rounded GB, set default tensor split config to gpu1_vram, gpu2_vram, ...
+                long gpu1VramGb = this.Gpu != null ? (long) Math.Round(this.Gpu.GetTotalVramBytes() / 1_073_741_824.0) : 0;
+                long gpu2VramGb = this.Gpu2 != null ? (long) Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0) : 0;
+                if (gpu1VramGb > 0 && gpu2VramGb > 0)
+                {
+                    this.toolStripTextBox_tensorSplit.Text = $"{gpu1VramGb},{gpu2VramGb}";
+                }
+                else
+                {
+                    this.toolStripTextBox_tensorSplit.Text = "";
+                }
+            }
+        }
+
+        private void toolStripComboBox_ggufModels_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            string? selectedModel = this.toolStripComboBox_ggufModels.SelectedItem as string;
+            if (selectedModel == null)
+            {
+                return;
+            }
+
+            string? mmprojPath = LlamaCppModelLoader.GetModelMmprojFilePath(selectedModel);
+            this.toolStripMenuItem_loadMmproj.Enabled = mmprojPath != null;
+            if (!this.toolStripMenuItem_loadMmproj.Enabled || mmprojPath == null)
+            {
+                this.toolStripMenuItem_loadMmproj.Text = "No MMProj available.";
+                this.toolStripMenuItem_loadMmproj.Checked = false;
+            }
+            else
+            {
+                float mmprojSizeMb = new FileInfo(mmprojPath).Length / 1_048_576f;
+                this.toolStripMenuItem_loadMmproj.Text = $"Try load MMProj (+ {mmprojSizeMb:F2} MB)";
+                this.toolStripMenuItem_loadMmproj.Checked = true;
+            }
+        }
+
+        [GeneratedRegex(@" (?=-)")]
+        private static partial Regex ArgsSplitRegex();
     }
 }
 

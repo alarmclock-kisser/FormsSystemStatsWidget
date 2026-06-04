@@ -20,12 +20,17 @@ namespace FormsSystemStatsWidget.Core
         private static string _detectedModelName = "local-llama-model";
         private static string _quantizationLevel = "unknown";
         private static string _parameterSize = "unknown";
+        private static string _modelFamily = "llama";
+
+        // Logging settings
+        public static bool EnableFormattedLogging = true;
+        public static bool EnableRawChunkLogging = true;
 
         // Dynamische Fallbacks, falls der /props-Endpunkt unerwartet fehlschlägt
         private static int _detectedNumCtx = 4096;
         private static double _detectedTemperature = 0.7;
 
-        private static readonly HttpClient _httpClient = new HttpClient();
+        private static readonly HttpClient _httpClient = new();
 
         /// <summary>
         /// Prüft die Erreichbarkeit von llama-server, liest die Modellkonfiguration aus 
@@ -54,9 +59,10 @@ namespace FormsSystemStatsWidget.Core
                         _detectedModelName = modelId;
                         _quantizationLevel = ExtractQuantization(modelId);
                         _parameterSize = ExtractParameterSize(modelId);
+                        _modelFamily = ExtractModelFamily(modelId);
 
                         Logger.Log($"[LlamaBridge] Model detected: {_detectedModelName}");
-                        Logger.Log($"[LlamaBridge] Parser result: Size={_parameterSize}, Quant={_quantizationLevel}");
+                        Logger.Log($"[LlamaBridge] Parser result: Family={_modelFamily}, Size={_parameterSize}, Quant={_quantizationLevel}");
                     }
                 }
                 else
@@ -155,7 +161,7 @@ namespace FormsSystemStatsWidget.Core
                     // Read incoming stream to pass it through the sanitize filter
                     using var reader = new StreamReader(request.InputStream);
                     var requestBody = await reader.ReadToEndAsync();
-                    string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody);
+                    string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily);
 
                     Logger.Log("========================================");
                     Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
@@ -291,8 +297,8 @@ namespace FormsSystemStatsWidget.Core
                                 details = new {
                                     parent_model = "",
                                     format = "gguf",
-                                    family = "llama",
-                                    families = new[] { "llama" },
+                                    family = _modelFamily,
+                                    families = new[] { _modelFamily },
                                     parameter_size = _parameterSize,
                                     quantization_level = _quantizationLevel
                                 }
@@ -318,8 +324,8 @@ namespace FormsSystemStatsWidget.Core
                                 details = new {
                                     parent_model = "",
                                     format = "gguf",
-                                    family = "llama",
-                                    families = new[] { "llama" },
+                                    family = _modelFamily,
+                                    families = new[] { _modelFamily },
                                     parameter_size = _parameterSize,
                                     quantization_level = _quantizationLevel
                                 }
@@ -344,8 +350,8 @@ namespace FormsSystemStatsWidget.Core
                         {
                             parent_model = "",
                             format = "gguf",
-                            family = "llama",
-                            families = new[] { "llama" },
+                            family = _modelFamily,
+                            families = new[] { _modelFamily },
                             parameter_size = _parameterSize,
                             quantization_level = _quantizationLevel
                         },
@@ -408,7 +414,90 @@ namespace FormsSystemStatsWidget.Core
             }
 
             var match = Regex.Match(modelName, @"(?i)\b(\d+(?:\.\d+)?[BM])\b");
+            if (!match.Success)
+            {
+                // Resolve the A<n>B Param sizes (qwen3.5+ / gemma-4 etc latest models dense sizes) switch case
+                string denseSize = "unknown";
+                var denseMatch = Regex.Match(modelName, @"(?i)\bA(\d+)B\b");
+                if (!match.Success)
+                {
+                    denseSize = "unknown";
+
+                }
+                else
+                {
+                    string numPart = denseMatch.Groups[1].Value;
+                    if (int.TryParse(numPart, out int numValue))
+                    {
+                        if (numValue >= 1000)
+                        {
+                            denseSize = $"{numValue / 1000}B";
+                        }
+                        else
+                        {
+                            denseSize = $"{numValue}M";
+                        }
+                    }
+                }
+
+                return denseSize;
+            }
+
             return match.Success ? match.Value.ToUpper() : "unknown";
+        }
+
+        private static string ExtractModelFamily(string modelName)
+        {
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return "llama";
+            }
+
+            string normalizedModelName = modelName.Trim().ToLowerInvariant();
+
+            string[] qwenMarkers = { "qwen", "qwq" };
+            if (qwenMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
+            {
+                return "qwen";
+            }
+
+            string[] gemmaMarkers = { "gemma", "medgemma" };
+            if (gemmaMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
+            {
+                return "gemma";
+            }
+
+            string[] mistralMarkers = { "mistral", "mixtral", "ministral", "codestral", "pixtral" };
+            if (mistralMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
+            {
+                return "mistral";
+            }
+
+            string[] llamaMarkers = { "llama", "llama3", "llama-", "meta-llama", "codellama" };
+            if (llamaMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
+            {
+                return "llama";
+            }
+
+            string[] deepSeekMarkers = { "deepseek" };
+            if (deepSeekMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
+            {
+                return "deepseek";
+            }
+
+            string[] phiMarkers = { "phi" };
+            if (phiMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
+            {
+                return "phi";
+            }
+
+            string[] commandRMarkers = { "command-r", "commandr", "aya", "cohere" };
+            if (commandRMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
+            {
+                return "command-r";
+            }
+
+            return "llama";
         }
 
         public static void Stop()
@@ -427,10 +516,83 @@ namespace FormsSystemStatsWidget.Core
 
     public static class Logger
     {
+        private const int MaxBufferedLogEntries = 2048;
+        private static readonly object SyncRoot = new();
+        private static readonly Queue<string> BufferedEntries = new();
+
+        private static bool _isStreaming = false;
+        private static int _streamChunkCount = 0;
+
+        public static event Action<string>? MessageLogged;
+
         public static void Log(string text)
         {
-            Debug.WriteLine(text);
-            Console.WriteLine(text);
+            lock (SyncRoot)
+            {
+                if (!LlamaOllamaBridge.EnableRawChunkLogging)
+                {
+                    // WICHTIG: Erst prüfen, BEVOR ein Timestamp hinzugefügt wird!
+                    if (text.Contains("[RAW CHUNK]"))
+                    {
+                        _isStreaming = true;
+                        _streamChunkCount++;
+                        // Nur Konsole updaten, ohne neue Zeile (\r)
+                        Console.Write($"\r ==> Streaming Response: Received {_streamChunkCount} chunks...");
+                        return;
+                    }
+
+                    // Sobald das Streaming aufhört, packen wir die Zusammenfassung ins UI
+                    if (_isStreaming)
+                    {
+                        Console.WriteLine(); // Den \r Effekt abschließen
+                        string finalStreamLog = $"[Stream Completed] Total received chunks: {_streamChunkCount}";
+
+                        if (LlamaOllamaBridge.EnableFormattedLogging)
+                        {
+                            finalStreamLog = Environment.NewLine + DateTime.Now.ToString("HH:mm:ss.fff") + " :: " + finalStreamLog;
+                        }
+
+                        Debug.WriteLine(finalStreamLog);
+                        BufferedEntries.Enqueue(finalStreamLog);
+                        MessageLogged?.Invoke(finalStreamLog);
+
+                        _isStreaming = false;
+                        _streamChunkCount = 0;
+                    }
+
+                    if (text.Contains("\"role\":"))
+                    {
+                        int estimatedTokens = text.Length / 4;
+                        string type = text.Contains("\"assistant\"") ? "Response" : "Request";
+                        text = $"[Chat {type} Payload] - Summary: approx. {estimatedTokens} tokens sent/received.";
+                    }
+                }
+
+                // Standard-Logging
+                if (LlamaOllamaBridge.EnableFormattedLogging && !text.StartsWith(Environment.NewLine))
+                {
+                    text = Environment.NewLine + DateTime.Now.ToString("HH:mm:ss.fff") + " :: " + text;
+                }
+
+                Debug.WriteLine(text);
+                Console.WriteLine(text);
+
+                BufferedEntries.Enqueue(text);
+                while (BufferedEntries.Count > MaxBufferedLogEntries)
+                {
+                    BufferedEntries.Dequeue();
+                }
+
+                MessageLogged?.Invoke(text);
+            }
+        }
+
+        public static string[] GetRecentEntries()
+        {
+            lock (SyncRoot)
+            {
+                return BufferedEntries.ToArray();
+            }
         }
     }
 }
