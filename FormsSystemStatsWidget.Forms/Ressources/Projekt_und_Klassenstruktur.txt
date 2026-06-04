@@ -1,0 +1,212 @@
+================================================================================
+		   PROJEKT- UND KLASSENSTRUKTUR - FORMS SYSTEM STATS WIDGET
+================================================================================
+
+--------------------------------------------------------------------------------
+PROJEKTE
+--------------------------------------------------------------------------------
+
+1. FormsSystemStatsWidget.Core
+   └── FormsSystemStatsWidget.Core.csproj (.NET 10, C# 14.0)
+	   ├── Namespace: FormsSystemStatsWidget.Core
+	   │
+	   │   ├── CpuStats.cs (Static)
+	   │   │   ├── CpuTelemetrySnapshot (record)
+	   │   │   ├── GetThreadUsages() -> float[]
+	   │   │   ├── GetTopCpuProcesses() -> IReadOnlyList<(string, double)>
+	   │   │   ├── GetCpuTelemetrySnapshot() -> CpuTelemetrySnapshot
+	   │   │   ├── GetTotalMemoryBytes() -> long
+	   │   │   ├── GetUsedMemoryBytes() -> long
+	   │   │   └── RenderCoresBitmapAsync(usages, width, height, diagramColor, percentageColor, ct) -> Bitmap
+	   │
+	   ├── GpuStats.cs (Class : IDisposable)
+	   │   ├── Sample (record)
+	   │   ├── ProcessingSession (class)
+	   │   │   ├── Properties: DeviceIndex, StartedAt, EndedAt, Duration, AvgUtil01, PeakUtil01, AvgPowerWatts, PeakPowerWatts, EnergyJoules, EnergyWh, Samples
+	   │   │   └── Add(sample, maxSamples)
+	   │   ├── ProcessingSessions (public List<ProcessingSession>)
+	   │   ├── CurrentLoad01 (double, volatile read)
+	   │   ├── CurrentPowerWatts (double?)
+	   │   ├── LastSessionOrDefault() -> ProcessingSession?
+	   │   └── GpuStats(deviceIndex)
+	   │       └── WorkerLoop(ct) - Samples GPU, detects sessions with hysteresis, calculates energy
+	   │
+	   ├── LlamaOllamaBridge.cs (Static)
+	   │   ├── LlamaOllamaBridge
+	   │   │   ├── Properties: _listener, _isRunning, _detectedModelName, _quantizationLevel, _parameterSize, _detectedNumCtx, _detectedTemperature
+	   │   ├── StartAsync(llamacppPort, ollamaPort) -> Task<bool>
+	   │   │   ├── /v1/models API-Call für Modellnamen und Quantisierung
+	   │   │   ├── /props API-Call für Context und Temperatur
+	   │   │   └── HttpListener auf ollamaPort
+	   │   ├── ListenLoopAsync(llamacppPort)
+	   │   └── HandleRequestAsync(context, llamacppPort)
+	   │       ├── POST /v1/chat/completions -> Sanitize & TransformOpenAiStreamAsync
+	   │       ├── POST /api/chat -> NDJSON ↔ OpenAI ↔ OpenAI ↔ NDJSON Übersetzer
+	   │       └── GET /api/tags -> Tags-Endpoint für VS Copilot-Erkennung
+	   │
+	   ├── LlamaServerStats.cs (Static)
+	   │   ├── LlamaServerStats
+	   │   │   └── GetCurrentLlamaServerGenerationStatsAsync(llamacppPort) -> Task<float?>
+	   │   │       └── Fragt /slots ab, berechnet t/s (tokens/sec) mit Decay-Faktor
+	   │
+	   ├── LlamaStreamTransformer.cs (Static)
+	   │   ├── SanitizeIncomingRequest(jsonInput) -> string
+	   │   │   └── Entfernt: parallel_tool_calls, store, audio, refusal, reasoning_content
+	   │   ├── BuildAssistantToolCallSummary(toolCallsNode) -> string
+	   │   └── TransformOpenAiStreamAsync(upstreamStream, downstreamStream, detectedModelName) -> Task
+	   │       └── Stream-Verarbeitung:Thinking detection (</think> -> reasoning_content), JSON-Buffering für Tools
+	   │
+	   └── TrafficStats.cs (Static)
+		   ├── TrafficStats
+		   │   ├── Properties: UpBytesPerSecond, DownBytesPerSecond, TopTalker, ThresholdBytesPerSecond, ActiveProcesses
+		   ├── Init(thresholdBytesPerSec) -> void
+		   ├── Sample(intervalMs) -> void
+		   └── FormatBytesPerSecond(bytesPerSec) -> string
+
+
+2. FormsSystemStatsWidget.Forms
+   └── FormsSystemStatsWidget.Forms.csproj
+	   ├── Namespace: FormsSystemStatsWidget.Forms
+	   │
+	   │   ├── Program.cs
+	   │   │   └── Program
+	   │   │       └── Main()
+	   │   │           └── Application.Run(new WindowWidget())
+	   │
+	   │   ├── WindowWidget.cs (Form : IDisposable)
+	   │   │   ├── WindowWidget
+	   │   │   │   ├── Properties:
+	   │   │   │   │   ├── _updateIntervalMs, _diagramColor, _percentageColor, _driveTestFileSizeMb, _driveTestBlockSizeKb, _driveTestPasses, _driveTestWorkerThreads, _driveTestInProgress
+	   │   │   │   │   ├── UpdateTimer (Timer)
+	   │   │   │   │   ├── Gpu (GpuStats)
+	   │   │   │   │   ├── Gpu2 (GpuStats?)
+	   │   │   │   │   ├── _closing, _tickInProgress, _recordingCancellationTokenSource, _recordingTask
+	   │   │   │   │   ├── _cachedTopTasks, _lastTopTasksSampleUtc, _lastTickDiagnosticsUtc
+	   │   │   │   │   └── DriveSelection (nested record)
+	   │   │   ├── Constructors:
+	   │   │   │   └── WindowWidget()
+	   │   │   │       ├── UpdateTimer setup
+	   │   │   │       ├── Gpu/Gpu2 initialisation
+	   │   │   │       ├── TrafficStats.Init()
+	   │   │   │       ├── PopulateDriveSelections()
+	   │   │   │       └── ApplyDriveSpeedTestSettingTexts()
+	   │   │   ├── Layout:
+	   │   │   │   └── ApplyGpuLayout()
+	   │   │   ├── Drive-Speed-Test:
+	   │   │   │   ├── PopulateDriveSelections()
+	   │   │   │   ├── ApplyDriveSpeedTestSettingTexts()
+	   │   │   │   ├── UpdateDriveSpeedTestDropDownWidths()
+	   │   │   │   ├── ApplyDriveTestFileSizeFromText()
+	   │   │   │   ├── ApplyDriveTestBlockSizeFromText()
+	   │   │   │   ├── ApplyDriveTestPassesFromText()
+	   │   │   │   ├── ApplyDriveTestWorkerThreadsFromText()
+	   │   │   │   ├── CalculateParallelTransferredBytes(totalBytes, blockSizeBytes, workerCount) -> long
+	   │   │   │   ├── FormatDuration(duration) -> string
+	   │   │   │   ├── BuildDriveTestWindowTitle(rootPath, elapsed, progressPercent) -> string
+	   │   │   │   ├── GetSafePropertyValue(source, propertyName) -> string
+	   │   │   │   ├── FormatBytesToGiB(bytes) -> string
+	   │   │   │   ├── BuildDriveEnvironmentInfoBlock(rootPath) -> string
+	   │   │   │   ├── TrySetWindowTitleSafe(title) -> void
+	   │   │   │   ├── ResolveWritableDriveTempDirectoryAsync(rootPath, ct) -> Task<string>
+	   │   │   │   ├── RunDriveSpeedPassAsync(filePath, fileSizeBytes, blockSizeBytes, options, ct, progressCallback) -> Task<(double, double)>
+	   │   │   │   ├── RunDriveSmallRandomPassAsync(filePath, fileSizeBytes, blockSizeBytes, options, ct, progressCallback) -> Task<(double, double)>
+	   │   │   │   ├── RunDriveParallelPassAsync(tempDirectoryPath, totalBytes, blockSizeBytes, workerCount, options, ct, progressCallback) -> Task<(double, double)>
+	   │   │   │   ├── WriteWorkerFileAsync(path, fileSizeBytes, buffer, blockSizeBytes, options, ct, progressCallback) -> Task
+	   │   │   │   ├── ReadWorkerFileAsync(path, buffer, blockSizeBytes, ct, progressCallback) -> Task
+	   │   │   │   ├── RunDriveSpeedTestAndBuildReportAsync(rootPath, ct) -> Task<string>
+	   │   │   │   ├── ShowDriveSpeedReportDialog(report) -> void
+	   │   │   │   └── ApplyDriveFileSizeLimitForSelectedDrive(drive) -> void
+	   │   │   ├── Recording:
+	   │   │   │   ├── button_recordUsages_Click()
+	   │   │   │   ├── RecordUsagesToCsvAsync(filePath, ct) -> Task
+	   │   │   │   ├── BuildRecordingHeader(hasSecondGpu) -> string
+	   │   │   │   ├── BuildRecordingSampleAsync(hasSecondGpu, previousTimestamp, ct) -> Task<RecordingSample>
+	   │   │   │   ├── CompleteRecording(filePath, failure, finalSummary) -> void
+	   │   │   │   ├── BuildRecordingCompletionText(filePath, finalSummary) -> string
+	   │   │   │   ├── GetMetricsDirectoryPath() -> string
+	   │   │   │   ├── EnsureMetricsDirectory(directoryPath) -> void
+	   │   │   │   ├── GetRecordingLineByteCount(line) -> long
+	   │   │   │   ├── TrimRecordingLines(csvLines, ref currentFileBytes) -> void
+	   │   │   │   ├── RewriteRecordingFileAsync(filePath, csvLines, ct) -> Task
+	   │   │   │   ├── PruneMetricsDirectory(directoryPath, preserveFilePath) -> void
+	   │   │   │   ├── CreateRecordingSummary(startedAt, endedAt, cpuLoadSum, cpuPowerSum, cpuPowerSamples, cpuEnergyWh, gpuLoadSum, gpuPowerSum, gpuPowerSamples, gpuEnergyWh, sampleCount) -> RecordingSummary
+	   │   │   │   ├── AppendRecordingSummaryAsync(filePath, csvLines, summary, ct) -> Task
+	   │   │   │   ├── BuildRecordingSummaryLines(summary) -> List<string>
+	   │   │   │   └── FormatRecordingNullableNumber(value, format) -> string
+	   │   │   ├── UI-Updates:
+	   │   │   │   ├── Timer_Tick(sender, e) -> async void
+	   │   │   │   │   ├── CpuStats.GetThreadUsages()
+	   │   │   │   │   ├── CpuStats.GetTopCpuProcesses()
+	   │   │   │   │   ├── CpuStats.GetCpuTelemetrySnapshot()
+	   │   │   │   │   ├── Gpu.CurrentLoad01, CurrentPowerWatts, GetTotalVramBytes(), GetUsedVramBytes()
+	   │   │   │   │   ├── TrafficStats.Sample(intervalMs)
+	   │   │   │   │   ├── UpdateAverageCpuLoadAndTemperatureLabel(threads)
+	   │   │   │   │   ├── UpdateTopTasksLabel(topTasks)
+	   │   │   │   │   ├── UpdateLlamaServerGenerationSpeedAsync()
+	   │   │   │   │   ├── UpdateCpuUsageAsync(threads)
+	   │   │   │   │   ├── UpdateRamUsageAsync(ramTotalGb, ramUsedGb)
+	   │   │   │   │   ├── UpdateGpuUsageAsync(usagePercent, wattage)
+	   │   │   │   │   ├── UpdateVramUsageAsync(totalGb, usedGb)
+	   │   │   │   │   ├── UpdateTitleWithTraffic()
+	   │   │   │   │   └── LogTickDurationIfSlow(tickDuration) -> void
+	   │   │   │   ├── UpdateAverageCpuLoadAndTemperatureLabel(threads)
+	   │   │   │   ├── UpdateCpuUsageAsync(threads)
+	   │   │   │   ├── UpdateTopTasksLabel(topTasks)
+	   │   │   │   ├── UpdateRamUsageAsync(ramTotalGb, ramUsedGb)
+	   │   │   │   ├── UpdateGpuUsageAsync(usagePercent, wattage)
+	   │   │   │   └── UpdateVramUsageAsync(totalGb, usedGb)
+	   │   │   ├── Events:
+	   │   │   │   ├── toolStripComboBox_gpus_SelectedIndexChanged(sender, e)
+	   │   │   │   ├── toolStripTextBox_diagramColor_TextChanged(sender, e)
+	   │   │   │   ├── toolStripTextBox_percentageColor_TextChanged(sender, e)
+	   │   │   │   ├── toolStripTextBox_percentageColor_EnabledChanged(sender, e)
+	   │   │   │   ├── toolStripTextBox_diagramColor_DoubleClick(sender, e)
+	   │   │   │   ├── toolStripTextBox_percentageColor_DoubleClick(sender, e)
+	   │   │   │   ├── alwaysOnTopToolStripMenuItem_CheckedChanged(sender, e)
+	   │   │   │   ├── toolStripTextBox_threshold_TextChanged(sender, e)
+	   │   │   │   ├── driveSpeedTestToolStripMenuItem_DropDownOpening(sender, e)
+	   │   │   │   ├── toolStripComboBox_drives_SelectedIndexChanged(sender, e)
+	   │   │   │   ├── driveSpeedTestToolStripMenuItem_Click(sender, e)
+	   │   │   │   ├── toolStripTextBox_testFileSizeMb_Leave(sender, e)
+	   │   │   │   ├── toolStripTextBox_testFileSizeMb_KeyDown(sender, e)
+	   │   │   │   ├── toolStripTextBox_testBlockSizeKb_Leave(sender, e)
+	   │   │   │   ├── toolStripTextBox_testBlockSizeKb_KeyDown(sender, e)
+	   │   │   │   ├── toolStripTextBox_testPasses_Leave(sender, e)
+	   │   │   │   ├── toolStripTextBox_testPasses_KeyDown(sender, e)
+	   │   │   │   ├── toolStripTextBox_testThreads_Leave(sender, e)
+	   │   │   │   ├── toolStripTextBox_testThreads_KeyDown(sender, e)
+	   │   │   │   ├── button_recordUsages_Click(sender, e)
+	   │   │   │   └── rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged(sender, e)
+	   │   │   ├── Lifecycle:
+	   │   │   │   └── OnFormClosing(e)
+	   │   │   └── Helpers:
+	   │   │       ├── Ellipsize(text, maxLen) -> string
+	   │   │       ├── ApplyIntervalFromText()
+	   │   │       ├── GetTopTaskName(topTasks, index) -> string
+	   │   │       ├── GetTopTaskPercent(topTasks, index) -> string
+	   │   │       ├── FormatRecordingNumber(value, format) -> string
+	   │   │       └── EscapeCsvValue(value) -> string
+	   │
+	   │   └── WindowWidget.Designer.cs (Generated)
+	   │
+	   └── Ressources/
+		   ├── FSS_Widget.favicon.ico
+		   └── FSS_Widget.favicon.png
+
+
+--------------------------------------------------------------------------------
+ZUSÄTZLICHE INFORMATIONEN
+--------------------------------------------------------------------------------
+
+Projektstruktur:
+- Core-Projekt: Enthält die Business-Logik und Services (CpuStats, GpuStats,
+  LlamaOllamaBridge, LlamaServerStats, LlamaStreamTransformer, TrafficStats)
+- Forms-Projekt: Enthält die Windows-Form-UI (WindowWidget) mit Live-Monitoring,
+  Drive-Speed-Test und Systemdaten-Aufzeichnung
+
+Technologien:
+- .NET 10
+- C# 14.0
+- Windows Forms
+
+================================================================================

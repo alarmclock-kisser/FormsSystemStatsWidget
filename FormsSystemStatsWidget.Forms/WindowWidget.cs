@@ -847,7 +847,7 @@ namespace FormsSystemStatsWidget.Forms
                 return text.Substring(0, maxLen);
             }
 
-            return text.Substring(0, maxLen - 3) + "...";
+            return string.Concat(text.AsSpan(0, maxLen - 3), "...");
         }
 
         private async void Timer_Tick(object? sender, EventArgs e)
@@ -901,6 +901,7 @@ namespace FormsSystemStatsWidget.Forms
 
                 this.UpdateAverageCpuLoadAndTemperatureLabel(threads);
                 this.UpdateTopTasksLabel(topTasks);
+                await this.UpdateLlamaServerGenerationSpeedAsync();
 
                 await Task.WhenAll(
                     this.UpdateCpuUsageAsync(threads),
@@ -921,6 +922,33 @@ namespace FormsSystemStatsWidget.Forms
             finally
             {
                 Interlocked.Exchange(ref this._tickInProgress, 0);
+            }
+        }
+
+        private async Task UpdateLlamaServerGenerationSpeedAsync()
+        {
+            if (!this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked || !this.showTokenssToolStripMenuItem.Checked)
+            {
+                return;
+            }
+            float genSpeed = await LlamaServerStats.GetCurrentLlamaServerGenerationStatsAsync() ?? 0f;
+            if (genSpeed > 0)
+            {
+                // Invoke on UI thread to update the label
+                if (this.InvokeRequired)
+                {
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        if (!this.IsDisposed && !this.Disposing)
+                        {
+                            this.label_routingPortsInfo.Text = this.label_routingPortsInfo.Text + $"\n {genSpeed:0.000} tokens/s";
+                        }
+                    }));
+                }
+                else
+                {
+                    this.label_routingPortsInfo.Text = this.label_routingPortsInfo.Text + $"\n {genSpeed:0.000} tokens/s";
+                }
             }
         }
 
@@ -1945,13 +1973,20 @@ namespace FormsSystemStatsWidget.Forms
             if (menuItem.Checked)
             {
                 int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;
+                this.toolStripTextBox_llamacppPort.Text = llamaPort.ToString();
                 int ollamaPort = int.TryParse(this.toolStripTextBox_ollamaPort.Text.Trim(), out int parsedOllamaPort) ? parsedOllamaPort : 11434;
+                this.toolStripTextBox_ollamaPort.Text = ollamaPort.ToString();
 
                 bool isStarted = await LlamaOllamaBridge.StartAsync(llamaPort, ollamaPort);
 
+                // Jetzt ContextMenu wieder einklappen / schließen
+                this.ContextMenuStrip?.Close();
+
                 if (isStarted)
                 {
-                    MessageBox.Show($"Success! Proxy routes localhost:{llamaPort} to localhost:{ollamaPort}.", "API Bridge Active", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    this.label_routingPortsInfo.Text = $"Port {llamaPort} to {ollamaPort}";
+                    this.label_routingPortsInfo.ForeColor = Color.DarkGreen;
+                    this.label_routingPortsInfo.Visible = true;
                 }
                 else
                 {
@@ -1959,16 +1994,49 @@ namespace FormsSystemStatsWidget.Forms
                     menuItem.Checked = false;
                     menuItem.CheckedChanged += this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
 
+                    this.label_routingPortsInfo.Text = $"Port {llamaPort} to {ollamaPort} failed";
+                    this.label_routingPortsInfo.ForeColor = Color.Red;
+                    this.label_routingPortsInfo.Visible = true;
+
                     MessageBox.Show($"Connection to llama-server (Port {llamaPort}) failed or Port {ollamaPort} is blocked!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else
             {
                 LlamaOllamaBridge.Stop(); // Keine asynchrone Task mehr nötig beim Stoppen
+
+                this.label_routingPortsInfo.Text = "Port ----- to -----";
+                this.label_routingPortsInfo.ForeColor = Color.Black;
+                this.label_routingPortsInfo.Visible = false;
             }
 
             menuItem.Enabled = true;
         }
+
+        private void openDebugConsoleToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (NativeMethods.GetConsoleWindow() == IntPtr.Zero)
+            {
+                NativeMethods.AllocConsole();
+                Console.WriteLine("Console opened.");
+            }
+            else
+            {
+                NativeMethods.FreeConsole();
+            }
+        }
+    }
+
+    internal static class NativeMethods
+    {
+        [DllImport("kernel32.dll")]
+        public static extern bool AllocConsole();
+
+        [DllImport("kernel32.dll")]
+        public static extern bool FreeConsole();
+
+        [DllImport("kernel32.dll")]
+        public static extern IntPtr GetConsoleWindow();
     }
 }
 

@@ -58,6 +58,11 @@
             this.writeThroughToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripSeparator1 = new ToolStripSeparator();
             this.rerouteAPILlamacppOllamaToolStripMenuItem = new ToolStripMenuItem();
+            this.llamacppPortToolStripMenuItem = new ToolStripMenuItem();
+            this.toolStripTextBox_llamacppPort = new ToolStripTextBox();
+            this.ollamaPortToolStripMenuItem = new ToolStripMenuItem();
+            this.toolStripTextBox_ollamaPort = new ToolStripTextBox();
+            this.showTokenssToolStripMenuItem = new ToolStripMenuItem();
             this.label_vram = new Label();
             this.progressBar_vram = new ProgressBar();
             this.label_wattage = new Label();
@@ -69,10 +74,9 @@
             this.label_avgCpuLoadAndTemperature = new Label();
             this.label_topTasksList = new Label();
             this.button_recordUsages = new Button();
-            this.llamacppPortToolStripMenuItem = new ToolStripMenuItem();
-            this.ollamaPortToolStripMenuItem = new ToolStripMenuItem();
-            this.toolStripTextBox_llamacppPort = new ToolStripTextBox();
-            this.toolStripTextBox_ollamaPort = new ToolStripTextBox();
+            this.label_routingPortsInfo = new Label();
+            this.toolStripSeparator2 = new ToolStripSeparator();
+            this.openDebugConsoleToolStripMenuItem = new ToolStripMenuItem();
             ((System.ComponentModel.ISupportInitialize) this.pictureBox_cpu).BeginInit();
             this.contextMenuStrip_widget.SuspendLayout();
             this.SuspendLayout();
@@ -107,9 +111,9 @@
             // 
             // contextMenuStrip_widget
             // 
-            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.selectGPUToolStripMenuItem, this.diagramColorToolStripMenuItem, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.rerouteAPILlamacppOllamaToolStripMenuItem });
+            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.selectGPUToolStripMenuItem, this.diagramColorToolStripMenuItem, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.showTokenssToolStripMenuItem, this.toolStripSeparator2, this.openDebugConsoleToolStripMenuItem });
             this.contextMenuStrip_widget.Name = "contextMenuStrip_widget";
-            this.contextMenuStrip_widget.Size = new Size(254, 208);
+            this.contextMenuStrip_widget.Size = new Size(254, 258);
             this.contextMenuStrip_widget.Text = "Settings";
             // 
             // updateIntervalToolStripMenuItem
@@ -303,6 +307,39 @@
             this.rerouteAPILlamacppOllamaToolStripMenuItem.Text = "Re-route API llama.cpp -> Ollama";
             this.rerouteAPILlamacppOllamaToolStripMenuItem.CheckedChanged += this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
             // 
+            // llamacppPortToolStripMenuItem
+            // 
+            this.llamacppPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_llamacppPort });
+            this.llamacppPortToolStripMenuItem.Name = "llamacppPortToolStripMenuItem";
+            this.llamacppPortToolStripMenuItem.Size = new Size(151, 22);
+            this.llamacppPortToolStripMenuItem.Text = "llama.cpp Port";
+            // 
+            // toolStripTextBox_llamacppPort
+            // 
+            this.toolStripTextBox_llamacppPort.Name = "toolStripTextBox_llamacppPort";
+            this.toolStripTextBox_llamacppPort.Size = new Size(100, 23);
+            this.toolStripTextBox_llamacppPort.Text = "8080";
+            // 
+            // ollamaPortToolStripMenuItem
+            // 
+            this.ollamaPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_ollamaPort });
+            this.ollamaPortToolStripMenuItem.Name = "ollamaPortToolStripMenuItem";
+            this.ollamaPortToolStripMenuItem.Size = new Size(151, 22);
+            this.ollamaPortToolStripMenuItem.Text = "Ollama Port";
+            // 
+            // toolStripTextBox_ollamaPort
+            // 
+            this.toolStripTextBox_ollamaPort.Name = "toolStripTextBox_ollamaPort";
+            this.toolStripTextBox_ollamaPort.Size = new Size(100, 23);
+            this.toolStripTextBox_ollamaPort.Text = "11434";
+            // 
+            // showTokenssToolStripMenuItem
+            // 
+            this.showTokenssToolStripMenuItem.CheckOnClick = true;
+            this.showTokenssToolStripMenuItem.Name = "showTokenssToolStripMenuItem";
+            this.showTokenssToolStripMenuItem.Size = new Size(253, 22);
+            this.showTokenssToolStripMenuItem.Text = "Show tokens/s";
+            // 
             // label_vram
             // 
             this.label_vram.AutoSize = true;
@@ -409,31 +446,28 @@
             this.button_recordUsages.UseVisualStyleBackColor = true;
             this.button_recordUsages.Click += this.button_recordUsages_Click;
             // 
-            // llamacppPortToolStripMenuItem
+            // label_routingPortsInfo
             // 
-            this.llamacppPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_llamacppPort });
-            this.llamacppPortToolStripMenuItem.Name = "llamacppPortToolStripMenuItem";
-            this.llamacppPortToolStripMenuItem.Size = new Size(180, 22);
-            this.llamacppPortToolStripMenuItem.Text = "llama.cpp Port";
+            this.label_routingPortsInfo.AutoSize = true;
+            this.label_routingPortsInfo.Font = new Font("Bahnschrift Light SemiCondensed", 8.25F, FontStyle.Regular, GraphicsUnit.Point,  0);
+            this.label_routingPortsInfo.Location = new Point(22, 119);
+            this.label_routingPortsInfo.Name = "label_routingPortsInfo";
+            this.label_routingPortsInfo.Size = new Size(94, 13);
+            this.label_routingPortsInfo.TabIndex = 14;
+            this.label_routingPortsInfo.Text = "Port: ----- to -----";
+            this.label_routingPortsInfo.Visible = false;
             // 
-            // ollamaPortToolStripMenuItem
+            // toolStripSeparator2
             // 
-            this.ollamaPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_ollamaPort });
-            this.ollamaPortToolStripMenuItem.Name = "ollamaPortToolStripMenuItem";
-            this.ollamaPortToolStripMenuItem.Size = new Size(180, 22);
-            this.ollamaPortToolStripMenuItem.Text = "Ollama Port";
+            this.toolStripSeparator2.Name = "toolStripSeparator2";
+            this.toolStripSeparator2.Size = new Size(250, 6);
             // 
-            // toolStripTextBox_llamacppPort
+            // openDebugConsoleToolStripMenuItem
             // 
-            this.toolStripTextBox_llamacppPort.Name = "toolStripTextBox_llamacppPort";
-            this.toolStripTextBox_llamacppPort.Size = new Size(100, 23);
-            this.toolStripTextBox_llamacppPort.Text = "8080";
-            // 
-            // toolStripTextBox_ollamaPort
-            // 
-            this.toolStripTextBox_ollamaPort.Name = "toolStripTextBox_ollamaPort";
-            this.toolStripTextBox_ollamaPort.Size = new Size(100, 23);
-            this.toolStripTextBox_ollamaPort.Text = "11434";
+            this.openDebugConsoleToolStripMenuItem.Name = "openDebugConsoleToolStripMenuItem";
+            this.openDebugConsoleToolStripMenuItem.Size = new Size(253, 22);
+            this.openDebugConsoleToolStripMenuItem.Text = "Open Debug Console";
+            this.openDebugConsoleToolStripMenuItem.Click += this.openDebugConsoleToolStripMenuItem_Click;
             // 
             // WindowWidget
             // 
@@ -441,6 +475,7 @@
             this.AutoScaleMode = AutoScaleMode.Font;
             this.ClientSize = new Size(240, 271);
             this.ContextMenuStrip = this.contextMenuStrip_widget;
+            this.Controls.Add(this.label_routingPortsInfo);
             this.Controls.Add(this.button_recordUsages);
             this.Controls.Add(this.label_topTasksList);
             this.Controls.Add(this.label_avgCpuLoadAndTemperature);
@@ -512,5 +547,9 @@
         private ToolStripTextBox toolStripTextBox_llamacppPort;
         private ToolStripMenuItem ollamaPortToolStripMenuItem;
         private ToolStripTextBox toolStripTextBox_ollamaPort;
+        private Label label_routingPortsInfo;
+        private ToolStripMenuItem showTokenssToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator2;
+        private ToolStripMenuItem openDebugConsoleToolStripMenuItem;
     }
 }

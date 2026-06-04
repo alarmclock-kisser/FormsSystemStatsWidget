@@ -1,242 +1,436 @@
 ﻿using System;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
-public static class LlamaOllamaBridge
+namespace FormsSystemStatsWidget.Core
 {
-    private static HttpListener? _listener;
-    private static bool _isRunning;
-    private static string _detectedModelName = "local-llama-model";
-    private static readonly HttpClient _httpClient = new HttpClient();
-
-    /// <summary>
-    /// Prüft den llama-server und startet den nativen HTTP-Proxy auf dem Ollama-Port.
-    /// </summary>
-    public static async Task<bool> StartAsync(int llamacppPort = 8080, int ollamaPort = 11434)
+    public static class LlamaOllamaBridge
     {
-        // 1. Verbindungstest zu llama-server (Modellnamen auslesen)
-        try
-        {
-            _httpClient.Timeout = TimeSpan.FromSeconds(3);
-            var response = await _httpClient.GetAsync($"http://localhost:{llamacppPort}/v1/models");
+        private static HttpListener? _listener;
+        private static bool _isRunning;
+        private static string _detectedModelName = "local-llama-model";
+        private static string _quantizationLevel = "unknown";
+        private static string _parameterSize = "unknown";
 
-            if (response.IsSuccessStatusCode)
+        // Dynamische Fallbacks, falls der /props-Endpunkt unerwartet fehlschlägt
+        private static int _detectedNumCtx = 4096;
+        private static double _detectedTemperature = 0.7;
+
+        private static readonly HttpClient _httpClient = new HttpClient();
+
+        /// <summary>
+        /// Prüft die Erreichbarkeit von llama-server, liest die Modellkonfiguration aus 
+        /// und startet den nativen HTTP-Ollama-Proxy.
+        /// </summary>
+        public static async Task<bool> StartAsync(int llamacppPort = 8080, int ollamaPort = 11434)
+        {
+            Logger.Log($"[LlamaBridge] Starting Bridge: llama-server ({llamacppPort}) -> Ollama ({ollamaPort})");
+
+            // 1. Verbindungstest & detaillierte Metadaten-Abfrage zu llama-server
+            try
             {
-                var content = await response.Content.ReadAsStringAsync();
-                var json = JsonNode.Parse(content);
-                var modelId = json?["data"]?[0]?["id"]?.ToString();
-                if (!string.IsNullOrEmpty(modelId))
+                // Lokalen Token-Timer für den ersten Verbindungs-Ping erstellen
+                using var ctsModels = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
+                // A. Echten Modellnamen holen via /v1/models
+                var response = await _httpClient.GetAsync($"http://localhost:{llamacppPort}/v1/models", ctsModels.Token);
+                if (response.IsSuccessStatusCode)
                 {
-                    _detectedModelName = modelId;
+                    var content = await response.Content.ReadAsStringAsync();
+                    var json = JsonNode.Parse(content);
+                    var modelId = json?["data"]?[0]?["id"]?.ToString();
+
+                    if (!string.IsNullOrEmpty(modelId))
+                    {
+                        _detectedModelName = modelId;
+                        _quantizationLevel = ExtractQuantization(modelId);
+                        _parameterSize = ExtractParameterSize(modelId);
+
+                        Logger.Log($"[LlamaBridge] Model detected: {_detectedModelName}");
+                        Logger.Log($"[LlamaBridge] Parser result: Size={_parameterSize}, Quant={_quantizationLevel}");
+                    }
+                }
+                else
+                {
+                    Logger.Log($"[LlamaBridge] Error: /v1/models returned status {response.StatusCode}");
+                    return false;
+                }
+
+                // Create local token timer for the second props ping
+                using var ctsProps = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
+                // B. Extract context size and default temperature live from /props
+                var propsResponse = await _httpClient.GetAsync($"http://localhost:{llamacppPort}/props", ctsProps.Token);
+                if (propsResponse.IsSuccessStatusCode)
+                {
+                    var propsContent = await propsResponse.Content.ReadAsStringAsync();
+                    var propsJson = JsonNode.Parse(propsContent);
+
+                    // Path-tolerant reading of n_ctx
+                    var nCtxNode = propsJson?["default_generation_settings"]?["n_ctx"] ?? propsJson?["n_ctx"];
+                    if (nCtxNode != null && int.TryParse(nCtxNode.ToString(), out int parsedCtx))
+                    {
+                        _detectedNumCtx = parsedCtx;
+                    }
+
+                    // Path-tolerant reading of default temperature
+                    var tempNode = propsJson?["default_generation_settings"]?["temperature"]
+                                   ?? propsJson?["default_generation_settings"]?["params"]?["temperature"]
+                                   ?? propsJson?["params"]?["temperature"];
+
+                    if (tempNode != null && double.TryParse(tempNode.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out double parsedTemp))
+                    {
+                        _detectedTemperature = parsedTemp;
+                    }
+
+                    Logger.Log($"[LlamaBridge] Server-Props loaded: Context={_detectedNumCtx}, Temp={_detectedTemperature}");
                 }
             }
-            else
+            catch (Exception ex)
             {
+                Logger.Log($"[LlamaBridge] Critical connection error to llama-server: {ex.Message}");
+                return false; // llama-server is offline or unreachable
+            }
+
+            // 2. Start native HttpListener instance on the Ollama standard port
+            try
+            {
+                _listener = new HttpListener();
+                _listener.Prefixes.Add($"http://localhost:{ollamaPort}/");
+                _listener.Start();
+                _isRunning = true;
+
+                // Den Listening-Loop entkoppelt in den ThreadPool schieben
+                _ = Task.Run(() => ListenLoopAsync(llamacppPort));
+                Logger.Log("[LlamaBridge] HttpListener successfully started.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[LlamaBridge] Port {ollamaPort} blocked or listener error: {ex.Message}");
                 return false;
             }
         }
-        catch
+
+        private static async Task ListenLoopAsync(int llamacppPort)
         {
-            return false; // llama-server offline
+            while (_isRunning && _listener != null)
+            {
+                try
+                {
+                    var context = await _listener.GetContextAsync();
+                    _ = Task.Run(() => HandleRequestAsync(context, llamacppPort));
+                }
+                catch
+                {
+                    break; // Abbruch bei Stop()
+                }
+            }
         }
 
-        // 2. Native HttpListener-Instanz hochfahren
-        try
+        private static async Task HandleRequestAsync(HttpListenerContext context, int llamacppPort)
         {
-            _listener = new HttpListener();
-            _listener.Prefixes.Add($"http://localhost:{ollamaPort}/");
-            _listener.Start();
-            _isRunning = true;
+            var request = context.Request;
+            var response = context.Response;
+            var path = request.Url?.AbsolutePath ?? "";
 
-            // Den Listening-Loop in den Hintergrund schieben, um nichts zu blockieren
-            _ = Task.Run(() => ListenLoopAsync(llamacppPort));
-            return true;
-        }
-        catch
-        {
-            return false; // Port blockiert (z.B. durch echtes Ollama)
-        }
-    }
+            Logger.Log($"[LlamaBridge-Inbound] {request.HttpMethod} -> {path}");
 
-    private static async Task ListenLoopAsync(int llamacppPort)
-    {
-        while (_isRunning && _listener != null)
-        {
             try
             {
-                var context = await _listener.GetContextAsync();
-                // Jeden Request entkoppelt verarbeiten (wichtig für parallele Anfragen)
-                _ = Task.Run(() => HandleRequestAsync(context, llamacppPort));
-            }
-            catch
-            {
-                break;
-            }
-        }
-    }
-
-    private static async Task HandleRequestAsync(HttpListenerContext context, int llamacppPort)
-    {
-        var request = context.Request;
-        var response = context.Response;
-        var path = request.Url?.AbsolutePath ?? "";
-
-        try
-        {
-            // Endpunkt 1: VS Copilot fragt ab, welche Modelle da sind
-            if (request.HttpMethod == "GET" && path == "/api/tags")
-            {
-                var tagsData = new
+                // --- ENDPUNKT 1: Der moderne OpenAI-Pass-Through ---
+                if (request.HttpMethod == "POST" && path == "/v1/chat/completions")
                 {
-                    models = new[]
+                    Logger.Log("[LlamaBridge] Processing OpenAI-compatible direct stream...");
+
+                    // Read incoming stream to pass it through the sanitize filter
+                    using var reader = new StreamReader(request.InputStream);
+                    var requestBody = await reader.ReadToEndAsync();
+                    string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody);
+
+                    Logger.Log("========================================");
+                    Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
+                    Logger.Log(sanitizedBody);
+                    Logger.Log("========================================");
+
+                    var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"http://localhost:{llamacppPort}/v1/chat/completions")
                     {
-                        new {
-                            name = _detectedModelName,
-                            model = _detectedModelName,
-                            modified_at = DateTime.UtcNow,
-                            details = new { format = "gguf", family = "llama" }
-                        }
+                        Content = new StringContent(sanitizedBody, Encoding.UTF8, "application/json")
+                    };
+
+                    var upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
+
+                    response.StatusCode = (int) upstreamRes.StatusCode;
+                    response.ContentType = upstreamRes.Content.Headers.ContentType?.ToString() ?? "text/event-stream";
+                    response.SendChunked = true;
+
+                    // Stream-Verarbeitung an die spezialisierte Transformator-Klasse übergeben
+                    using (var upstreamStream = await upstreamRes.Content.ReadAsStreamAsync())
+                    {
+                        await LlamaStreamTransformer.TransformOpenAiStreamAsync(upstreamStream, response.OutputStream, _detectedModelName);
                     }
-                };
-                await SendJsonResponseAsync(response, tagsData);
-            }
-            // Endpunkt 2: Detail-Abfrage für VS Copilot
-            else if (request.HttpMethod == "POST" && path == "/api/show")
-            {
-                var showData = new { details = new { format = "gguf", family = "llama" } };
-                await SendJsonResponseAsync(response, showData);
-            }
-            // Endpunkt 3: Das eigentliche Chat-Streaming
-            else if (request.HttpMethod == "POST" && path == "/api/chat")
-            {
-                using var reader = new StreamReader(request.InputStream);
-                var body = await reader.ReadToEndAsync();
-                var ollamaReq = JsonNode.Parse(body);
 
-                // Konvertierung ins OpenAI-Format für llama-server
-                var openAiReq = new JsonObject
+                    response.OutputStream.Close();
+                    Logger.Log("[LlamaBridge] OpenAI direct stream successfully ended.");
+                    return;
+                }
+
+                // --- ENDPUNKT 2: Legacy/Alternativer Ollama Chat-Übersetzer (Falls Agent-Tools umschalten) ---
+                if (request.HttpMethod == "POST" && path == "/api/chat")
                 {
-                    ["model"] = _detectedModelName,
-                    ["messages"] = ollamaReq?["messages"]?.DeepClone(),
-                    ["stream"] = ollamaReq?["stream"] ?? true
-                };
+                    Logger.Log("[LlamaBridge] Translating NDJSON-Ollama request...");
 
-                var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"http://localhost:{llamacppPort}/v1/chat/completions")
-                {
-                    Content = new StringContent(openAiReq.ToJsonString(), Encoding.UTF8, "application/json")
-                };
+                    using var reader = new StreamReader(request.InputStream);
+                    var body = await reader.ReadToEndAsync();
+                    var ollamaReq = JsonNode.Parse(body);
 
-                var upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
-
-                response.ContentType = "application/x-javascript; charset=utf-8";
-                response.StatusCode = (int) upstreamRes.StatusCode;
-
-                // Falls VS kein Streaming verlangt (Fallback)
-                if (ollamaReq?["stream"]?.GetValue<bool>() == false)
-                {
-                    var resContent = await upstreamRes.Content.ReadAsStringAsync();
-                    var openAiRes = JsonNode.Parse(resContent);
-                    var text = openAiRes?["choices"]?[0]?["message"]?["content"]?.ToString() ?? "";
-
-                    var ollamaRes = new JsonObject
+                    var openAiReq = new JsonObject
                     {
                         ["model"] = _detectedModelName,
-                        ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = text },
-                        ["done"] = true
+                        ["messages"] = ollamaReq?["messages"]?.DeepClone(),
+                        ["stream"] = ollamaReq?["stream"] ?? true
                     };
-                    byte[] buffer = Encoding.UTF8.GetBytes(ollamaRes.ToJsonString() + "\n");
-                    await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-                }
-                // Live-Streaming Übersetzung: OpenAI SSE -> Ollama NDJSON
-                else
-                {
-                    using var responseStream = await upstreamRes.Content.ReadAsStreamAsync();
-                    using var streamReader = new StreamReader(responseStream);
-                    using var writer = new StreamWriter(response.OutputStream, new UTF8Encoding(false));
 
-                    string? line;
-                    while ((line = await streamReader.ReadLineAsync()) != null)
+                    var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"http://localhost:{llamacppPort}/v1/chat/completions")
                     {
-                        if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
-                        {
-                            continue;
-                        }
+                        Content = new StringContent(openAiReq.ToJsonString(), Encoding.UTF8, "application/json")
+                    };
 
-                        var data = line["data: ".Length..].Trim();
-                        if (data == "[DONE]")
-                        {
-                            break;
-                        }
+                    var upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
+                    response.ContentType = "application/x-javascript; charset=utf-8";
+                    response.StatusCode = (int) upstreamRes.StatusCode;
+                    response.SendChunked = true;
 
-                        try
-                        {
-                            var openAiChunk = JsonNode.Parse(data);
-                            var contentChunk = openAiChunk?["choices"]?[0]?["delta"]?["content"]?.ToString() ?? "";
+                    if (ollamaReq?["stream"]?.GetValue<bool>() == false)
+                    {
+                        var resContent = await upstreamRes.Content.ReadAsStringAsync();
+                        var openAiRes = JsonNode.Parse(resContent);
+                        var text = openAiRes?["choices"]?[0]?["message"]?["content"]?.ToString() ?? "";
 
-                            if (!string.IsNullOrEmpty(contentChunk))
+                        var ollamaRes = new JsonObject
+                        {
+                            ["model"] = _detectedModelName,
+                            ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = text },
+                            ["done"] = true
+                        };
+                        byte[] buffer = Encoding.UTF8.GetBytes(ollamaRes.ToJsonString() + "\n");
+                        await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+                    }
+                    else
+                    {
+                        using var responseStream = await upstreamRes.Content.ReadAsStreamAsync();
+                        using var streamReader = new StreamReader(responseStream);
+                        using var writer = new StreamWriter(response.OutputStream, new UTF8Encoding(false));
+
+                        string? line;
+                        while ((line = await streamReader.ReadLineAsync()) != null)
+                        {
+                            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
                             {
-                                var ollamaChunk = new JsonObject
-                                {
-                                    ["model"] = _detectedModelName,
-                                    ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = contentChunk },
-                                    ["done"] = false
-                                };
-                                await writer.WriteLineAsync(ollamaChunk.ToJsonString());
-                                await writer.FlushAsync();
+                                continue;
                             }
+
+                            var data = line["data: ".Length..].Trim();
+                            if (data == "[DONE]")
+                            {
+                                break;
+                            }
+
+                            try
+                            {
+                                var openAiChunk = JsonNode.Parse(data);
+                                var contentChunk = openAiChunk?["choices"]?[0]?["delta"]?["content"]?.ToString() ?? "";
+
+                                if (!string.IsNullOrEmpty(contentChunk))
+                                {
+                                    var ollamaChunk = new JsonObject
+                                    {
+                                        ["model"] = _detectedModelName,
+                                        ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = contentChunk },
+                                        ["done"] = false
+                                    };
+                                    await writer.WriteLineAsync(ollamaChunk.ToJsonString());
+                                    await writer.FlushAsync();
+                                }
+                            }
+                            catch { }
                         }
-                        catch { }
+
+                        var finalChunk = new JsonObject { ["model"] = _detectedModelName, ["done"] = true };
+                        await writer.WriteLineAsync(finalChunk.ToJsonString());
+                        await writer.FlushAsync();
                     }
 
-                    // Finaler Abschluss-Chunk
-                    var finalChunk = new JsonObject { ["model"] = _detectedModelName, ["done"] = true };
-                    await writer.WriteLineAsync(finalChunk.ToJsonString());
-                    await writer.FlushAsync();
+                    response.OutputStream.Close();
+                    Logger.Log("[LlamaBridge] Ollama NDJSON stream successfully ended.");
+                    return;
                 }
-                response.OutputStream.Close();
-            }
-            else
-            {
+
+                // --- ENDPOINT 3: Model Tags Manifest for VS Copilot Recognition (GET) ---
+                if (request.HttpMethod == "GET" && path == "/api/tags")
+                {
+                    var tagsData = new
+                    {
+                        models = new[]
+                        {
+                            new {
+                                name = _detectedModelName,
+                                model = _detectedModelName,
+                                modified_at = DateTime.UtcNow,
+                                size = 0,
+                                digest = "proxy_identity_digest",
+                                details = new {
+                                    parent_model = "",
+                                    format = "gguf",
+                                    family = "llama",
+                                    families = new[] { "llama" },
+                                    parameter_size = _parameterSize,
+                                    quantization_level = _quantizationLevel
+                                }
+                            }
+                        }
+                    };
+                    await SendJsonResponseAsync(response, tagsData);
+                    return;
+                }
+
+                // --- ENDPUNKT 4: Aktive VRAM-Modelle (GET) ---
+                if (request.HttpMethod == "GET" && path == "/api/ps")
+                {
+                    var psData = new
+                    {
+                        models = new[]
+                        {
+                            new {
+                                name = _detectedModelName,
+                                model = _detectedModelName,
+                                size = 0,
+                                digest = "proxy_identity_digest",
+                                details = new {
+                                    parent_model = "",
+                                    format = "gguf",
+                                    family = "llama",
+                                    families = new[] { "llama" },
+                                    parameter_size = _parameterSize,
+                                    quantization_level = _quantizationLevel
+                                }
+                            }
+                        }
+                    };
+                    await SendJsonResponseAsync(response, psData);
+                    return;
+                }
+
+                // --- ENDPUNKT 5: Detaillierte Capabilities-Injektion für das Chat-Dropdown (POST) ---
+                if (request.HttpMethod == "POST" && path == "/api/show")
+                {
+                    string tempFormatted = _detectedTemperature.ToString("G", CultureInfo.InvariantCulture);
+
+                    var showData = new
+                    {
+                        modelfile = $"FROM {_detectedModelName}\nPARAMETER temperature {tempFormatted}\nPARAMETER num_ctx {_detectedNumCtx}",
+                        parameters = $"temperature {tempFormatted}\nnum_ctx {_detectedNumCtx}",
+                        template = "{{ .System }}\n{{ .Prompt }}",
+                        details = new
+                        {
+                            parent_model = "",
+                            format = "gguf",
+                            family = "llama",
+                            families = new[] { "llama" },
+                            parameter_size = _parameterSize,
+                            quantization_level = _quantizationLevel
+                        },
+                        capabilities = new[] { "completion", "tools" }
+                    };
+                    await SendJsonResponseAsync(response, showData);
+                    return;
+                }
+
+                // --- KOSMETISCHER ENDPUNKT 6: Browser-Root-Aufruf ---
+                if (request.HttpMethod == "GET" && path == "/")
+                {
+                    var responseString = "Ollama is running (routed via LlamaOllamaBridge Widget)";
+                    byte[] buffer = Encoding.UTF8.GetBytes(responseString);
+                    response.ContentType = "text/plain; charset=utf-8";
+                    response.ContentLength64 = buffer.Length;
+                    await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+                    response.OutputStream.Close();
+                    return;
+                }
+
+                // Fallback für ungemappte Routen
+                Logger.Log($"[LlamaBridge] Unknown path rejected (404): {path}");
                 response.StatusCode = (int) HttpStatusCode.NotFound;
                 response.OutputStream.Close();
             }
-        }
-        catch
-        {
-            try { response.StatusCode = (int) HttpStatusCode.InternalServerError; response.OutputStream.Close(); } catch { }
-        }
-    }
-
-    private static async Task SendJsonResponseAsync(HttpListenerResponse response, object data)
-    {
-        var json = JsonSerializer.Serialize(data);
-        byte[] buffer = Encoding.UTF8.GetBytes(json);
-        response.ContentType = "application/json; charset=utf-8";
-        response.ContentLength64 = buffer.Length;
-        await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-        response.OutputStream.Close();
-    }
-
-    /// <summary>
-    /// Stoppt den Proxy-Server sauber.
-    /// </summary>
-    public static void Stop()
-    {
-        _isRunning = false;
-        if (_listener != null)
-        {
-            try
+            catch (Exception ex)
             {
-                _listener.Stop();
-                _listener.Close();
+                Logger.Log($"[LlamaBridge-Exception] Error processing request: {ex.Message}");
+                try { response.StatusCode = (int) HttpStatusCode.InternalServerError; response.OutputStream.Close(); } catch { }
             }
-            catch { }
-            _listener = null;
+        }
+
+        private static async Task SendJsonResponseAsync(HttpListenerResponse response, object data)
+        {
+            var json = JsonSerializer.Serialize(data);
+            byte[] buffer = Encoding.UTF8.GetBytes(json);
+            response.ContentType = "application/json; charset=utf-8";
+            response.ContentLength64 = buffer.Length;
+            await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+            response.OutputStream.Close();
+        }
+
+        private static string ExtractQuantization(string modelName)
+        {
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return "unknown";
+            }
+
+            var match = Regex.Match(modelName, @"(?i)\b(Q\d+_[K_A-Z0-9_]+|IQ\d+_[A-Z0-9_]+|Q\d+_\d+|FP16|BF16)\b");
+            return match.Success ? match.Value.ToUpper() : "unknown";
+        }
+
+        private static string ExtractParameterSize(string modelName)
+        {
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return "unknown";
+            }
+
+            var match = Regex.Match(modelName, @"(?i)\b(\d+(?:\.\d+)?[BM])\b");
+            return match.Success ? match.Value.ToUpper() : "unknown";
+        }
+
+        public static void Stop()
+        {
+            Logger.Log("[LlamaBridge] Shutting down bridge...");
+            _isRunning = false;
+            if (_listener != null)
+            {
+                try { _listener.Stop(); _listener.Close(); } catch { }
+                _listener = null;
+            }
+            Logger.Log("[LlamaBridge] Bridge successfully stopped.");
+        }
+    }
+
+
+    public static class Logger
+    {
+        public static void Log(string text)
+        {
+            Debug.WriteLine(text);
+            Console.WriteLine(text);
         }
     }
 }
