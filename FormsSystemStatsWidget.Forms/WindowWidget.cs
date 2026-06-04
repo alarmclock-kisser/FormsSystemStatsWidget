@@ -1,5 +1,4 @@
 using FormsSystemStatsWidget.Core;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Management;
@@ -2320,8 +2319,13 @@ namespace FormsSystemStatsWidget.Forms
         private static partial Regex ArgsSplitRegex();
 
 
-        private void toolStripTextBox_temperature_Validating(object sender, CancelEventArgs e)
+        private void toolStripTextBox_temperature_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
             string entered = this.toolStripTextBox_temperature.Text.Trim();
             if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float temperature) && temperature > 0)
             {
@@ -2331,13 +2335,20 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 MessageBox.Show(this, "Please enter a valid positive number for temperature.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_temperature.Text = "0.75"; // Reset auf Standard
-                e.Cancel = true; // Fokus bleibt im Control, User muss korrigieren
+                this.toolStripTextBox_temperature.Text = "0.75";
             }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
 
-        private void toolStripTextBox_repetationPenalty_Validating(object sender, System.ComponentModel.CancelEventArgs e)
+        private void toolStripTextBox_repetationPenalty_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
             string entered = this.toolStripTextBox_repetationPenalty.Text.Trim();
             if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float penalty) && penalty > 0)
             {
@@ -2347,13 +2358,20 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 MessageBox.Show(this, "Please enter a valid positive number for repetition penalty.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_repetationPenalty.Text = "1.1"; // Reset auf Standard
-                e.Cancel = true; // Fokus bleibt im Control, User muss korrigieren
+                this.toolStripTextBox_repetationPenalty.Text = "1.1";
             }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
 
-        private void toolStripTextBox_contextSize_Validating(object sender, System.ComponentModel.CancelEventArgs e)
+        private void toolStripTextBox_contextSize_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
             string entered = this.toolStripTextBox_contextSize.Text.Trim();
             if (int.TryParse(entered, out int contextSize) && contextSize > 0)
             {
@@ -2362,13 +2380,20 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 MessageBox.Show(this, "Please enter a valid positive integer for context size.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_contextSize.Text = "16384"; // Reset auf Standard
-                e.Cancel = true; // Fokus bleibt im Control, User muss korrigieren
+                this.toolStripTextBox_contextSize.Text = "16384";
             }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
 
-        private void toolStripTextBox_batchSize_Validating(object sender, System.ComponentModel.CancelEventArgs e)
+        private void toolStripTextBox_batchSize_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
             string entered = this.toolStripTextBox_batchSize.Text.Trim();
             if (int.TryParse(entered, out int batchSize) && batchSize > 0)
             {
@@ -2377,17 +2402,26 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 MessageBox.Show(this, "Please enter a valid positive integer for batch size.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_batchSize.Text = "1024"; // Reset auf Standard
-                e.Cancel = true; // Fokus bleibt im Control, User muss korrigieren
+                this.toolStripTextBox_batchSize.Text = "1024";
             }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
 
-        private void toolStripTextBox_tensorSplit_Validating(object sender, System.ComponentModel.CancelEventArgs e)
+        private void toolStripTextBox_tensorSplit_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
             string entered = this.toolStripTextBox_tensorSplit.Text.Trim();
             if (entered == "")
             {
-                return; // Empty is allowed, it means no tensor split config
+                e.SuppressKeyPress = true;
+                e.Handled = true;
+                return;
             }
             else
             {
@@ -2396,15 +2430,21 @@ namespace FormsSystemStatsWidget.Forms
                 if (parts.Length > GpuStats.GpuNames.Count)
                 {
                     MessageBox.Show(this, $"Please enter a valid tensor split configuration with at most {GpuStats.GpuNames.Count} values (for {GpuStats.GpuNames.Count} GPUs).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    this.toolStripTextBox_tensorSplit.Text = ""; // Reset auf Standard
-                    e.Cancel = true; // Fokus bleibt im Control, User muss korrigieren
-                    return;
+                    this.toolStripTextBox_tensorSplit.Text = "";
                 }
             }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
 
-        private void toolStripTextBox_gpuLayersCount_Validating(object sender, System.ComponentModel.CancelEventArgs e)
+        private void toolStripTextBox_gpuLayersCount_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
             string entered = this.toolStripTextBox_gpuLayersCount.Text.Trim();
             if (int.TryParse(entered, out int gpuLayerCount) && gpuLayerCount >= 0)
             {
@@ -2413,13 +2453,20 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 MessageBox.Show(this, "Please enter a valid non-negative integer for GPU layers count.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_gpuLayersCount.Text = "0"; // Reset auf Standard
-                e.Cancel = true; // Fokus bleibt im Control, User muss korrigieren
+                this.toolStripTextBox_gpuLayersCount.Text = "0";
             }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
 
-        private void toolStripTextBox_numberParallelSlots_Validating(object sender, System.ComponentModel.CancelEventArgs e)
+        private void toolStripTextBox_numberParallelSlots_KeyDown(object sender, KeyEventArgs e)
         {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
             string entered = this.toolStripTextBox_numberParallelSlots.Text.Trim();
             if (int.TryParse(entered, out int parallelSlots) && parallelSlots > 0)
             {
@@ -2428,9 +2475,11 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 MessageBox.Show(this, "Please enter a valid positive integer for number of parallel slots.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_numberParallelSlots.Text = "1"; // Reset auf Standard
-                e.Cancel = true; // Fokus bleibt im Control, User muss korrigieren
+                this.toolStripTextBox_numberParallelSlots.Text = "1";
             }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
         
     }

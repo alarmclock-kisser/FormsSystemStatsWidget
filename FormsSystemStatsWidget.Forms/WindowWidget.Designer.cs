@@ -376,7 +376,7 @@
             this.toolStripTextBox_contextSize.Name = "toolStripTextBox_contextSize";
             this.toolStripTextBox_contextSize.Size = new Size(100, 23);
             this.toolStripTextBox_contextSize.Text = "32768";
-            this.toolStripTextBox_contextSize.Validating += this.toolStripTextBox_contextSize_Validating;
+            this.toolStripTextBox_contextSize.KeyDown += this.toolStripTextBox_contextSize_KeyDown;
             // 
             // toolStripMenuItem_batchSize
             // 
@@ -390,7 +390,7 @@
             this.toolStripTextBox_batchSize.Name = "toolStripTextBox_batchSize";
             this.toolStripTextBox_batchSize.Size = new Size(100, 23);
             this.toolStripTextBox_batchSize.Text = "4096";
-            this.toolStripTextBox_batchSize.Validating += this.toolStripTextBox_batchSize_Validating;
+            this.toolStripTextBox_batchSize.KeyDown += this.toolStripTextBox_batchSize_KeyDown;
             // 
             // toolStripMenuItem_splitMode
             // 
@@ -418,7 +418,7 @@
             // 
             this.toolStripTextBox_tensorSplit.Name = "toolStripTextBox_tensorSplit";
             this.toolStripTextBox_tensorSplit.Size = new Size(100, 23);
-            this.toolStripTextBox_tensorSplit.Validating += this.toolStripTextBox_tensorSplit_Validating;
+            this.toolStripTextBox_tensorSplit.KeyDown += this.toolStripTextBox_tensorSplit_KeyDown;
             // 
             // toolStripMenuItem_flashAttention
             // 
@@ -441,7 +441,7 @@
             this.toolStripTextBox_gpuLayersCount.Name = "toolStripTextBox_gpuLayersCount";
             this.toolStripTextBox_gpuLayersCount.Size = new Size(100, 23);
             this.toolStripTextBox_gpuLayersCount.Text = "999";
-            this.toolStripTextBox_gpuLayersCount.Validating += this.toolStripTextBox_gpuLayersCount_Validating;
+            this.toolStripTextBox_gpuLayersCount.KeyDown += this.toolStripTextBox_gpuLayersCount_KeyDown;
             // 
             // toolStripMenuItem_parallelSlots
             // 
@@ -455,7 +455,7 @@
             this.toolStripTextBox_numberParallelSlots.Name = "toolStripTextBox_numberParallelSlots";
             this.toolStripTextBox_numberParallelSlots.Size = new Size(100, 23);
             this.toolStripTextBox_numberParallelSlots.Text = "1";
-            this.toolStripTextBox_numberParallelSlots.Validating += this.toolStripTextBox_numberParallelSlots_Validating;
+            this.toolStripTextBox_numberParallelSlots.KeyDown += this.toolStripTextBox_numberParallelSlots_KeyDown;
             // 
             // toolStripMenuItem_noWarmup
             // 
@@ -497,7 +497,7 @@
             this.toolStripTextBox_temperature.Name = "toolStripTextBox_temperature";
             this.toolStripTextBox_temperature.Size = new Size(100, 23);
             this.toolStripTextBox_temperature.Text = "0.25";
-            this.toolStripTextBox_temperature.Validating += this.toolStripTextBox_temperature_Validating;
+            this.toolStripTextBox_temperature.KeyDown += this.toolStripTextBox_temperature_KeyDown;
             // 
             // toolStripMenuItem_repetitionPenalty
             // 
@@ -511,7 +511,7 @@
             this.toolStripTextBox_repetationPenalty.Name = "toolStripTextBox_repetationPenalty";
             this.toolStripTextBox_repetationPenalty.Size = new Size(100, 23);
             this.toolStripTextBox_repetationPenalty.Text = "1.25";
-            this.toolStripTextBox_repetationPenalty.Validating += this.toolStripTextBox_repetationPenalty_Validating;
+            this.toolStripTextBox_repetationPenalty.KeyDown += this.toolStripTextBox_repetationPenalty_KeyDown;
             // 
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 
