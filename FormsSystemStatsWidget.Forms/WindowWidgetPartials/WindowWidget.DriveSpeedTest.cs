@@ -629,7 +629,7 @@ namespace FormsSystemStatsWidget.Forms
             string userTempPath = Path.GetTempPath();
             string userTempRoot = Path.GetPathRoot(userTempPath) ?? string.Empty;
 
-            List<string> candidates = new();
+            List<string> candidates = [];
             if (string.Equals(userTempRoot, normalizedRootPath, StringComparison.OrdinalIgnoreCase))
             {
                 candidates.Add(Path.Combine(userTempPath, "FormsSystemStatsWidget", "DriveSpeedTest"));

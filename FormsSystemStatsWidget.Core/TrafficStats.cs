@@ -30,7 +30,7 @@ namespace FormsSystemStatsWidget.Core
 
         private static long _lastTotalSent;
         private static long _lastTotalReceived;
-        private static Dictionary<int, (string Name, ulong Read, ulong Write)> _prevSnapshot = new();
+        private static Dictionary<int, (string Name, ulong Read, ulong Write)> _prevSnapshot = [];
         private static bool _initialized;
         private static readonly TimeSpan NetworkInterfacesRefreshInterval = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan ProcessIoSamplingInterval = TimeSpan.FromMilliseconds(1200);

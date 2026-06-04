@@ -45,7 +45,7 @@ namespace FormsSystemStatsWidget.Forms
         private bool _explicitWidgetCloseRequested;
         private Process? _llamaServerProcess;
         private CancellationTokenSource? _processCts;
-        private readonly HashSet<Keys> _processingKeys = new();
+        private readonly HashSet<Keys> _processingKeys = [];
 
         private const int WmSysCommand = 0x0112;
         private const int ScClose = 0xF060;
@@ -134,50 +134,44 @@ namespace FormsSystemStatsWidget.Forms
         }
 
 
-        private void HandleLoggerMessageLogged(string text)
+        protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
+            if (e.CloseReason != CloseReason.WindowsShutDown && !this._explicitWidgetCloseRequested)
             {
+                e.Cancel = true;
+                Logger.Log("[WindowWidget] Unerwartetes FormClosing wurde blockiert.");
                 return;
             }
 
-            this._debugConsoleForm.AppendLogLine(text);
-        }
+            this._closing = true;
+            this.UpdateTimer.Stop();
+            Logger.MessageLogged -= this.HandleLoggerMessageLogged;
 
-        private void ConfigureContextMenuAutoCloseBehavior()
-        {
-            this.toolStripMenuItem_loadLlamaCppServer.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
-            this.openDebugConsoleToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
-        }
-
-        private void KeepSelectedSubMenuOpenForItemClicks(object? sender, ToolStripDropDownClosingEventArgs e)
-        {
-            if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked)
+            if (this._debugConsoleForm != null)
             {
-                e.Cancel = true;
+                try { this._debugConsoleForm.Close(); } catch { }
+                this._debugConsoleForm = null;
             }
+
+            try { this.Gpu?.Dispose(); } catch { }
+            try { this.Gpu2?.Dispose(); } catch { }
+
+            base.OnFormClosing(e);
         }
 
-        private void ApplyGpuLayout()
+        protected override void WndProc(ref Message m)
         {
-            bool hasSecondGpu = this.Gpu2 != null;
+            if (m.Msg == WmSysCommand)
+            {
+                long command = m.WParam.ToInt64() & 0xFFF0;
+                if (command == ScClose)
+                {
+                    this._explicitWidgetCloseRequested = true;
+                }
+            }
 
-            this.label_gpuLoad2.Visible = hasSecondGpu;
-            this.label_gpuWatts2.Visible = hasSecondGpu;
-            this.label_gpuVram2.Visible = hasSecondGpu;
-            this.progressBar_vram2.Visible = hasSecondGpu;
-
-            int clientHeight = hasSecondGpu ? MultiGpuClientHeight : SingleGpuClientHeight;
-            this.ClientSize = new Size(this.ClientSize.Width, clientHeight);
-
-            Size windowSize = new(256, clientHeight + 39);
-            this.MinimumSize = windowSize;
-            this.MaximumSize = windowSize;
+            base.WndProc(ref m);
         }
-
-
-
-
 
         private void TrySetWindowTitleSafe(string title)
         {
@@ -235,6 +229,52 @@ namespace FormsSystemStatsWidget.Forms
             }
             this.Text = $"\u2191 {up}  \u2193 {down}  {top}";
         }
+
+
+
+        private void HandleLoggerMessageLogged(string text)
+        {
+            if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
+            {
+                return;
+            }
+
+            this._debugConsoleForm.AppendLogLine(text);
+        }
+
+        private void ConfigureContextMenuAutoCloseBehavior()
+        {
+            this.toolStripMenuItem_loadLlamaCppServer.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.openDebugConsoleToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+        }
+
+        private void KeepSelectedSubMenuOpenForItemClicks(object? sender, ToolStripDropDownClosingEventArgs e)
+        {
+            if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked)
+            {
+                e.Cancel = true;
+            }
+        }
+
+        private void ApplyGpuLayout()
+        {
+            bool hasSecondGpu = this.Gpu2 != null;
+
+            this.label_gpuLoad2.Visible = hasSecondGpu;
+            this.label_gpuWatts2.Visible = hasSecondGpu;
+            this.label_gpuVram2.Visible = hasSecondGpu;
+            this.progressBar_vram2.Visible = hasSecondGpu;
+
+            int clientHeight = hasSecondGpu ? MultiGpuClientHeight : SingleGpuClientHeight;
+            this.ClientSize = new Size(this.ClientSize.Width, clientHeight);
+
+            Size windowSize = new(256, clientHeight + 39);
+            this.MinimumSize = windowSize;
+            this.MaximumSize = windowSize;
+        }
+
+
+
 
         /// <summary>
         /// TIMER TICK : Main Update-Loop for HW Stats and UI.
@@ -390,45 +430,6 @@ namespace FormsSystemStatsWidget.Forms
 
             this._lastTickDiagnosticsUtc = nowUtc;
             Debug.WriteLine($"[WidgetTick] Slow tick: {tickDuration.TotalMilliseconds:0} ms (target {this._updateIntervalMs} ms)");
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            if (e.CloseReason != CloseReason.WindowsShutDown && !this._explicitWidgetCloseRequested)
-            {
-                e.Cancel = true;
-                Logger.Log("[WindowWidget] Unerwartetes FormClosing wurde blockiert.");
-                return;
-            }
-
-            this._closing = true;
-            this.UpdateTimer.Stop();
-            Logger.MessageLogged -= this.HandleLoggerMessageLogged;
-
-            if (this._debugConsoleForm != null)
-            {
-                try { this._debugConsoleForm.Close(); } catch { }
-                this._debugConsoleForm = null;
-            }
-
-            try { this.Gpu?.Dispose(); } catch { }
-            try { this.Gpu2?.Dispose(); } catch { }
-
-            base.OnFormClosing(e);
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            if (m.Msg == WmSysCommand)
-            {
-                long command = m.WParam.ToInt64() & 0xFFF0;
-                if (command == ScClose)
-                {
-                    this._explicitWidgetCloseRequested = true;
-                }
-            }
-
-            base.WndProc(ref m);
         }
 
         private void toolStripTextBox_interval_Leave(object? sender, EventArgs e)

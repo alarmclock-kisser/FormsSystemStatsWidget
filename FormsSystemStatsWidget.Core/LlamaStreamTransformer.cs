@@ -352,8 +352,8 @@ namespace FormsSystemStatsWidget.Core
 
         private static JsonArray CreateToolCallsArray(JsonObject parsedToolCall)
         {
-            return new JsonArray
-            {
+            return
+            [
                 new JsonObject
                 {
                     ["index"] = 0,
@@ -365,7 +365,7 @@ namespace FormsSystemStatsWidget.Core
                         ["arguments"] = parsedToolCall["arguments"]?.ToString() ?? "{}"
                     }
                 }
-            };
+            ];
         }
 
         public static async Task TransformOpenAiStreamAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName)

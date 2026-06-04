@@ -92,7 +92,7 @@ namespace FormsSystemStatsWidget.Forms
                 }
 
                 HashSet<string> diskDeviceIds = new(StringComparer.OrdinalIgnoreCase);
-                List<ManagementObject> diskDrives = new();
+                List<ManagementObject> diskDrives = [];
 
                 foreach (ManagementObject logicalDisk in logicalDisks.Cast<ManagementObject>())
                 {

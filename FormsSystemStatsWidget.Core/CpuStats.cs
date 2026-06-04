@@ -45,7 +45,7 @@ namespace FormsSystemStatsWidget.Core
         private static DateTime _lastCpuEnergySampleUtc = DateTime.MinValue;
         private static readonly Lock _processSamplingLock = new();
         private static DateTime _lastProcessSampleUtc = DateTime.MinValue;
-        private static Dictionary<int, TimeSpan> _lastProcessCpuTimes = new();
+        private static Dictionary<int, TimeSpan> _lastProcessCpuTimes = [];
 
         private static bool EnsureOpenHardwareMonitorOpened()
         {
@@ -98,10 +98,10 @@ namespace FormsSystemStatsWidget.Core
                     return (null, null);
                 }
 
-                List<double> preferredTemperatureValues = new();
-                List<double> fallbackTemperatureValues = new();
-                List<double> preferredPowerValues = new();
-                List<double> fallbackPowerValues = new();
+                List<double> preferredTemperatureValues = [];
+                List<double> fallbackTemperatureValues = [];
+                List<double> preferredPowerValues = [];
+                List<double> fallbackPowerValues = [];
 
                 try
                 {
@@ -533,7 +533,7 @@ namespace FormsSystemStatsWidget.Core
                 using ManagementObjectSearcher searcher = new("root\\WMI", "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
                 using ManagementObjectCollection results = searcher.Get();
 
-                List<double> temperatureValues = new();
+                List<double> temperatureValues = [];
                 foreach (ManagementObject result in results.Cast<ManagementObject>())
                 {
                     try
@@ -641,7 +641,7 @@ namespace FormsSystemStatsWidget.Core
                 try
                 {
                     Dictionary<int, TimeSpan> currentProcessCpuTimes = new(processes.Length);
-                    List<(string processName, double cpuPercent)> processUsages = new();
+                    List<(string processName, double cpuPercent)> processUsages = [];
 
                     foreach (Process process in processes)
                     {
@@ -783,16 +783,16 @@ namespace FormsSystemStatsWidget.Core
 
                 _lastTemperatureSampleUtc = nowUtc;
 
-                List<double> preferredTemperatureValues = new();
-                List<double> fallbackTemperatureValues = new();
-                List<double> preferredPowerValues = new();
-                List<double> fallbackPowerValues = new();
-                List<double> preferredVoltageValues = new();
-                List<double> fallbackVoltageValues = new();
-                List<double> preferredCurrentValues = new();
-                List<double> fallbackCurrentValues = new();
-                List<double> preferredEnergyValues = new();
-                List<double> fallbackEnergyValues = new();
+                List<double> preferredTemperatureValues = [];
+                List<double> fallbackTemperatureValues = [];
+                List<double> preferredPowerValues = [];
+                List<double> fallbackPowerValues = [];
+                List<double> preferredVoltageValues = [];
+                List<double> fallbackVoltageValues = [];
+                List<double> preferredCurrentValues = [];
+                List<double> fallbackCurrentValues = [];
+                List<double> preferredEnergyValues = [];
+                List<double> fallbackEnergyValues = [];
 
                 try
                 {
@@ -804,7 +804,7 @@ namespace FormsSystemStatsWidget.Core
                         {
                             UpdateHardwareRecursive(hardware);
 
-                            List<ISensor> sensors = new();
+                            List<ISensor> sensors = [];
                             CollectCpuRelevantSensorsRecursive(hardware, sensors);
 
                             foreach (ISensor sensor in sensors)

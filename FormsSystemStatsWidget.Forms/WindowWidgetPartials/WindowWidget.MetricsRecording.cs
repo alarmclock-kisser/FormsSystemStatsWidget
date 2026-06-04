@@ -6,7 +6,7 @@ using System.Text;
 
 namespace FormsSystemStatsWidget.Forms
 {
-    internal partial class WindowWidget
+    public partial class WindowWidget
     {
         private void button_recordUsages_Click(object sender, EventArgs e)
         {
@@ -36,7 +36,7 @@ namespace FormsSystemStatsWidget.Forms
             bool hasSecondGpu = this.Gpu2 != null;
             DateTimeOffset recordingStartedAt = DateTimeOffset.Now;
             DateTimeOffset previousSampleTimestamp = recordingStartedAt;
-            List<string> csvLines = new();
+            List<string> csvLines = [];
             long currentFileBytes = 0;
             int sampleCount = 0;
             double cpuLoadSum = 0d;
@@ -253,8 +253,8 @@ namespace FormsSystemStatsWidget.Forms
 
         private static List<string> BuildRecordingSummaryLines(RecordingSummary summary)
         {
-            List<string> lines = new()
-            {
+            List<string> lines =
+            [
                 "==========",
                 "Metric;Value",
                 $"Time;{summary.Duration:hh\\:mm\\:ss}",
@@ -266,7 +266,7 @@ namespace FormsSystemStatsWidget.Forms
                 $"~Load (CPU);{summary.CpuAverageLoadPercent:0.00}%",
                 $"~Load (GPU(s));{summary.GpuAverageLoadPercent:0.00}%",
                 $"Total Energy (Wh);{summary.TotalEnergyWh:0.000}"
-            };
+            ];
 
             return lines;
         }
@@ -275,8 +275,8 @@ namespace FormsSystemStatsWidget.Forms
 
         private static string BuildRecordingHeader(bool hasSecondGpu)
         {
-            List<string> columns = new()
-            {
+            List<string> columns =
+            [
                 "Timestamp",
                 "CPU Usage (%)",
                 "CPU Temperature (°C)",
@@ -298,7 +298,7 @@ namespace FormsSystemStatsWidget.Forms
                 "Top CPU Task 2 (%)",
                 "Top CPU Task 3",
                 "Top CPU Task 3 (%)"
-            };
+            ];
 
             if (hasSecondGpu)
             {
@@ -378,8 +378,8 @@ namespace FormsSystemStatsWidget.Forms
             double gpuAverageLoadPercent = hasSecondGpu ? (gpu1UsagePercent + gpu2UsagePercent) / 2d : gpu1UsagePercent;
 
             IReadOnlyList<(string processName, double cpuPercent)> topTasks = topTasksTask.Result;
-            List<string> values = new()
-            {
+            List<string> values =
+            [
                 timestamp.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture),
                 FormatRecordingNumber(cpuUsagePercent),
                 FormatRecordingNullableNumber(cpuTelemetry.AverageTemperatureCelsius),
@@ -401,7 +401,7 @@ namespace FormsSystemStatsWidget.Forms
                 GetTopTaskPercent(topTasks, 1),
                 GetTopTaskName(topTasks, 2),
                 GetTopTaskPercent(topTasks, 2)
-            };
+            ];
 
             if (hasSecondGpu)
             {
