@@ -1,0 +1,23 @@
+
+16:40:19.253 :: Found 31 model(s) in GGUF models directory: D:\\Models\GGUF\Others
+
+16:40:19.257 :: Found smaller GGUF file: D:\Models\GGUF\Others\gemma-4-A4B-98e-v6-coder-it-Q6_K_L\mmproj-gemma4.gguf (probably the mmproj file)
+
+16:40:34.500 :: Found smaller GGUF file: D:\Models\GGUF\Others\Qwopus3.5-9B-Coder-MTP-Q8_0\mmproj-F32.gguf (probably the mmproj file)
+Debug-Console opened. (Formatted Logging: True, Raw Chunk Logging: True, Log Generation Speed: True)
+
+16:43:30.796 :: Found smaller GGUF file: D:\Models\GGUF\Others\gemma-4-A4B-98e-v6-coder-it-Q6_K_L\mmproj-gemma4.gguf (probably the mmproj file)
+
+16:43:44.298 :: Found 31 model(s) in GGUF models directory: D:\\Models\GGUF\Others
+
+16:43:44.299 :: Found smaller GGUF file: D:\Models\GGUF\Others\gemma-4-A4B-98e-v6-coder-it-Q6_K_L\mmproj-gemma4.gguf (probably the mmproj file)
+
+16:44:17.594 :: [LlamaBridge] Starting Bridge: llama-server (8080) -> Ollama (11434)
+
+16:44:19.677 :: [LlamaBridge] Model detected: gemma-4-A4B-98e-v6-coder-it-Q6_K_L.gguf
+
+16:44:19.678 :: [LlamaBridge] Parser result: Family=gemma, Size=26B, Quant=Q6_K_L
+
+16:44:19.680 :: [LlamaBridge] Server-Props loaded: Context=32768, Temp=1
+
+16:44:19.684 :: [LlamaBridge] HttpListener successfully started.
