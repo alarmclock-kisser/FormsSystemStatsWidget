@@ -148,19 +148,31 @@ namespace FormsSystemStatsWidget.Core
 
             if (TryParseJsonCommandToolCall(toolBuffer, out JsonObject? jsonToolCall))
             {
-                toolCallsArray = CreateToolCallsArray(jsonToolCall);
+                if (jsonToolCall != null)
+                {
+                    toolCallsArray = CreateToolCallsArray(jsonToolCall);
+                }
+
                 return true;
             }
 
             if (TryParseTaggedToolCall(toolBuffer, out JsonObject? taggedToolCall))
             {
-                toolCallsArray = CreateToolCallsArray(taggedToolCall);
+                if (taggedToolCall != null)
+                {
+                    toolCallsArray = CreateToolCallsArray(taggedToolCall);
+                }
+
                 return true;
             }
 
             if (TryParseQwenToolCall(toolBuffer, out JsonObject? qwenToolCall))
             {
-                toolCallsArray = CreateToolCallsArray(qwenToolCall);
+                if (qwenToolCall != null)
+                {
+                    toolCallsArray = CreateToolCallsArray(qwenToolCall);
+                }
+
                 return true;
             }
 

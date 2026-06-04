@@ -31,20 +31,26 @@ PROJEKTE
 	   │   └── GpuStats(deviceIndex)
 	   │       └── WorkerLoop(ct) - Samples GPU, detects sessions with hysteresis, calculates energy
 	   │
-	   ├── LlamaOllamaBridge.cs (Static)
-	   │   ├── LlamaOllamaBridge
-	   │   │   ├── Properties: _listener, _isRunning, _detectedModelName, _quantizationLevel, _parameterSize, _detectedNumCtx, _detectedTemperature
-	   │   ├── StartAsync(llamacppPort, ollamaPort) -> Task<bool>
-	   │   │   ├── /v1/models API-Call für Modellnamen und Quantisierung
-	   │   │   ├── /props API-Call für Context und Temperatur
-	   │   │   └── HttpListener auf ollamaPort
-	   │   ├── ListenLoopAsync(llamacppPort)
-	   │   └── HandleRequestAsync(context, llamacppPort)
-	   │       ├── POST /v1/chat/completions -> Sanitize & TransformOpenAiStreamAsync
-	   │       ├── POST /api/chat -> NDJSON ↔ OpenAI ↔ OpenAI ↔ NDJSON Übersetzer
-	   │       └── GET /api/tags -> Tags-Endpoint für VS Copilot-Erkennung
-	   │
-	   ├── LlamaServerStats.cs (Static)
+	       ├── LlamaOllamaBridge.cs (Static)
+	       │   ├── LlamaOllamaBridge
+	       │   │   ├── Properties: _listener, _isRunning, _detectedModelName, _quantizationLevel, _parameterSize, _detectedNumCtx, _detectedTemperature
+	       │   ├── StartAsync(llamacppPort, ollamaPort) -> Task<bool>
+	       │   │   ├── /v1/models API-Call für Modellnamen und Quantisierung
+	       │   │   ├── /props API-Call für Context und Temperatur
+	       │   │   └── HttpListener auf ollamaPort
+	       │   ├── ListenLoopAsync(llamacppPort)
+	       │   └── HandleRequestAsync(context, llamacppPort)
+	       │       ├── POST /v1/chat/completions -> Sanitize & TransformOpenAiStreamAsync
+	       │       ├── POST /api/chat -> NDJSON ↔ OpenAI ↔ OpenAI ↔ NDJSON Übersetzer
+	       │       └── GET /api/tags -> Tags-Endpoint für VS Copilot-Erkennung
+	       │
+	       ├── LlamaCppModelLoader.cs (Static)
+	       │   ├── LlamaCppModelLoader
+	       │   │   ├── Properties: GgufModelsDirectory, ModelFilePaths
+	       │   │   ├── GetModelFilePaths() -> string[] (Finds largest GGUF per dir, sorted by creation time)
+	       │   │   └── GetModelMmprojFilePath(modelFilePathOrName) -> string? (Finds smaller GGUF in same dir)
+	       │
+	       ├── LlamaServerStats.cs (Static)
 	   │   ├── LlamaServerStats
 	   │   │   └── GetCurrentLlamaServerGenerationStatsAsync(llamacppPort) -> Task<float?>
 	   │   │       └── Fragt /slots ab, berechnet t/s (tokens/sec) mit Decay-Faktor

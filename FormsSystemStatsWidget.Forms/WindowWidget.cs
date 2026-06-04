@@ -136,6 +136,9 @@ namespace FormsSystemStatsWidget.Forms
                     this.toolStripTextBox_tensorSplit.Text = "";
                 }
             }
+
+            LlamaOllamaBridge.UserDefinedTemperature = double.TryParse(this.toolStripTextBox_temperature.Text, out double temperature) ? temperature : 0.3;
+            LlamaOllamaBridge.UserDefinedRepetitionPenalty = double.TryParse(this.toolStripTextBox_repetationPenalty.Text, out double repetitionPenalty) ? repetitionPenalty : 1.1;
         }
 
         private void ConfigureContextMenuAutoCloseBehavior()
@@ -1898,10 +1901,10 @@ namespace FormsSystemStatsWidget.Forms
 
             try
             {
-                gpu1UsagePercent = this.Gpu.CurrentLoad01 * 100d;
-                gpu1PowerWatts = this.Gpu.CurrentPowerWatts ?? 0d;
-                gpu1VramUsedGb = Math.Round(this.Gpu.GetUsedVramBytes() / 1_073_741_824.0, 3);
-                gpu1VramTotalGb = Math.Round(this.Gpu.GetTotalVramBytes() / 1_073_741_824.0, 3);
+                gpu1UsagePercent = this.Gpu?.CurrentLoad01 * 100d ?? 0d;
+                gpu1PowerWatts = this.Gpu?.CurrentPowerWatts ?? 0d;
+                gpu1VramUsedGb = Math.Round(this.Gpu?.GetUsedVramBytes() / 1_073_741_824.0 ?? 0d, 3);
+                gpu1VramTotalGb = Math.Round(this.Gpu?.GetTotalVramBytes() / 1_073_741_824.0 ?? 0d, 3);
             }
             catch
             {

@@ -412,7 +412,10 @@ namespace FormsSystemStatsWidget.Core
 
         private static string ExtractParameterSize(string modelName)
         {
-            if (string.IsNullOrWhiteSpace(modelName)) return "unknown";
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return "unknown";
+            }
 
             // Mapping von Marketing-Bezeichnern auf die echten Parameter-Größen
             // Das lässt sich hier zentral erweitern, wenn neue Modelle kommen.

@@ -145,29 +145,31 @@ namespace FormsSystemStatsWidget.Core
                     _lastCheckTime = now;
                 }
                 else if (deltaSeconds > 0 && deltaTokens >= 0)
-                {
-                    if (deltaTokens > 0)
-                    {
-                        _currentTps = (float) (deltaTokens / deltaSeconds);
-                        _lastNDecoded = currentNDecoded;
-                        _lastCheckTime = now;
-                    }
-                    else
-                    {
-                        if (currentNDecoded == 0)
-                        {
-                            _currentTps = 0.001f; // Evaluating Prompt (Umgeht die UI Idle-Prüfung)
-                        }
-                        else
-                        {
-                            _currentTps *= 0.85f;
-                            if (_currentTps < 0.001f)
-                            {
-                                _currentTps = 0.001f; // Prevent Idle status while actively processing
-                            }
-                        }
-                    }
-                }
+                 {
+                     if (deltaTokens > 0)
+                     {
+                         _currentTps = (float) (deltaTokens / deltaSeconds);
+                         _lastNDecoded = currentNDecoded;
+                         _lastCheckTime = now;
+                     }
+                     else
+                     {
+                         if (currentNDecoded == 0)
+                         {
+                             _currentTps = 0.001f; // Evaluating Prompt (Umgeht die UI Idle-Prüfung)
+                         }
+                         else
+                         {
+                             _currentTps *= 0.85f;
+                             if (_currentTps < 0.001f)
+                             {
+                                 _currentTps = 0.001f; // Prevent Idle status while actively processing
+                             }
+                         }
+                         // Update Zeit für nächste Berechnung
+                         _lastCheckTime = now;
+                     }
+                 }
 
                 return _currentTps;
             }
