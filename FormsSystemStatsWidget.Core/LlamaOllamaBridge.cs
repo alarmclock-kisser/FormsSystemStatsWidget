@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 
 namespace FormsSystemStatsWidget.Core
 {
-    public static class LlamaOllamaBridge
+    public static partial class LlamaOllamaBridge
     {
         private static HttpListener? _listener;
         private static bool _isRunning;
@@ -408,43 +408,41 @@ namespace FormsSystemStatsWidget.Core
 
         private static string ExtractParameterSize(string modelName)
         {
-            if (string.IsNullOrWhiteSpace(modelName))
+            if (string.IsNullOrWhiteSpace(modelName)) return "unknown";
+
+            // Mapping von Marketing-Bezeichnern auf die echten Parameter-Größen
+            // Das lässt sich hier zentral erweitern, wenn neue Modelle kommen.
+            var sizeMapping = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                return "unknown";
+                { "e2b", "9B" },   // Beispiel: Gemma-4-E2B (kleinstes)
+                { "e4b", "26B" },  // Beispiel: Gemma-4-E4B
+                { "a4b", "26B" },  // Beispiel: Gemma-4-A4B
+                { "a3b", "30B" }   // Beispiel: Qwen3-A3B
+            };
+
+            // 1. Suche nach bekannten Marketing-Markern aus unserem Dictionary
+            foreach (var entry in sizeMapping)
+            {
+                // Sucht z.B. nach "e2b" oder "a4b" in der Modell-ID
+                if (modelName.Contains(entry.Key, StringComparison.OrdinalIgnoreCase))
+                {
+                    return entry.Value;
+                }
             }
 
-            var match = Regex.Match(modelName, @"(?i)\b(\d+(?:\.\d+)?[BM])\b");
-            if (!match.Success)
+            // 2. Fallback: Wenn kein Mapping gefunden, versuche die echte Größe aus dem String zu ziehen
+            // Sucht z.B. nach "26b" (aber NICHT hinter einem 'a' oder 'e')
+            var realSizeMatch = Regex.Match(modelName, @"(?<![ae])\b(\d+)b\b", RegexOptions.IgnoreCase);
+            if (realSizeMatch.Success)
             {
-                // Resolve the A<n>B Param sizes (qwen3.5+ / gemma-4 etc latest models dense sizes) switch case
-                string denseSize = "unknown";
-                var denseMatch = Regex.Match(modelName, @"(?i)\bA(\d+)B\b");
-                if (!match.Success)
-                {
-                    denseSize = "unknown";
-
-                }
-                else
-                {
-                    string numPart = denseMatch.Groups[1].Value;
-                    if (int.TryParse(numPart, out int numValue))
-                    {
-                        if (numValue >= 1000)
-                        {
-                            denseSize = $"{numValue / 1000}B";
-                        }
-                        else
-                        {
-                            denseSize = $"{numValue}M";
-                        }
-                    }
-                }
-
-                return denseSize;
+                return $"{realSizeMatch.Groups[1].Value}B";
             }
 
-            return match.Success ? match.Value.ToUpper() : "unknown";
+            // 3. Letzter Ausweg: Klassische Regex (7B, 14B etc.)
+            var classicMatch = Regex.Match(modelName, @"(?i)\b(\d+(?:\.\d+)?[BM])\b");
+            return classicMatch.Success ? classicMatch.Value.ToUpper() : "unknown";
         }
+
 
         private static string ExtractModelFamily(string modelName)
         {
@@ -492,12 +490,7 @@ namespace FormsSystemStatsWidget.Core
             }
 
             string[] commandRMarkers = { "command-r", "commandr", "aya", "cohere" };
-            if (commandRMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
-            {
-                return "command-r";
-            }
-
-            return "llama";
+            return commandRMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)) ? "command-r" : "llama";
         }
 
         public static void Stop()
@@ -511,6 +504,11 @@ namespace FormsSystemStatsWidget.Core
             }
             Logger.Log("[LlamaBridge] Bridge successfully stopped.");
         }
+
+        [GeneratedRegex(@"(?i)\b(\d+(?:\.\d+)?[BM])\b", RegexOptions.None, "de-DE")]
+        private static partial Regex ModelSizeClassicRegex();
+        [GeneratedRegex(@"(?i)\b(?:E|A)(\d+)B\b", RegexOptions.None, "de-DE")]
+        private static partial Regex ModelSizeModernRegex();
     }
 
 

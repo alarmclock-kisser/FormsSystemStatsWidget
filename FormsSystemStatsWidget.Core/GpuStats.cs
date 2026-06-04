@@ -321,22 +321,12 @@ public sealed class GpuStats : IDisposable
 
     public long GetTotalVramBytes()
     {
-        if (!NvmlGpu.TryGetGpuUtilization(this.DeviceIndex).HasValue)
-        {
-            return -1;
-        }
-        
-        return NvmlGpu.TryGetGpuTotalMemoryBytes(this.DeviceIndex) ?? -1;
+        return !NvmlGpu.TryGetGpuUtilization(this.DeviceIndex).HasValue ? -1 : NvmlGpu.TryGetGpuTotalMemoryBytes(this.DeviceIndex) ?? -1;
     }
 
     public long GetUsedVramBytes()
     {
-        if (!NvmlGpu.TryGetGpuUtilization(this.DeviceIndex).HasValue)
-        {
-            return -1;
-        }
-        
-        return NvmlGpu.TryGetGpuUsedMemoryBytes(this.DeviceIndex) ?? -1;
+        return !NvmlGpu.TryGetGpuUtilization(this.DeviceIndex).HasValue ? -1 : NvmlGpu.TryGetGpuUsedMemoryBytes(this.DeviceIndex) ?? -1;
     }
 
     // ------------------------ NVML (GPU util + power) ------------------------
@@ -360,12 +350,7 @@ public sealed class GpuStats : IDisposable
             }
 
             rc = nvmlDeviceGetUtilizationRates(device, out var util);
-            if (rc != NvmlReturn.Success)
-            {
-                return null;
-            }
-
-            return util.gpu / 100.0;
+            return rc != NvmlReturn.Success ? null : util.gpu / 100.0;
         }
 
         public static uint? TryGetGpuPowerMilliwatts(int deviceIndex)
@@ -382,12 +367,7 @@ public sealed class GpuStats : IDisposable
             }
 
             rc = nvmlDeviceGetPowerUsage(device, out var milliwatts);
-            if (rc != NvmlReturn.Success)
-            {
-                return null;
-            }
-
-            return milliwatts;
+            return rc != NvmlReturn.Success ? null : milliwatts;
         }
 
         public static long? TryGetGpuTotalMemoryBytes(int deviceIndex)
@@ -396,17 +376,13 @@ public sealed class GpuStats : IDisposable
             {
                 return null;
             }
-            var rc = nvmlDeviceGetHandleByIndex_v2((uint)deviceIndex, out var device);
+            var rc = nvmlDeviceGetHandleByIndex_v2((uint) deviceIndex, out var device);
             if (rc != NvmlReturn.Success)
             {
                 return null;
             }
             rc = nvmlDeviceGetMemoryInfo(device, out var memInfo);
-            if (rc != NvmlReturn.Success)
-            {
-                return null;
-            }
-            return (long)memInfo.total;
+            return rc != NvmlReturn.Success ? null : (long) memInfo.total;
         }
 
         public static long? TryGetGpuUsedMemoryBytes(int deviceIndex)
@@ -415,17 +391,13 @@ public sealed class GpuStats : IDisposable
             {
                 return null;
             }
-            var rc = nvmlDeviceGetHandleByIndex_v2((uint)deviceIndex, out var device);
+            var rc = nvmlDeviceGetHandleByIndex_v2((uint) deviceIndex, out var device);
             if (rc != NvmlReturn.Success)
             {
                 return null;
             }
             rc = nvmlDeviceGetMemoryInfo(device, out var memInfo);
-            if (rc != NvmlReturn.Success)
-            {
-                return null;
-            }
-            return (long)memInfo.used;
+            return rc != NvmlReturn.Success ? null : (long) memInfo.used;
         }
 
         private static bool EnsureInitialized()

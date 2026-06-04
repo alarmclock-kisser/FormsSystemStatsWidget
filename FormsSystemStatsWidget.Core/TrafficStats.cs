@@ -90,10 +90,10 @@ namespace FormsSystemStatsWidget.Core
                 long totalReceived = GetTotalBytesReceived(_cachedNetworkInterfaces);
 
                 double factor = 1000.0 / Math.Max(1, intervalMs);
-                UpBytesPerSecond   = Math.Max(0, totalSent     - _lastTotalSent)     * factor;
+                UpBytesPerSecond = Math.Max(0, totalSent - _lastTotalSent) * factor;
                 DownBytesPerSecond = Math.Max(0, totalReceived - _lastTotalReceived) * factor;
 
-                _lastTotalSent     = totalSent;
+                _lastTotalSent = totalSent;
                 _lastTotalReceived = totalReceived;
 
                 if ((nowUtc - _lastProcessIoSampleUtc) >= ProcessIoSamplingInterval)
@@ -200,9 +200,9 @@ namespace FormsSystemStatsWidget.Core
             Dictionary<int, (string Name, ulong Read, ulong Write)> curr,
             double factor)
         {
-            string? topName  = null;
-            double  topValue = 0;
-            var     active   = new List<(string, double)>();
+            string? topName = null;
+            double topValue = 0;
+            var active = new List<(string, double)>();
 
             foreach (var (pid, cur) in curr)
             {
@@ -216,14 +216,14 @@ namespace FormsSystemStatsWidget.Core
                     continue;
                 }
 
-                double deltaRead  = cur.Read  >= prv.Read  ? (cur.Read  - prv.Read)  : 0;
+                double deltaRead = cur.Read >= prv.Read ? (cur.Read - prv.Read) : 0;
                 double deltaWrite = cur.Write >= prv.Write ? (cur.Write - prv.Write) : 0;
                 double rate = (deltaRead + deltaWrite) * factor;
 
                 if (rate > topValue)
                 {
                     topValue = rate;
-                    topName  = cur.Name;
+                    topName = cur.Name;
                 }
                 if (rate >= ThresholdBytesPerSecond)
                 {

@@ -1038,7 +1038,7 @@ namespace FormsSystemStatsWidget.Core
                             using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
 
                             // Measure and adjust font size. Use GraphicsUnit.Pixel for consistent measurements in pixels.
-                            for (;;)
+                            for (; ; )
                             {
                                 using var testFont = new Font(SystemFonts.DefaultFont.FontFamily, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
                                 var size = g.MeasureString(percentText, testFont);
@@ -1089,12 +1089,7 @@ namespace FormsSystemStatsWidget.Core
                 dwLength = (uint) Marshal.SizeOf<MEMORYSTATUSEX>()
             };
 
-            if (!GlobalMemoryStatusEx(ref status))
-            {
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-            }
-
-            return status;
+            return !GlobalMemoryStatusEx(ref status) ? throw new Win32Exception(Marshal.GetLastWin32Error()) : status;
         }
 
         /// <summary>

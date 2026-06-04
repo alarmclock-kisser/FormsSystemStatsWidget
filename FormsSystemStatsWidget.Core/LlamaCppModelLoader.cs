@@ -59,7 +59,7 @@ namespace FormsSystemStatsWidget.Core
             {
                 return null;
             }
-            
+
             var ggufFiles = System.IO.Directory.GetFiles(modelRootDir, "*.gguf");
             if (ggufFiles.Length <= 1)
             {

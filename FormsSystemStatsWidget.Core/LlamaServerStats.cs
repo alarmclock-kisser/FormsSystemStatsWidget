@@ -92,7 +92,9 @@ namespace FormsSystemStatsWidget.Core
                             activeTaskId = 1;
                         }
 
-                        var nDecodedNode = slotNode["n_decoded"];
+                        // FIX: llama.cpp API sendet "n_decoded_tokens" als Key, im C++ Log steht es intern als "n_decoded".
+                        var nDecodedNode = slotNode["n_decoded_tokens"] ?? slotNode["n_decoded"];
+
                         if (nDecodedNode != null && int.TryParse(nDecodedNode.ToString(), out int nDecoded))
                         {
                             currentNDecoded += nDecoded;

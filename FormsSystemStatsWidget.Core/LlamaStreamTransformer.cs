@@ -15,7 +15,7 @@ namespace FormsSystemStatsWidget.Core
         private static readonly Regex ParameterRegex = ParamsRegex();
         private static readonly Regex QwenToolCallRegex = QwenToolRegex(); // NEUER PARSER
 
-        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama")
+        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", double temperature = 0.3)
         {
             try
             {
@@ -24,6 +24,11 @@ namespace FormsSystemStatsWidget.Core
 
                 if (node is JsonObject root)
                 {
+                    // ====================================================================
+                    // TEMPERATUR-OVERRIDE: Zwingt das Modell in den deterministischen Modus
+                    // ====================================================================
+                    root["temperature"] = temperature;
+
                     root.Remove("parallel_tool_calls");
                     root.Remove("store");
 
@@ -295,12 +300,9 @@ namespace FormsSystemStatsWidget.Core
                 return JsonValue.Create(longValue);
             }
 
-            if (double.TryParse(normalizedValue, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double doubleValue))
-            {
-                return JsonValue.Create(doubleValue);
-            }
-
-            return JsonValue.Create(normalizedValue);
+            return double.TryParse(normalizedValue, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double doubleValue)
+                ? JsonValue.Create(doubleValue)
+                : JsonValue.Create(normalizedValue);
         }
 
         private static JsonArray CreateToolCallsArray(JsonObject parsedToolCall)
@@ -342,16 +344,27 @@ namespace FormsSystemStatsWidget.Core
                 {
                     if (!toolCallTriggered)
                     {
-                        await writer.WriteLineAsync(line);
+                        try
+                        {
+                            await writer.WriteLineAsync(line);
+                            await writer.FlushAsync();
+                        }
+                        catch (IOException) { break; }
+                        catch (System.Net.HttpListenerException) { break; }
+                        catch { break; }
                     }
-
                     continue;
                 }
 
                 var dataStr = line["data: ".Length..].Trim();
                 if (dataStr == "[DONE]")
                 {
-                    try { await writer.WriteLineAsync(line); } catch { }
+                    try
+                    {
+                        await writer.WriteLineAsync(line);
+                        await writer.FlushAsync();
+                    }
+                    catch { }
                     break;
                 }
 
@@ -363,8 +376,8 @@ namespace FormsSystemStatsWidget.Core
                         if (!toolCallTriggered)
                         {
                             await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
+                            await writer.FlushAsync();
                         }
-
                         continue;
                     }
 
@@ -378,10 +391,47 @@ namespace FormsSystemStatsWidget.Core
 
                     if (delta != null)
                     {
-                        // PRIO 2: Reasoning-Content nativ belassen! Kein <think> Wrapping mehr!
-                        // Copilot (VS2026) rendert das `reasoning_content` JSON-Feld nativ als ausklappbaren Spoiler.
+                        // ====================================================================
+                        // REASONING INTERCEPTOR (Robuste Markdown Version für VS Copilot)
+                        // Wandelt reasoning_content in visuelle Zitate (Blockquotes) um.
+                        // ====================================================================
+                        bool hasReasoning = delta.ContainsKey("reasoning_content") && delta["reasoning_content"] != null && !string.IsNullOrEmpty(delta["reasoning_content"]?.ToString());
+                        bool hasContent = delta.ContainsKey("content") && delta["content"] != null && !string.IsNullOrEmpty(delta["content"]?.ToString());
 
-                        if (delta.ContainsKey("content"))
+                        if (hasReasoning)
+                        {
+                            string rContent = delta["reasoning_content"]!.ToString();
+                            delta.Remove("reasoning_content");
+
+                            // Verwandelt Zeilenumbrüche im Gedankengang in Zitat-Umbrüche
+                            rContent = rContent.Replace("\n", "\n> ");
+
+                            if (!isReceivingReasoning)
+                            {
+                                rContent = "\n\n> 🧠 **Gedankengang:**\n> " + rContent;
+                                isReceivingReasoning = true;
+                            }
+
+                            delta["content"] = rContent;
+                            hasContent = true;
+                        }
+                        else if (isReceivingReasoning && hasContent)
+                        {
+                            string nContent = delta["content"]!.ToString();
+
+                            // Beendet das Zitat durch eine doppelte Leerzeile vor der echten Antwort
+                            delta["content"] = "\n\n" + nContent;
+                            isReceivingReasoning = false;
+                        }
+                        else if (isReceivingReasoning && choice != null && choice.ContainsKey("finish_reason") && choice["finish_reason"]?.ToString() != null)
+                        {
+                            // Beendet das Zitat sauber, falls der Stream abrupt endet
+                            delta["content"] = (delta["content"]?.ToString() ?? "") + "\n\n";
+                            isReceivingReasoning = false;
+                        }
+                        // ====================================================================
+
+                        if (hasContent)
                         {
                             var content = delta["content"]?.ToString();
 
@@ -400,21 +450,22 @@ namespace FormsSystemStatsWidget.Core
                                         delta.Remove("content");
                                         delta.Remove("reasoning_content");
                                         delta["tool_calls"] = toolCallsArray;
-                                        if (choice != null) choice["finish_reason"] = null;
+                                        choice?["finish_reason"] = null;
 
                                         await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
 
                                         var finishChunk = new JsonObject
                                         {
                                             ["choices"] = new JsonArray {
-                                                new JsonObject {
-                                                    ["delta"] = new JsonObject(),
-                                                    ["finish_reason"] = "tool_calls",
-                                                    ["index"] = 0
-                                                }
-                                            }
+                                        new JsonObject {
+                                            ["delta"] = new JsonObject(),
+                                            ["finish_reason"] = "tool_calls",
+                                            ["index"] = 0
+                                        }
+                                    }
                                         };
                                         await writer.WriteLineAsync("data: " + finishChunk.ToJsonString());
+                                        await writer.FlushAsync();
                                         toolBuffer = "";
                                     }
                                     continue;
@@ -433,6 +484,7 @@ namespace FormsSystemStatsWidget.Core
                                     {
                                         delta["content"] = textBeforeToolCall;
                                         await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
+                                        await writer.FlushAsync();
                                     }
                                     detectBuffer = "";
                                     continue;
@@ -451,16 +503,20 @@ namespace FormsSystemStatsWidget.Core
                                             break;
                                         }
                                     }
-                                    if (isPartial) break;
+                                    if (isPartial)
+                                    {
+                                        break;
+                                    }
                                 }
 
                                 if (!isPartial)
                                 {
                                     delta["content"] = detectBuffer;
                                     await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
+                                    await writer.FlushAsync();
                                     detectBuffer = "";
                                 }
-                                continue; // Write handled manually to hold buffers
+                                continue;
                             }
                         }
 
@@ -468,14 +524,34 @@ namespace FormsSystemStatsWidget.Core
                         if (!delta.ContainsKey("content") || string.IsNullOrEmpty(delta["content"]?.ToString()))
                         {
                             await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
+                            await writer.FlushAsync();
                         }
                     }
                 }
-                catch
+                catch (IOException)
                 {
-                    try { await writer.WriteLineAsync(line); } catch { }
+                    Logger.Log("[Disconnect] Copilot hat die Anfrage abgebrochen (Timeout/Stop). Beende llama-server Generierung...");
+                    break; // Bricht die Schleife ab -> Stream wird disposed -> llama-server stoppt sofort!
                 }
-            }
+                catch (System.Net.HttpListenerException)
+                {
+                    Logger.Log("[Disconnect] HTTP Verbindung getrennt. Beende llama-server Generierung...");
+                    break; // Bricht die Schleife ab -> Stream wird disposed -> llama-server stoppt sofort!
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[Transformer-Error] {ex.Message}");
+                    try
+                    {
+                        await writer.WriteLineAsync(line);
+                        await writer.FlushAsync();
+                    }
+                    catch
+                    {
+                        break; // Wenn der Fallback auch fehlschlägt: Raus hier und Ressourcen freigeben!
+                    }
+                }
+            } // ENDE DER WHILE-SCHLEIFE
 
             // Flush remaining partial tool detection buffer just in case the model stopped mid-word
             if (!string.IsNullOrEmpty(detectBuffer) && !toolCallTriggered && !inToolCall)
@@ -483,13 +559,18 @@ namespace FormsSystemStatsWidget.Core
                 var finalChunk = new JsonObject
                 {
                     ["choices"] = new JsonArray {
-                        new JsonObject {
-                            ["delta"] = new JsonObject { ["content"] = detectBuffer },
-                            ["index"] = 0
-                        }
-                    }
+                new JsonObject {
+                    ["delta"] = new JsonObject { ["content"] = detectBuffer },
+                    ["index"] = 0
+                }
+            }
                 };
-                try { await writer.WriteLineAsync("data: " + finalChunk.ToJsonString()); } catch { }
+                try
+                {
+                    await writer.WriteLineAsync("data: " + finalChunk.ToJsonString());
+                    await writer.FlushAsync();
+                }
+                catch { }
             }
 
             if (!string.IsNullOrWhiteSpace(responseTextBuffer))
@@ -497,12 +578,14 @@ namespace FormsSystemStatsWidget.Core
                 string cleanLog = responseTextBuffer.Replace("\r", "").Replace("\n", " ").Trim();
                 if (cleanLog.Length > 200)
                 {
-                    cleanLog = cleanLog.Substring(0, 200) + "...";
+                    cleanLog = string.Concat(cleanLog.AsSpan(0, 200), "...");
                 }
 
                 Logger.Log($"[LLM Output Summary] Generated text: {cleanLog}");
             }
         }
+
+
 
         [GeneratedRegex(@"<function=(?<name>[^\s>]+)>\s*(?<body>.*?)\s*</function>(?:\s*</tool_call>)?", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline, "de-DE")]
         private static partial Regex FunctionRegex();

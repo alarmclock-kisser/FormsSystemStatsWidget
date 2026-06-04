@@ -884,12 +884,7 @@ namespace FormsSystemStatsWidget.Forms
                 return text;
             }
 
-            if (maxLen <= 3)
-            {
-                return text.Substring(0, maxLen);
-            }
-
-            return string.Concat(text.AsSpan(0, maxLen - 3), "...");
+            return maxLen <= 3 ? text.Substring(0, maxLen) : string.Concat(text.AsSpan(0, maxLen - 3), "...");
         }
 
         /// <summary>
@@ -980,20 +975,15 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;
+            string ollamaPortStr = this.toolStripTextBox_ollamaPort.Text.Trim();
 
-            // Die erste Zeile (Ports) sicher extrahieren und erhalten
-            string baseText = this.label_routingPortsInfo.Text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None)[0];
-
-            // Fallback, falls das Label leer war oder überschrieben wurde
-            if (string.IsNullOrWhiteSpace(baseText) || !baseText.StartsWith("Port"))
-            {
-                baseText = $"Port {llamaPort} to {this.toolStripTextBox_ollamaPort.Text.Trim()}";
-            }
+            // FIX: Niemals den Text aus dem Label parsen, da Asynchronität zu kaputten Strings wie "Port: ----" führen kann.
+            // Immer sauber frisch aus den Config-Textboxen aufbauen!
+            string baseText = $"Port {llamaPort} to {ollamaPortStr}";
 
             // Geschwindigkeit abrufen
             float genSpeed = await LlamaServerStats.GetCurrentLlamaServerGenerationStatsAsync(llamaPort) ?? 0f;
 
-            // FIX: Den Speed-String immer formatieren, auch bei Idle (0f). Das verhindert Flackern.
             string speedString = genSpeed > 0f ? $"{genSpeed:0.000} tokens/s" : "Idle (0.000 tokens/s)";
             string nextText = $"{baseText}{Environment.NewLine}{speedString}";
 
@@ -1005,7 +995,6 @@ namespace FormsSystemStatsWidget.Forms
                     {
                         this.label_routingPortsInfo.Text = nextText;
 
-                        // Optional: Logs nur schreiben, wenn auch wirklich was generiert wird
                         if (genSpeed > 0f && this.toolStripMenuItem_logGenerationSpeed.Checked)
                         {
                             Logger.Log($" --- Llama server generation speed: {genSpeed:0.000} tokens/s");
@@ -1021,12 +1010,9 @@ namespace FormsSystemStatsWidget.Forms
         private Task<IReadOnlyList<(string processName, double cpuPercent)>> GetTopTasksSnapshotAsync()
         {
             DateTime nowUtc = DateTime.UtcNow;
-            if ((nowUtc - this._lastTopTasksSampleUtc) < TopTasksSamplingInterval)
-            {
-                return Task.FromResult(this._cachedTopTasks);
-            }
-
-            return Task.Run(() =>
+            return (nowUtc - this._lastTopTasksSampleUtc) < TopTasksSamplingInterval
+                ? Task.FromResult(this._cachedTopTasks)
+                : Task.Run(() =>
             {
                 IReadOnlyList<(string processName, double cpuPercent)> sampledTopTasks = CpuStats.GetTopCpuProcesses();
                 this._cachedTopTasks = sampledTopTasks;
