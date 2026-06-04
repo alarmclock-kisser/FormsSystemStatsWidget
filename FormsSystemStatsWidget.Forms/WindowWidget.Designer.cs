@@ -83,6 +83,8 @@
             this.toolStripTextBox_temperature = new ToolStripTextBox();
             this.toolStripMenuItem_repetitionPenalty = new ToolStripMenuItem();
             this.toolStripTextBox_repetationPenalty = new ToolStripTextBox();
+            this.toolStripMenuItem_thinkingBudget = new ToolStripMenuItem();
+            this.toolStripTextBox_thinkingBudget = new ToolStripTextBox();
             this.rerouteAPILlamacppOllamaToolStripMenuItem = new ToolStripMenuItem();
             this.llamacppPortToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripTextBox_llamacppPort = new ToolStripTextBox();
@@ -142,7 +144,7 @@
             // 
             this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.selectGPUToolStripMenuItem, this.diagramColorToolStripMenuItem, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.showTokenssToolStripMenuItem, this.toolStripSeparator2, this.openDebugConsoleToolStripMenuItem });
             this.contextMenuStrip_widget.Name = "contextMenuStrip_widget";
-            this.contextMenuStrip_widget.Size = new Size(254, 280);
+            this.contextMenuStrip_widget.Size = new Size(254, 258);
             this.contextMenuStrip_widget.Text = "Settings";
             // 
             // updateIntervalToolStripMenuItem
@@ -329,7 +331,7 @@
             // 
             // toolStripMenuItem_loadLlamaCppServer
             // 
-            this.toolStripMenuItem_loadLlamaCppServer.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_modelsDirectory, this.toolStripComboBox_ggufModels, this.toolStripMenuItem_loadMmproj, this.toolStripMenuItem_contextSize, this.toolStripMenuItem_batchSize, this.toolStripMenuItem_splitMode, this.toolStripMenuItem_tensorSplit, this.toolStripMenuItem_flashAttention, this.toolStripMenuItem_gpuLayersCount, this.toolStripMenuItem_parallelSlots, this.toolStripMenuItem_noWarmup, this.toolStripMenuItem_fitMode, this.KVoffload_ToolStripMenuItem, this.toolStripSeparator3, this.toolStripMenuItem_temperature, this.toolStripMenuItem_repetitionPenalty });
+            this.toolStripMenuItem_loadLlamaCppServer.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_modelsDirectory, this.toolStripComboBox_ggufModels, this.toolStripMenuItem_loadMmproj, this.toolStripMenuItem_contextSize, this.toolStripMenuItem_batchSize, this.toolStripMenuItem_splitMode, this.toolStripMenuItem_tensorSplit, this.toolStripMenuItem_flashAttention, this.toolStripMenuItem_gpuLayersCount, this.toolStripMenuItem_parallelSlots, this.toolStripMenuItem_noWarmup, this.toolStripMenuItem_fitMode, this.KVoffload_ToolStripMenuItem, this.toolStripSeparator3, this.toolStripMenuItem_temperature, this.toolStripMenuItem_repetitionPenalty, this.toolStripMenuItem_thinkingBudget });
             this.toolStripMenuItem_loadLlamaCppServer.Name = "toolStripMenuItem_loadLlamaCppServer";
             this.toolStripMenuItem_loadLlamaCppServer.Size = new Size(253, 22);
             this.toolStripMenuItem_loadLlamaCppServer.Text = "Load Model (llama-server.exe)";
@@ -375,7 +377,7 @@
             // 
             this.toolStripTextBox_contextSize.Name = "toolStripTextBox_contextSize";
             this.toolStripTextBox_contextSize.Size = new Size(100, 23);
-            this.toolStripTextBox_contextSize.Text = "32768";
+            this.toolStripTextBox_contextSize.Text = "65536";
             this.toolStripTextBox_contextSize.KeyDown += this.toolStripTextBox_contextSize_KeyDown;
             // 
             // toolStripMenuItem_batchSize
@@ -475,10 +477,12 @@
             // 
             // KVoffload_ToolStripMenuItem
             // 
+            this.KVoffload_ToolStripMenuItem.Checked = true;
             this.KVoffload_ToolStripMenuItem.CheckOnClick = true;
+            this.KVoffload_ToolStripMenuItem.CheckState = CheckState.Checked;
             this.KVoffload_ToolStripMenuItem.Name = "KVoffload_ToolStripMenuItem";
             this.KVoffload_ToolStripMenuItem.Size = new Size(340, 22);
-            this.KVoffload_ToolStripMenuItem.Text = "KV-offload (context flows also in RAM (slower))";
+            this.KVoffload_ToolStripMenuItem.Text = "KV-offload (context only in VRAM (faster))";
             // 
             // toolStripSeparator3
             // 
@@ -496,7 +500,7 @@
             // 
             this.toolStripTextBox_temperature.Name = "toolStripTextBox_temperature";
             this.toolStripTextBox_temperature.Size = new Size(100, 23);
-            this.toolStripTextBox_temperature.Text = "0.25";
+            this.toolStripTextBox_temperature.Text = "0.2";
             this.toolStripTextBox_temperature.KeyDown += this.toolStripTextBox_temperature_KeyDown;
             // 
             // toolStripMenuItem_repetitionPenalty
@@ -512,6 +516,20 @@
             this.toolStripTextBox_repetationPenalty.Size = new Size(100, 23);
             this.toolStripTextBox_repetationPenalty.Text = "1.25";
             this.toolStripTextBox_repetationPenalty.KeyDown += this.toolStripTextBox_repetationPenalty_KeyDown;
+            // 
+            // toolStripMenuItem_thinkingBudget
+            // 
+            this.toolStripMenuItem_thinkingBudget.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_thinkingBudget });
+            this.toolStripMenuItem_thinkingBudget.Name = "toolStripMenuItem_thinkingBudget";
+            this.toolStripMenuItem_thinkingBudget.Size = new Size(340, 22);
+            this.toolStripMenuItem_thinkingBudget.Text = "Thinking Budget";
+            // 
+            // toolStripTextBox_thinkingBudget
+            // 
+            this.toolStripTextBox_thinkingBudget.Name = "toolStripTextBox_thinkingBudget";
+            this.toolStripTextBox_thinkingBudget.Size = new Size(100, 23);
+            this.toolStripTextBox_thinkingBudget.Text = "16384";
+            this.toolStripTextBox_thinkingBudget.KeyDown += this.toolStripTextBox_thinkingBudget_KeyDown;
             // 
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 
@@ -825,5 +843,7 @@
         private ToolStripTextBox toolStripTextBox_temperature;
         private ToolStripMenuItem toolStripMenuItem_repetitionPenalty;
         private ToolStripTextBox toolStripTextBox_repetationPenalty;
+        private ToolStripMenuItem toolStripMenuItem_thinkingBudget;
+        private ToolStripTextBox toolStripTextBox_thinkingBudget;
     }
 }

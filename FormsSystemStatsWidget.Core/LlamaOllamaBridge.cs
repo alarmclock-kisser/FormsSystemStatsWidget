@@ -30,9 +30,11 @@ namespace FormsSystemStatsWidget.Core
         private static int _detectedNumCtx = 4096;
         private static double _detectedTemperature = 0.7;
 
+
         // Options / Settings from UI set
         public static double UserDefinedTemperature { get; set; } = 0.7;
         public static double UserDefinedRepetitionPenalty { get; set; } = 1.1;
+        public static int UserDefinedThinkingBudget { get; set; } = 4096;
 
         private static readonly HttpClient _httpClient = new();
 
@@ -165,7 +167,7 @@ namespace FormsSystemStatsWidget.Core
                     // Read incoming stream to pass it through the sanitize filter
                     using var reader = new StreamReader(request.InputStream);
                     var requestBody = await reader.ReadToEndAsync();
-                    string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, UserDefinedTemperature, UserDefinedRepetitionPenalty);
+                    string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty);
 
                     Logger.Log("========================================");
                     Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");

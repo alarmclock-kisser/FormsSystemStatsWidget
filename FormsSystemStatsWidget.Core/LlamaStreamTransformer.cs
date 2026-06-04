@@ -15,7 +15,7 @@ namespace FormsSystemStatsWidget.Core
         private static readonly Regex ParameterRegex = ParamsRegex();
         private static readonly Regex QwenToolCallRegex = QwenToolRegex(); // NEUER PARSER
 
-        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", double temperature = 0.3, double repetitionPenalty = 1.25)
+        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25)
         {
             try
             {
@@ -43,7 +43,38 @@ namespace FormsSystemStatsWidget.Core
 
                             NormalizeToolHistoryMessage(msg, flattenToolHistory);
                         }
+
+                        int maxPromptTokens = (int) (numCtx * 0.90);
+                        int hardCharLimit = maxPromptTokens * 3;
+                        Logger.Log($"[Sanitizer] Enforcing max prompt length: {maxPromptTokens} tokens (~{hardCharLimit} chars). Original length: {jsonInput.Length} chars.");
+
+                        Func<int> getTotalLength = () => messages.OfType<JsonObject>().Sum(m => m["content"]?.ToString().Length ?? 0);
+                        bool hasSystem = messages.Count() > 0 && messages[0]?["role"]?.ToString().ToLower() == "system";
+                        int deleteIndex = hasSystem ? 1 : 0;
+
+                        while (getTotalLength() > hardCharLimit && messages.Count > (hasSystem ? 2 : 1))
+                        {
+                            messages.RemoveAt(deleteIndex);
+                        }
+
+                        if (getTotalLength() > hardCharLimit && messages.Count > 0)
+                        {
+                            var lastMsg = messages.Last() as JsonObject;
+                            if (lastMsg != null && lastMsg["content"] != null)
+                            {
+                                string content = lastMsg["content"]!.ToString();
+                                if (content.Length > hardCharLimit)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"[Proxy-Rolling] Last message too long. Truncating to {hardCharLimit} chars.");
+
+                                    // Letzte X Zeichen behalten (Code am Cursor)
+                                    string truncatedContent = string.Concat($"// [Context automatically rolled by proxy to fit dynamic limit of {numCtx} ctx]\r\n", content.AsSpan(content.Length - hardCharLimit + 500));
+                                    lastMsg["content"] = truncatedContent;
+                                }
+                            }
+                        }
                     }
+                    return node.ToJsonString();
                 }
 
                 Logger.Log($"[Sanitized Request] {node?.ToJsonString() ?? jsonInput}");
