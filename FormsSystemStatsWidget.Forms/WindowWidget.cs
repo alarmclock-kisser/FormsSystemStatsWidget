@@ -67,6 +67,7 @@ namespace FormsSystemStatsWidget.Forms
             this.InitializeComponent();
             this.DoubleBuffered = true;
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
+            this.ConfigureContextMenuAutoCloseBehavior();
 
             this.UpdateTimer = new Timer();
             this.UpdateTimer.Interval = this._updateIntervalMs;
@@ -135,6 +136,12 @@ namespace FormsSystemStatsWidget.Forms
                     this.toolStripTextBox_tensorSplit.Text = "";
                 }
             }
+        }
+
+        private void ConfigureContextMenuAutoCloseBehavior()
+        {
+            this.toolStripMenuItem_loadLlamaCppServer.DropDown.AutoClose = false;
+            this.openDebugConsoleToolStripMenuItem.DropDown.AutoClose = false;
         }
 
         private void ApplyGpuLayout()

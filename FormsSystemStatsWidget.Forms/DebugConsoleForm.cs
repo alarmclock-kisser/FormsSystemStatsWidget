@@ -1,10 +1,13 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Windows.Forms;
 
 namespace FormsSystemStatsWidget.Forms
 {
     internal sealed class DebugConsoleForm : Form
     {
+        private const int MaxRepositoryLogFiles = 16;
         private readonly TextBox _logTextBox;
         private readonly ContextMenuStrip _contextMenuStrip_textBox_log;
 
@@ -91,11 +94,12 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             string content = this._logTextBox.Text;
+            string logsDirectory = GetRepositoryLogsDirectory();
+            Directory.CreateDirectory(logsDirectory);
 
-            // SFD at RepoDirectory\.Forms proj\Ressources\Logs\ for .TXT files, initial file name = FSSWidget_Logs_<TimeStamp>
             SaveFileDialog sfd = new()
             {
-                InitialDirectory = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "Logs"),
+                InitialDirectory = logsDirectory,
                 FileName = $"FSSWidget_Logs_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.txt",
                 Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*",
                 RestoreDirectory = true
@@ -105,7 +109,8 @@ namespace FormsSystemStatsWidget.Forms
             {
                 try
                 {
-                    System.IO.File.WriteAllText(sfd.FileName, content);
+                    File.WriteAllText(sfd.FileName, content);
+                    PruneRepositoryLogFiles(logsDirectory, sfd.FileName);
                     MessageBox.Show($"Logs saved successfully at \n{sfd.FileName}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
@@ -113,6 +118,48 @@ namespace FormsSystemStatsWidget.Forms
                     MessageBox.Show($"Error saving logs to \n{sfd.FileName}: \n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
 
+            }
+        }
+
+        private static string GetRepositoryLogsDirectory()
+        {
+            DirectoryInfo? directory = new(AppDomain.CurrentDomain.BaseDirectory);
+            while (directory != null)
+            {
+                string formsProjectDirectory = Path.Combine(directory.FullName, "FormsSystemStatsWidget.Forms");
+                if (Directory.Exists(formsProjectDirectory))
+                {
+                    return Path.Combine(formsProjectDirectory, "Ressources", "Logs");
+                }
+
+                if (string.Equals(directory.Name, "FormsSystemStatsWidget.Forms", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Path.Combine(directory.FullName, "Ressources", "Logs");
+                }
+
+                directory = directory.Parent;
+            }
+
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "Logs");
+        }
+
+        private static void PruneRepositoryLogFiles(string logsDirectory, string preserveFilePath)
+        {
+            string fullPreserveFilePath = Path.GetFullPath(preserveFilePath);
+            FileInfo[] logFiles = new DirectoryInfo(logsDirectory)
+                .EnumerateFiles("*.txt", SearchOption.TopDirectoryOnly)
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .ThenByDescending(file => file.Name, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            foreach (FileInfo logFile in logFiles.Skip(MaxRepositoryLogFiles))
+            {
+                if (string.Equals(logFile.FullName, fullPreserveFilePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                logFile.Delete();
             }
         }
     }

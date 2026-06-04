@@ -32,6 +32,8 @@ bld/
 [Oo]ut/
 [Ll]og/
 [Ll]ogs/
+!FormsSystemStatsWidget.Forms/Ressources/Logs/
+!FormsSystemStatsWidget.Forms/Ressources/Logs/*.txt
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/

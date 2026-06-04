@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Globalization;
 using System.Net.Http;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -50,6 +51,7 @@ namespace FormsSystemStatsWidget.Core
                 bool anySlotActive = false;
                 int activeTaskId = -1;
                 int currentNDecoded = 0;
+                float directTokensPerSecond = 0f;
 
                 foreach (var slotNode in slotsArray)
                 {
@@ -92,12 +94,20 @@ namespace FormsSystemStatsWidget.Core
                             activeTaskId = 1;
                         }
 
-                        // FIX: llama.cpp API sendet "n_decoded_tokens" als Key, im C++ Log steht es intern als "n_decoded".
-                        var nDecodedNode = slotNode["n_decoded_tokens"] ?? slotNode["n_decoded"];
-
-                        if (nDecodedNode != null && int.TryParse(nDecodedNode.ToString(), out int nDecoded))
+                        if (TryReadInt(slotNode, out int nDecoded, "n_decoded_tokens", "n_decoded", "n_decode", "n_tokens_predicted", "n_predict", "tokens_predicted"))
                         {
                             currentNDecoded += nDecoded;
+                        }
+
+                        if (TryReadFloat(slotNode, out float slotTokensPerSecond, "tokens_per_second", "tokens/s", "predicted_per_second", "generation_tokens_per_second"))
+                        {
+                            directTokensPerSecond += slotTokensPerSecond;
+                        }
+
+                        JsonNode? timingsNode = slotNode["timings"];
+                        if (timingsNode != null && TryReadFloat(timingsNode, out slotTokensPerSecond, "predicted_per_second", "generation_tokens_per_second"))
+                        {
+                            directTokensPerSecond += slotTokensPerSecond;
                         }
                     }
                 }
@@ -117,13 +127,24 @@ namespace FormsSystemStatsWidget.Core
                     _lastTaskId = activeTaskId;
                     _lastNDecoded = currentNDecoded;
                     _lastCheckTime = now;
+                    if (directTokensPerSecond > 0f)
+                    {
+                        _currentTps = directTokensPerSecond;
+                    }
+
                     return _currentTps > 0 ? _currentTps : 0f;
                 }
 
                 int deltaTokens = currentNDecoded - _lastNDecoded;
                 double deltaSeconds = (now - _lastCheckTime).TotalSeconds;
 
-                if (deltaSeconds > 0 && deltaTokens >= 0)
+                if (directTokensPerSecond > 0f)
+                {
+                    _currentTps = directTokensPerSecond;
+                    _lastNDecoded = currentNDecoded;
+                    _lastCheckTime = now;
+                }
+                else if (deltaSeconds > 0 && deltaTokens >= 0)
                 {
                     if (deltaTokens > 0)
                     {
@@ -166,6 +187,36 @@ namespace FormsSystemStatsWidget.Core
 
                 return _currentTps > 0 ? _currentTps : 0.001f;
             }
+        }
+
+        private static bool TryReadInt(JsonNode node, out int value, params string[] propertyNames)
+        {
+            value = 0;
+            foreach (string propertyName in propertyNames)
+            {
+                JsonNode? valueNode = node[propertyName];
+                if (valueNode != null && int.TryParse(valueNode.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryReadFloat(JsonNode node, out float value, params string[] propertyNames)
+        {
+            value = 0f;
+            foreach (string propertyName in propertyNames)
+            {
+                JsonNode? valueNode = node[propertyName];
+                if (valueNode != null && float.TryParse(valueNode.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value) && value > 0f)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }
