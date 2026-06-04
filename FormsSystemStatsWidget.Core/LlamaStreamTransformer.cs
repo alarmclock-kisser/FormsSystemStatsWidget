@@ -15,7 +15,7 @@ namespace FormsSystemStatsWidget.Core
         private static readonly Regex ParameterRegex = ParamsRegex();
         private static readonly Regex QwenToolCallRegex = QwenToolRegex(); // NEUER PARSER
 
-        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", double temperature = 0.3)
+        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", double temperature = 0.3, double repetitionPenalty = 1.25)
         {
             try
             {
@@ -28,6 +28,7 @@ namespace FormsSystemStatsWidget.Core
                     // TEMPERATUR-OVERRIDE: Zwingt das Modell in den deterministischen Modus
                     // ====================================================================
                     root["temperature"] = temperature;
+                    root["repetition_penalty"] = repetitionPenalty;
 
                     root.Remove("parallel_tool_calls");
                     root.Remove("store");
@@ -45,6 +46,7 @@ namespace FormsSystemStatsWidget.Core
                     }
                 }
 
+                Logger.Log($"[Sanitized Request] {node?.ToJsonString() ?? jsonInput}");
                 return node?.ToJsonString() ?? jsonInput;
             }
             catch (Exception ex)
