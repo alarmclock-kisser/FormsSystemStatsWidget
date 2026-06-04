@@ -140,8 +140,16 @@ namespace FormsSystemStatsWidget.Forms
 
         private void ConfigureContextMenuAutoCloseBehavior()
         {
-            this.toolStripMenuItem_loadLlamaCppServer.DropDown.AutoClose = false;
-            this.openDebugConsoleToolStripMenuItem.DropDown.AutoClose = false;
+            this.toolStripMenuItem_loadLlamaCppServer.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.openDebugConsoleToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+        }
+
+        private void KeepSelectedSubMenuOpenForItemClicks(object? sender, ToolStripDropDownClosingEventArgs e)
+        {
+            if (e.CloseReason == ToolStripDropDownCloseReason.ItemClicked)
+            {
+                e.Cancel = true;
+            }
         }
 
         private void ApplyGpuLayout()
