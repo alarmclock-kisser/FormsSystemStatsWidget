@@ -843,6 +843,11 @@ namespace FormsSystemStatsWidget.Forms
         {
             // Get llama-server.exe Processes running
             var processes = WidgetStatics.GetLlamaServerProcesses();
+
+            // Always remove both handlers first to ensure a clean state and avoid duplicates
+            this.toolStripMenuItem_loadLlamaCppServer.Click -= this.toolStripMenuItem_loadLlamaCppServer_Click;
+            this.toolStripMenuItem_loadLlamaCppServer.Click -= this.ToolStripMenuItem_killLlamaServer_Click;
+
             if (processes.Count > 0)
             {
                 this.toolStripMenuItem_execModelLoadBat.Enabled = false;
@@ -854,6 +859,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripMenuItem_execModelLoadBat.Enabled = true;
                 this.toolStripMenuItem_loadLlamaCppServer.Text = "Load Model (llama-server.exe)";
+                this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false;
                 this.toolStripMenuItem_loadLlamaCppServer.Click -= this.ToolStripMenuItem_killLlamaServer_Click;
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;
             }

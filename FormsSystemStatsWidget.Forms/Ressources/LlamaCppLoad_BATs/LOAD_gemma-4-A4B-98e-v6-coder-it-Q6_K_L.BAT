@@ -12,6 +12,6 @@ llama-server ^
  --no-warmup ^
  --kv-offload ^
  -fit on ^
- -tb 4096
+ -tb 16384
 
 pause
