@@ -1,6 +1,7 @@
 ﻿using FormsSystemStatsWidget.Core;
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -119,7 +120,7 @@ namespace FormsSystemStatsWidget.Forms
 
 
         // Load llama-server.exe GGUF model
-        private void toolStripMenuItem_loadLlamaCppServer_Click(object sender, EventArgs e)
+        private void toolStripMenuItem_loadLlamaCppServer_Click(object? sender, EventArgs e)
         {
             string? selectedModel = this.toolStripComboBox_ggufModels.SelectedItem as string;
             if (selectedModel == null)
@@ -154,7 +155,7 @@ namespace FormsSystemStatsWidget.Forms
             bool fitMode = this.toolStripMenuItem_fitMode.Checked;
             int? thinkingBudget = this.toolStripTextBox_thinkingBudget.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_thinkingBudget.Text.Trim(), out int parsedThinkingBudget) ? parsedThinkingBudget : null;
 
-            // Aggregate CMD call
+            // Aggregate CMD call (Single Line)
             var sb = new StringBuilder();
             sb.Append($"llama-server ");
             sb.Append($"-m \"{selectedModel}\" ");
@@ -193,31 +194,93 @@ namespace FormsSystemStatsWidget.Forms
                 sb.Append($"-tb {thinkingBudget.Value} ");
             }
 
-            // Get multiline string, split at every arg (starting with " -" or " --")
+            // HIER DIE ANPASSUNG: Erzeugt das korrekte Multiline-Format mit dem Windows-Line-Continuation-Zeichen (^)
             string command = sb.ToString().Trim();
-            command = ArgsSplitRegex().Replace(command, Environment.NewLine + " ");
+            command = ArgsSplitRegex().Replace(command, " ^" + Environment.NewLine + " ");
 
             // Show the aggregated command in a MessageBox for confirmation
-            DialogResult result = MessageBox.Show(this, $"The following command will be executed to start llama-server with the selected model and options:\n\n{command}\n\nDo you want to proceed?", "Confirm Command", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            DialogResult result = MessageBox.Show(this, $"The following command will be executed to start llama-server with the selected model and options:\n\n{command}\n\nDo you want to save the current configuration?\nPress Yes to save, No to proceed without saving, or Cancel to abort.", "Confirm Command", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
             if (result == DialogResult.Yes)
             {
-                try
+                // SFD with default file name "LOAD_[MODELNAME].BAT" and default directory to save in
+                string batName = "LOAD_" + Path.GetFileNameWithoutExtension(selectedModel) + ".BAT";
+                var dlg = new SaveFileDialog
                 {
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    Title = "Save Model Load Configuration as Batch File",
+                    Filter = "Batch Files (*.bat)|*.bat",
+                    FileName = batName,
+                    InitialDirectory = WidgetStatics.GetRepositoryDirectory(".Forms", "Ressources\\LlamaCppLoad_BATs")
+                };
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    try
                     {
-                        FileName = "cmd.exe",
-                        Arguments = $"/c {sb}",
-                        UseShellExecute = true,
-                        CreateNoWindow = false,
-                        WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
-                    });
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(this, $"Failed to start llama-server with the selected model. Error: {ex.Message}", "Error Starting Server", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        // Schreibt den Header, den sauber umgebrochenen Befehl und das abschließende "pause"
+                        File.WriteAllText(dlg.FileName, $"@echo off{Environment.NewLine}title llama-server: {Path.GetFileNameWithoutExtension(selectedModel)}{Environment.NewLine}{command}{Environment.NewLine}{Environment.NewLine}pause");
+                        MessageBox.Show(this, $"Configuration saved successfully as batch file:\n{dlg.FileName}", "Batch File Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(this, $"Failed to save the batch file. Error: {ex.Message}", "Error Saving Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                 }
             }
+            if (result == DialogResult.Cancel)
+            {
+                return;
+            }
+
+            try
+            {
+                // Nutzt sb (die einzeilige Variante), da cmd.exe /c mit echten Zeilenumbrüchen in den Arguments zicken würde
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c {sb.ToString().Trim()}",
+                    UseShellExecute = true,
+                    CreateNoWindow = false,
+                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Failed to start llama-server with the selected model. Error: {ex.Message}", "Error Starting Server", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
+
+        private void toolStripMenuItem_execModelLoadBat_Click(object sender, EventArgs e)
+        {
+            string? selectedBatName = this.toolStripComboBox_modelLoadBats.SelectedItem as string;
+            if (string.IsNullOrEmpty(selectedBatName))
+            {
+                MessageBox.Show(this, "No batch file selected. Please select a batch file from the dropdown list.", "No Batch File Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string batFilePath = Path.Combine(WidgetStatics.GetRepositoryDirectory(".Forms", "Ressources\\LlamaCppLoad_BATs"), selectedBatName + ".BAT");
+            if (!File.Exists(batFilePath))
+            {
+                MessageBox.Show(this, $"The selected batch file does not exist:\n{batFilePath}", "Batch File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c \"{batFilePath}\"",
+                    UseShellExecute = true,
+                    CreateNoWindow = false,
+                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Failed to execute the selected batch file. Error: {ex.Message}", "Error Executing Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
 
         private void toolStripComboBox_splitMode_SelectedChanged(object sender, EventArgs e)
         {

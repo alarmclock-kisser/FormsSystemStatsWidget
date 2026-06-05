@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Management;
+using System.Net.NetworkInformation;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -186,5 +189,112 @@ namespace FormsSystemStatsWidget.Forms
 
             return maxLen <= 3 ? text.Substring(0, maxLen) : string.Concat(text.AsSpan(0, maxLen - 3), "...");
         }
+
+
+        public static string GetRepositoryDirectory(string proj = ".Forms", string subDir = "Ressources\\Logs")
+        {
+            // 1. Hol den vollen Assembly-Namen (z.B. "FormsSystemStatsWidget" oder "FormsSystemStatsWidget.Something")
+            string? fullAssemblyName = Assembly.GetExecutingAssembly().GetName().Name;
+            if (string.IsNullOrEmpty(fullAssemblyName))
+            {
+                fullAssemblyName = AppDomain.CurrentDomain.FriendlyName;
+            }
+
+            // 2. Namespace bis zum ersten Punkt holen (z.B. "FormsSystemStatsWidget")
+            int firstDot = fullAssemblyName.IndexOf('.');
+            string baseNamespace = firstDot > 0 ? fullAssemblyName.Substring(0, firstDot) : fullAssemblyName;
+
+            // 3. Den Wunschnamen des Ziel-Projektordners bauen (z.B. "FormsSystemStatsWidget.Forms")
+            string targetProjectName = baseNamespace + proj;
+
+            // Start-Verzeichnis (z.B. ...\bin\Release\win-x64\)
+            DirectoryInfo? directory = new(AppDomain.CurrentDomain.BaseDirectory);
+
+            while (directory != null)
+            {
+                // Option A: Wir stehen im Root (repos\alarmclock-kisser\) und der Zielordner ist ein direktes Unterverzeichnis
+                string potentialTargetDir = Path.Combine(directory.FullName, targetProjectName);
+                if (Directory.Exists(potentialTargetDir))
+                {
+                    return Path.Combine(potentialTargetDir, subDir);
+                }
+
+                // Option B: Wir sind durch das Hochwandern bereits direkt im Zielordner gelandet
+                if (string.Equals(directory.Name, targetProjectName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Path.Combine(directory.FullName, subDir);
+                }
+
+                // Ein Level höher springen
+                directory = directory.Parent;
+            }
+
+            // Fallback, falls nichts gefunden wurde
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, subDir);
+        }
+
+
+        // Public static Method to get all 'llama-server.exe' processes and return them
+        public static List<Process> GetLlamaServerProcesses(int? port = null)
+        {
+            List<Process> llamaProcesses = new();
+            try
+            {
+                Process[] allProcesses = Process.GetProcesses();
+                foreach (Process proc in allProcesses)
+                {
+                    if (port.HasValue)
+                    {
+                        // Only include processes that have a network connection on the specified port
+                        llamaProcesses.Add(proc);
+                    }
+
+                    try
+                    {
+                        if (string.Equals(proc.ProcessName, "llama-server", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(proc.MainModule?.FileName, "llama-server.exe", StringComparison.OrdinalIgnoreCase))
+                        {
+                            llamaProcesses.Add(proc);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore processes we can't access
+                    }
+                }
+            }
+            catch
+            {
+                // Handle any exceptions that may occur when retrieving processes
+            }
+            return llamaProcesses;
+        }
+
+        public static int? KillLlamaServerProcesses(IEnumerable<Process>? processes = null)
+        {
+            int killCount = 0;
+            try
+            {
+                IEnumerable<Process> targetProcesses = processes ?? GetLlamaServerProcesses();
+                foreach (Process proc in targetProcesses)
+                {
+                    try
+                    {
+                        proc.Kill();
+                        killCount++;
+                    }
+                    catch
+                    {
+                        // Ignore processes we can't kill
+                    }
+                }
+            }
+            catch
+            {
+                // Handle any exceptions that may occur when retrieving or killing processes
+            }
+            return killCount;
+        }
+
     }
 }

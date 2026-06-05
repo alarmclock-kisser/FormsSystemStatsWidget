@@ -44,6 +44,7 @@
 
   <ItemGroup>
     <Folder Include="Ressources\Logs\" />
+    <Folder Include="Ressources\LlamaCppLoad_BATs\" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Windows.Forms;
 
 namespace FormsSystemStatsWidget.Forms
@@ -94,7 +95,7 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             string content = this._logTextBox.Text;
-            string logsDirectory = GetRepositoryLogsDirectory();
+            string logsDirectory = WidgetStatics.GetRepositoryDirectory();
             Directory.CreateDirectory(logsDirectory);
 
             SaveFileDialog sfd = new()
@@ -121,29 +122,9 @@ namespace FormsSystemStatsWidget.Forms
             }
         }
 
-        private static string GetRepositoryLogsDirectory()
-        {
-            DirectoryInfo? directory = new(AppDomain.CurrentDomain.BaseDirectory);
-            while (directory != null)
-            {
-                string formsProjectDirectory = Path.Combine(directory.FullName, "FormsSystemStatsWidget.Forms");
-                if (Directory.Exists(formsProjectDirectory))
-                {
-                    return Path.Combine(formsProjectDirectory, "Ressources", "Logs");
-                }
+        
 
-                if (string.Equals(directory.Name, "FormsSystemStatsWidget.Forms", StringComparison.OrdinalIgnoreCase))
-                {
-                    return Path.Combine(directory.FullName, "Ressources", "Logs");
-                }
-
-                directory = directory.Parent;
-            }
-
-            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "Logs");
-        }
-
-        private static void PruneRepositoryLogFiles(string logsDirectory, string preserveFilePath)
+        public static void PruneRepositoryLogFiles(string logsDirectory, string preserveFilePath)
         {
             string fullPreserveFilePath = Path.GetFullPath(preserveFilePath);
             FileInfo[] logFiles = new DirectoryInfo(logsDirectory)

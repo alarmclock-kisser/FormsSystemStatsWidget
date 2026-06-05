@@ -752,7 +752,42 @@ namespace FormsSystemStatsWidget.Forms
 
 
 
+        // Init / Update / Fill ctxmenu items etc.
+        private void contextMenuStrip_widget_Opening(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            // Get llama-server.exe Processes running
+            var processes = WidgetStatics.GetLlamaServerProcesses();
+            if (processes.Count > 0)
+            {
+                this.toolStripComboBox_modelLoadBats.Enabled = false;
+                this.toolStripMenuItem_loadLlamaCppServer.Text = $"Kill llama-server ({processes.Count})";
+                this.toolStripMenuItem_loadLlamaCppServer.Click -= this.toolStripMenuItem_loadLlamaCppServer_Click;
+                this.toolStripMenuItem_loadLlamaCppServer.Click += (_, _) =>
+                {
+                    int? killed = WidgetStatics.KillLlamaServerProcesses(processes);
+                    Logger.Log($"[WindowWidget] Killed {killed} llama-server process(es).");
+                };
+            }
+            else
+            {
+                this.toolStripComboBox_modelLoadBats.Enabled = true;
+                this.toolStripMenuItem_loadLlamaCppServer.Text = "Load Model (llama-server.exe)";
+                this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;
+            }
 
+
+            // Get & fill all .BAT files from Ressources\LlamaCppLoad_BATs\
+            string batsDirectory = WidgetStatics.GetRepositoryDirectory(".Forms", "Ressources\\LlamaCppLoad_BATs");
+            string[] batFilePaths = Directory.GetFiles(batsDirectory, "*.bat").Concat(Directory.GetFiles(batsDirectory, "*.BAT")).ToArray();
+            batFilePaths = batFilePaths.OrderByDescending(File.GetLastWriteTime).ToArray();
+            string[] batFileNames = batFilePaths.Select(path => Path.GetFileNameWithoutExtension(path)).ToArray();
+            this.toolStripComboBox_modelLoadBats.Items.Clear();
+            this.toolStripComboBox_modelLoadBats.Items.AddRange(batFileNames);
+            if (this.toolStripComboBox_modelLoadBats.Items.Count > 0)
+            {
+                this.toolStripComboBox_modelLoadBats.SelectedIndex = 0;
+            }
+        }
     }
 }
 
