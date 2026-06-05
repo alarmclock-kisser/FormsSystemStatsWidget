@@ -1,6 +1,7 @@
 ﻿using FormsSystemStatsWidget.Core;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -200,6 +201,10 @@ namespace FormsSystemStatsWidget.Forms
 
             // Show the aggregated command in a MessageBox for confirmation
             DialogResult result = MessageBox.Show(this, $"The following command will be executed to start llama-server with the selected model and options:\n\n{command}\n\nDo you want to save the current configuration?\nPress Yes to save, No to proceed without saving, or Cancel to abort.", "Confirm Command", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if (result == DialogResult.Cancel)
+            {
+                return;
+            }
             if (result == DialogResult.Yes)
             {
                 // SFD with default file name "LOAD_[MODELNAME].BAT" and default directory to save in
@@ -217,17 +222,13 @@ namespace FormsSystemStatsWidget.Forms
                     {
                         // Schreibt den Header, den sauber umgebrochenen Befehl und das abschließende "pause"
                         File.WriteAllText(dlg.FileName, $"@echo off{Environment.NewLine}title llama-server: {Path.GetFileNameWithoutExtension(selectedModel)}{Environment.NewLine}{command}{Environment.NewLine}{Environment.NewLine}pause");
-                        MessageBox.Show(this, $"Configuration saved successfully as batch file:\n{dlg.FileName}", "Batch File Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        Logger.Log($" -- Saved batch file for loading model: {dlg.FileName} -- ");
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show(this, $"Failed to save the batch file. Error: {ex.Message}", "Error Saving Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
-            }
-            if (result == DialogResult.Cancel)
-            {
-                return;
             }
 
             try
@@ -248,7 +249,7 @@ namespace FormsSystemStatsWidget.Forms
             }
         }
 
-        private void toolStripMenuItem_execModelLoadBat_Click(object sender, EventArgs e)
+        private void toolStripMenuItem_execModelLoadBat_Click(object? sender, EventArgs e)
         {
             string? selectedBatName = this.toolStripComboBox_modelLoadBats.SelectedItem as string;
             if (string.IsNullOrEmpty(selectedBatName))
@@ -280,6 +281,20 @@ namespace FormsSystemStatsWidget.Forms
                 MessageBox.Show(this, $"Failed to execute the selected batch file. Error: {ex.Message}", "Error Executing Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+
+        private void ToolStripMenuItem_killLlamaServer_Click(object? sender, EventArgs e)
+        {
+            try
+            {
+                int? killed = WidgetStatics.KillLlamaServerProcesses();
+                Logger.Log($"[WindowWidget] Killed {killed} llama-server process(es).");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"Failed to kill llama-server processes. Error: {ex.Message}", "Error Killing Processes", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
 
 
         private void toolStripComboBox_splitMode_SelectedChanged(object sender, EventArgs e)

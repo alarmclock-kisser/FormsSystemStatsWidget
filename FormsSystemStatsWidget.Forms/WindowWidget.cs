@@ -759,19 +759,16 @@ namespace FormsSystemStatsWidget.Forms
             var processes = WidgetStatics.GetLlamaServerProcesses();
             if (processes.Count > 0)
             {
-                this.toolStripComboBox_modelLoadBats.Enabled = false;
+                this.toolStripMenuItem_execModelLoadBat.Enabled = false;
                 this.toolStripMenuItem_loadLlamaCppServer.Text = $"Kill llama-server ({processes.Count})";
                 this.toolStripMenuItem_loadLlamaCppServer.Click -= this.toolStripMenuItem_loadLlamaCppServer_Click;
-                this.toolStripMenuItem_loadLlamaCppServer.Click += (_, _) =>
-                {
-                    int? killed = WidgetStatics.KillLlamaServerProcesses(processes);
-                    Logger.Log($"[WindowWidget] Killed {killed} llama-server process(es).");
-                };
+                this.toolStripMenuItem_loadLlamaCppServer.Click += this.ToolStripMenuItem_killLlamaServer_Click;
             }
             else
             {
-                this.toolStripComboBox_modelLoadBats.Enabled = true;
+                this.toolStripMenuItem_execModelLoadBat.Enabled = true;
                 this.toolStripMenuItem_loadLlamaCppServer.Text = "Load Model (llama-server.exe)";
+                this.toolStripMenuItem_loadLlamaCppServer.Click -= this.ToolStripMenuItem_killLlamaServer_Click;
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;
             }
 
