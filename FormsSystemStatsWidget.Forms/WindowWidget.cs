@@ -7,6 +7,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading;
 using System.Threading.Tasks;
 using Timer = System.Windows.Forms.Timer;
 
@@ -42,10 +43,14 @@ namespace FormsSystemStatsWidget.Forms
         private DateTime _lastTopTasksSampleUtc = DateTime.MinValue;
         private DateTime _lastTickDiagnosticsUtc = DateTime.MinValue;
         private DebugConsoleForm? _debugConsoleForm;
+        private WidgetPersistentSettings _persistentSettings = new();
         private bool _explicitWidgetCloseRequested;
         private Process? _llamaServerProcess;
         private CancellationTokenSource? _processCts;
         private readonly HashSet<Keys> _processingKeys = [];
+        private static readonly Regex TokensPerSecondRegex = new(@"(?<tps>\d+(?:\.\d+)?)\s+t/s\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private double _lastStdOutTokensPerSecond;
+        private DateTime _lastStdOutTokensPerSecondUtc = DateTime.MinValue;
 
         private const int WmSysCommand = 0x0112;
         private const int ScClose = 0xF060;
@@ -57,6 +62,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             this.InitializeComponent();
             this.DoubleBuffered = true;
+            this._persistentSettings = WidgetPersistentSettingsStore.Load();
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
             this.ConfigureContextMenuAutoCloseBehavior();
 
@@ -131,6 +137,58 @@ namespace FormsSystemStatsWidget.Forms
             LlamaOllamaBridge.UserDefinedTemperature = double.TryParse(this.toolStripTextBox_temperature.Text, out double temperature) ? temperature : 0.3;
             LlamaOllamaBridge.UserDefinedRepetitionPenalty = double.TryParse(this.toolStripTextBox_repetationPenalty.Text, out double repetitionPenalty) ? repetitionPenalty : 1.1;
             LlamaOllamaBridge.UserDefinedThinkingBudget = int.TryParse(this.toolStripTextBox_thinkingBudget.Text, out int thinkingBudget) ? thinkingBudget : 4096;
+
+            this.enableSmartPromptOptimizationsToolStripMenuItem.Checked = SmartPromptOptimizationSettings.IsEnabled;
+            this.toolStripTextBox_promptSafetyRatio.Text = SmartPromptOptimizationSettings.PromptSafetyRatio.ToString("0.00", CultureInfo.InvariantCulture);
+            this.toolStripTextBox_smartBudgetRatio.Text = SmartPromptOptimizationSettings.SmartBudgetRatio.ToString("0.00", CultureInfo.InvariantCulture);
+            this.toolStripTextBox_largeMessageThresholdChars.Text = SmartPromptOptimizationSettings.LargeMessageThresholdChars.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_skeletonMaxLines.Text = SmartPromptOptimizationSettings.SkeletonMaxLines.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_focusKeywordLimit.Text = SmartPromptOptimizationSettings.FocusKeywordLimit.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_tailKeepBonusChars.Text = SmartPromptOptimizationSettings.TailKeepBonusChars.ToString(CultureInfo.InvariantCulture);
+
+            this.ApplyPersistentSettings();
+        }
+
+        private void ApplyPersistentSettings()
+        {
+            this._updateIntervalMs = Math.Max(50, this._persistentSettings.UpdateIntervalMs);
+            this.UpdateTimer.Interval = this._updateIntervalMs;
+            this.toolStripTextBox_interval.Text = this._updateIntervalMs.ToString(CultureInfo.InvariantCulture);
+
+            this.toolStripTextBox_diagramColor.Text = this._persistentSettings.DiagramColorHex;
+
+            this.showUsageToolStripMenuItem.Checked = this._persistentSettings.ShowPerCorePercent;
+            this.toolStripTextBox_percentageColor.Enabled = this.showUsageToolStripMenuItem.Checked;
+
+            this.alwaysOnTopToolStripMenuItem.Checked = this._persistentSettings.AlwaysOnTop;
+            this.TopMost = this._persistentSettings.AlwaysOnTop;
+
+            this.toolStripTextBox_threshold.Text = this._persistentSettings.TrafficThresholdText;
+
+            this.showTokenssToolStripMenuItem.Checked = this._persistentSettings.ShowTokensPerSecond;
+
+            this.toolStripMenuItem_visuallyFormatLog.Checked = this._persistentSettings.DebugConsoleFormattedLog;
+            this.toolStripMenuItem_includeRawChunksLog.Checked = this._persistentSettings.DebugConsoleIncludeRawChunks;
+            this.toolStripMenuItem_logGenerationSpeed.Checked = this._persistentSettings.DebugConsoleLogGenerationSpeed;
+
+            LlamaOllamaBridge.EnableFormattedLogging = this.toolStripMenuItem_visuallyFormatLog.Checked;
+            LlamaOllamaBridge.EnableRawChunkLogging = this.toolStripMenuItem_includeRawChunksLog.Checked;
+
+            this.enableSmartPromptOptimizationsToolStripMenuItem.Checked = this._persistentSettings.SmartPromptEnabled;
+            this.toolStripTextBox_promptSafetyRatio.Text = this._persistentSettings.SmartPromptSafetyRatio.ToString("0.00", CultureInfo.InvariantCulture);
+            this.toolStripTextBox_smartBudgetRatio.Text = this._persistentSettings.SmartPromptBudgetRatio.ToString("0.00", CultureInfo.InvariantCulture);
+            this.toolStripTextBox_largeMessageThresholdChars.Text = this._persistentSettings.SmartPromptLargeMessageThresholdChars.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_skeletonMaxLines.Text = this._persistentSettings.SmartPromptSkeletonMaxLines.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_focusKeywordLimit.Text = this._persistentSettings.SmartPromptFocusKeywordLimit.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_tailKeepBonusChars.Text = this._persistentSettings.SmartPromptTailKeepBonusChars.ToString(CultureInfo.InvariantCulture);
+
+            SmartPromptOptimizationSettings.IsEnabled = this.enableSmartPromptOptimizationsToolStripMenuItem.Checked;
+            SmartPromptOptimizationSettings.PromptSafetyRatio = this._persistentSettings.SmartPromptSafetyRatio;
+            SmartPromptOptimizationSettings.SmartBudgetRatio = this._persistentSettings.SmartPromptBudgetRatio;
+            SmartPromptOptimizationSettings.LargeMessageThresholdChars = this._persistentSettings.SmartPromptLargeMessageThresholdChars;
+            SmartPromptOptimizationSettings.SkeletonMaxLines = this._persistentSettings.SmartPromptSkeletonMaxLines;
+            SmartPromptOptimizationSettings.FocusKeywordLimit = this._persistentSettings.SmartPromptFocusKeywordLimit;
+            SmartPromptOptimizationSettings.TailKeepBonusChars = this._persistentSettings.SmartPromptTailKeepBonusChars;
         }
 
 
@@ -234,6 +292,13 @@ namespace FormsSystemStatsWidget.Forms
 
         private void HandleLoggerMessageLogged(string text)
         {
+            Match match = TokensPerSecondRegex.Match(text);
+            if (match.Success && double.TryParse(match.Groups["tps"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedTps))
+            {
+                this._lastStdOutTokensPerSecond = parsedTps;
+                this._lastStdOutTokensPerSecondUtc = DateTime.UtcNow;
+            }
+
             if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
             {
                 return;
@@ -370,8 +435,15 @@ namespace FormsSystemStatsWidget.Forms
             // Immer sauber frisch aus den Config-Textboxen aufbauen!
             string baseText = $"Port {llamaPort} to {ollamaPortStr}";
 
-            // Geschwindigkeit abrufen
-            float genSpeed = await LlamaServerStats.GetCurrentLlamaServerGenerationStatsAsync(llamaPort) ?? 0f;
+            double genSpeed;
+            if ((DateTime.UtcNow - this._lastStdOutTokensPerSecondUtc) <= TimeSpan.FromSeconds(2))
+            {
+                genSpeed = this._lastStdOutTokensPerSecond;
+            }
+            else
+            {
+                genSpeed = await LlamaServerStats.GetCurrentLlamaServerGenerationStatsAsync(llamaPort) ?? 0f;
+            }
 
             string speedString = genSpeed > 0f ? $"{genSpeed:0.000} tokens/s" : "Idle (0.000 tokens/s)";
             string nextText = $"{baseText}{Environment.NewLine}{speedString}";
@@ -459,6 +531,8 @@ namespace FormsSystemStatsWidget.Forms
 
             this.UpdateTimer.Interval = this._updateIntervalMs < 50 ? 50 : this._updateIntervalMs;
             this.toolStripTextBox_interval.Text = this._updateIntervalMs.ToString();
+            this._persistentSettings.UpdateIntervalMs = this._updateIntervalMs;
+            this.SavePersistentSettings();
         }
 
 
@@ -466,7 +540,8 @@ namespace FormsSystemStatsWidget.Forms
 
         private async Task UpdateCpuUsageAsync(float[] usages)
         {
-            var bmp = await CpuStats.RenderCoresBitmapAsync(usages, this.pictureBox_cpu.Width, this.pictureBox_cpu.Height, this._diagramColor, (this.showUsageToolStripMenuItem.Enabled ? this._percentageColor : null), CancellationToken.None);
+            Color? percentageColor = this.showUsageToolStripMenuItem.Checked ? this._percentageColor : null;
+            var bmp = await CpuStats.RenderCoresBitmapAsync(usages, this.pictureBox_cpu.Width, this.pictureBox_cpu.Height, this._diagramColor, percentageColor, CancellationToken.None);
             if (this._closing) { bmp?.Dispose(); return; }
             this.pictureBox_cpu.Image?.Dispose();
             this.pictureBox_cpu.Image = bmp;
@@ -615,6 +690,8 @@ namespace FormsSystemStatsWidget.Forms
             {
                 // rgb is RRGGBB; ensure the color is created opaque by adding alpha 0xFF
                 this._diagramColor = Color.FromArgb(unchecked((int) 0xFF000000 | rgb));
+                this._persistentSettings.DiagramColorHex = $"#{hex.ToUpperInvariant()}";
+                this.SavePersistentSettings();
             }
         }
 
@@ -681,6 +758,8 @@ namespace FormsSystemStatsWidget.Forms
         {
             this.TopMost = this.alwaysOnTopToolStripMenuItem.Checked;
             this._debugConsoleForm?.TopMost = this.alwaysOnTopToolStripMenuItem.Checked;
+            this._persistentSettings.AlwaysOnTop = this.alwaysOnTopToolStripMenuItem.Checked;
+            this.SavePersistentSettings();
         }
 
         private void toolStripTextBox_threshold_TextChanged(object sender, EventArgs e)
@@ -731,7 +810,14 @@ namespace FormsSystemStatsWidget.Forms
                 };
 
                 TrafficStats.ThresholdBytesPerSecond = value.Value * multiplier;
+                this._persistentSettings.TrafficThresholdText = this.toolStripTextBox_threshold.Text;
+                this.SavePersistentSettings();
             }
+        }
+
+        private void SavePersistentSettings()
+        {
+            WidgetPersistentSettingsStore.Save(this._persistentSettings);
         }
 
 

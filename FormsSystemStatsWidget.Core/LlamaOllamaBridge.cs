@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -21,10 +22,14 @@ namespace FormsSystemStatsWidget.Core
         private static string _quantizationLevel = "unknown";
         private static string _parameterSize = "unknown";
         private static string _modelFamily = "llama";
+        private static string _llamaServerBaseUrl = "http://localhost:8080";
+        private static string _lastStartError = string.Empty;
 
         // Logging settings
         public static bool EnableFormattedLogging = true;
         public static bool EnableRawChunkLogging = true;
+
+        public static string LastStartError => _lastStartError;
 
         // Dynamische Fallbacks, falls der /props-Endpunkt unerwartet fehlschlägt
         private static int _detectedNumCtx = 4096;
@@ -42,18 +47,81 @@ namespace FormsSystemStatsWidget.Core
         /// Prüft die Erreichbarkeit von llama-server, liest die Modellkonfiguration aus 
         /// und startet den nativen HTTP-Ollama-Proxy.
         /// </summary>
-        public static async Task<bool> StartAsync(int llamacppPort = 8080, int ollamaPort = 11434)
+        public static async Task<bool> StartAsync(string? apiUrl = null, int llamacppPort = 8080, int ollamaPort = 11434)
         {
+            _lastStartError = string.Empty;
             Logger.Log($"[LlamaBridge] Starting Bridge: llama-server ({llamacppPort}) -> Ollama ({ollamaPort})");
+            Logger.Log($"[LlamaBridge] Configured Source API URL: '{apiUrl ?? "<null>"}'");
 
             // 1. Verbindungstest & detaillierte Metadaten-Abfrage zu llama-server
             try
             {
+                string normalizedApiHost = string.Empty;
+                if (!string.IsNullOrWhiteSpace(apiUrl))
+                {
+                    string rawApiUrl = apiUrl.Trim().TrimEnd('/');
+
+                    if (Uri.TryCreate(rawApiUrl, UriKind.Absolute, out Uri? parsedApiUri))
+                    {
+                        normalizedApiHost = parsedApiUri.Host;
+                    }
+                    else
+                    {
+                        normalizedApiHost = rawApiUrl
+                            .Replace("http://", string.Empty, StringComparison.OrdinalIgnoreCase)
+                            .Replace("https://", string.Empty, StringComparison.OrdinalIgnoreCase)
+                            .Split('/')[0]
+                            .Split(':')[0];
+                    }
+                }
+
+                var candidateBaseUrls = new List<string>();
+                if (!string.IsNullOrWhiteSpace(normalizedApiHost))
+                {
+                    candidateBaseUrls.Add($"http://{normalizedApiHost}:{llamacppPort}");
+                }
+                candidateBaseUrls.Add($"http://localhost:{llamacppPort}");
+
+                Logger.Log($"[LlamaBridge] Reachability candidates: {string.Join(" | ", candidateBaseUrls.Distinct(StringComparer.OrdinalIgnoreCase))}");
+
+                string? selectedBaseUrl = null;
+                foreach (string candidateBaseUrl in candidateBaseUrls.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        Logger.Log($"[LlamaBridge] Probing llama-server models endpoint: {candidateBaseUrl}/v1/models");
+                        using var ctsProbe = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                        var probeResponse = await _httpClient.GetAsync($"{candidateBaseUrl}/v1/models", ctsProbe.Token);
+                        if (probeResponse.IsSuccessStatusCode)
+                        {
+                            Logger.Log($"[LlamaBridge] Reachability probe success: {candidateBaseUrl} ({(int) probeResponse.StatusCode})");
+                            selectedBaseUrl = candidateBaseUrl;
+                            break;
+                        }
+
+                        Logger.Log($"[LlamaBridge] Probe failed (HTTP {(int) probeResponse.StatusCode} {probeResponse.StatusCode}) for {candidateBaseUrl}/v1/models");
+                    }
+                    catch (Exception probeEx)
+                    {
+                        Logger.Log($"[LlamaBridge] Probe exception for {candidateBaseUrl}/v1/models: {probeEx.GetType().Name}: {probeEx.Message}");
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(selectedBaseUrl))
+                {
+                    _lastStartError = "llama-server not reachable via configured apiUrl and localhost fallback (/v1/models).";
+                    Logger.Log($"[LlamaBridge] Error: {_lastStartError}");
+                    return false;
+                }
+
+                _llamaServerBaseUrl = selectedBaseUrl;
+                Logger.Log($"[LlamaBridge] Using llama-server endpoint: {_llamaServerBaseUrl}");
+
                 // Lokalen Token-Timer für den ersten Verbindungs-Ping erstellen
                 using var ctsModels = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
                 // A. Echten Modellnamen holen via /v1/models
-                var response = await _httpClient.GetAsync($"http://localhost:{llamacppPort}/v1/models", ctsModels.Token);
+                var response = await _httpClient.GetAsync($"{_llamaServerBaseUrl}/v1/models", ctsModels.Token);
                 if (response.IsSuccessStatusCode)
                 {
                     var content = await response.Content.ReadAsStringAsync();
@@ -73,7 +141,8 @@ namespace FormsSystemStatsWidget.Core
                 }
                 else
                 {
-                    Logger.Log($"[LlamaBridge] Error: /v1/models returned status {response.StatusCode}");
+                    _lastStartError = $"/v1/models returned status {(int) response.StatusCode} {response.StatusCode} on {_llamaServerBaseUrl}.";
+                    Logger.Log($"[LlamaBridge] Error: {_lastStartError}");
                     return false;
                 }
 
@@ -81,7 +150,7 @@ namespace FormsSystemStatsWidget.Core
                 using var ctsProps = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
                 // B. Extract context size and default temperature live from /props
-                var propsResponse = await _httpClient.GetAsync($"http://localhost:{llamacppPort}/props", ctsProps.Token);
+                var propsResponse = await _httpClient.GetAsync($"{_llamaServerBaseUrl}/props", ctsProps.Token);
                 if (propsResponse.IsSuccessStatusCode)
                 {
                     var propsContent = await propsResponse.Content.ReadAsStringAsync();
@@ -106,10 +175,15 @@ namespace FormsSystemStatsWidget.Core
 
                     Logger.Log($"[LlamaBridge] Server-Props loaded: Context={_detectedNumCtx}, Temp={_detectedTemperature}");
                 }
+                else
+                {
+                    Logger.Log($"[LlamaBridge] Warning: /props unavailable on {_llamaServerBaseUrl} (HTTP {(int) propsResponse.StatusCode} {propsResponse.StatusCode}). Continuing with defaults.");
+                }
             }
             catch (Exception ex)
             {
-                Logger.Log($"[LlamaBridge] Critical connection error to llama-server: {ex.Message}");
+                _lastStartError = $"Critical connection error to llama-server: {ex.GetType().Name}: {ex.Message}";
+                Logger.Log($"[LlamaBridge] {_lastStartError}");
                 return false; // llama-server is offline or unreachable
             }
 
@@ -118,6 +192,7 @@ namespace FormsSystemStatsWidget.Core
             {
                 _listener = new HttpListener();
                 _listener.Prefixes.Add($"http://localhost:{ollamaPort}/");
+                Logger.Log($"[LlamaBridge] Starting local listener on http://localhost:{ollamaPort}/");
                 _listener.Start();
                 _isRunning = true;
 
@@ -128,7 +203,8 @@ namespace FormsSystemStatsWidget.Core
             }
             catch (Exception ex)
             {
-                Logger.Log($"[LlamaBridge] Port {ollamaPort} blocked or listener error: {ex.Message}");
+                _lastStartError = $"Port {ollamaPort} blocked or listener error: {ex.GetType().Name}: {ex.Message}";
+                Logger.Log($"[LlamaBridge] {_lastStartError}");
                 return false;
             }
         }
@@ -174,7 +250,7 @@ namespace FormsSystemStatsWidget.Core
                     Logger.Log(sanitizedBody);
                     Logger.Log("========================================");
 
-                    var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"http://localhost:{llamacppPort}/v1/chat/completions")
+                    var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
                     {
                         Content = new StringContent(sanitizedBody, Encoding.UTF8, "application/json")
                     };
@@ -212,7 +288,7 @@ namespace FormsSystemStatsWidget.Core
                         ["stream"] = ollamaReq?["stream"] ?? true
                     };
 
-                    var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"http://localhost:{llamacppPort}/v1/chat/completions")
+                    var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
                     {
                         Content = new StringContent(openAiReq.ToJsonString(), Encoding.UTF8, "application/json")
                     };

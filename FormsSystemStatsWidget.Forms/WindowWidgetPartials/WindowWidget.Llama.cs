@@ -26,12 +26,15 @@ namespace FormsSystemStatsWidget.Forms
 
             if (menuItem.Checked)
             {
-                int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;
+                string apiUrl = this.toolStripTextBox_openAiApiUrl.Text.Trim();
+                int? apiUrlPort = apiUrl != "" && Uri.TryCreate(apiUrl, UriKind.Absolute, out Uri? parsedUri) && parsedUri.IsLoopback ? parsedUri.Port : null;
+                apiUrl = apiUrl.Replace("http://", "").Replace("https://", "").Split(':').FirstOrDefault() ?? apiUrl;
+                int llamaPort = apiUrlPort == null ? int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080 : apiUrlPort.Value;
                 this.toolStripTextBox_llamacppPort.Text = llamaPort.ToString();
                 int ollamaPort = int.TryParse(this.toolStripTextBox_ollamaPort.Text.Trim(), out int parsedOllamaPort) ? parsedOllamaPort : 11434;
                 this.toolStripTextBox_ollamaPort.Text = ollamaPort.ToString();
 
-                bool isStarted = await LlamaOllamaBridge.StartAsync(llamaPort, ollamaPort);
+                bool isStarted = await LlamaOllamaBridge.StartAsync(apiUrl, llamaPort, ollamaPort);
 
                 // Jetzt ContextMenu wieder einklappen / schließen
                 this.ContextMenuStrip?.Close();
@@ -52,7 +55,12 @@ namespace FormsSystemStatsWidget.Forms
                     this.label_routingPortsInfo.ForeColor = Color.Red;
                     this.label_routingPortsInfo.Visible = true;
 
-                    MessageBox.Show($"Connection to llama-server (Port {llamaPort}) failed or Port {ollamaPort} is blocked!", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    string bridgeError = LlamaOllamaBridge.LastStartError;
+                    string message = string.IsNullOrWhiteSpace(bridgeError)
+                        ? $"Connection to llama-server (Port {llamaPort}) failed or Port {ollamaPort} is blocked!"
+                        : $"Connection setup failed:{Environment.NewLine}{bridgeError}";
+
+                    MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else
@@ -73,6 +81,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this._debugConsoleForm = new DebugConsoleForm();
                 this._debugConsoleForm.FormClosed += (_, _) => this._debugConsoleForm = null;
+                this._debugConsoleForm.TopMost = this.alwaysOnTopToolStripMenuItem.Checked;
 
                 Point openPosition = new(this.Left + this.Width + 8, this.Top);
                 this._debugConsoleForm.Location = openPosition;
@@ -97,11 +106,15 @@ namespace FormsSystemStatsWidget.Forms
         private void toolStripMenuItem_visuallyFormatLog_Click(object sender, EventArgs e)
         {
             LlamaOllamaBridge.EnableFormattedLogging = this.toolStripMenuItem_visuallyFormatLog.Checked;
+            this._persistentSettings.DebugConsoleFormattedLog = this.toolStripMenuItem_visuallyFormatLog.Checked;
+            this.SavePersistentSettings();
         }
 
         private void toolStripMenuItem_includeRawChunksLog_Click(object sender, EventArgs e)
         {
             LlamaOllamaBridge.EnableRawChunkLogging = this.toolStripMenuItem_includeRawChunksLog.Checked;
+            this._persistentSettings.DebugConsoleIncludeRawChunks = this.toolStripMenuItem_includeRawChunksLog.Checked;
+            this.SavePersistentSettings();
         }
 
         private void toolStripTextBox_modelsDirectory_Leave(object sender, EventArgs e)
@@ -288,6 +301,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 int? killed = WidgetStatics.KillLlamaServerProcesses();
                 Logger.Log($"[WindowWidget] Killed {killed} llama-server process(es).");
+                this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false; 
             }
             catch (Exception ex)
             {
@@ -529,6 +543,185 @@ namespace FormsSystemStatsWidget.Forms
                 MessageBox.Show(this, "Please enter a valid non-negative integer for thinking budget (tokens).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_thinkingBudget.Text = "0";
             }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void showUsageToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            this.toolStripTextBox_percentageColor.Enabled = this.showUsageToolStripMenuItem.Checked;
+            this._persistentSettings.ShowPerCorePercent = this.showUsageToolStripMenuItem.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void showTokenssToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.ShowTokensPerSecond = this.showTokenssToolStripMenuItem.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_logGenerationSpeed_CheckedChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.DebugConsoleLogGenerationSpeed = this.toolStripMenuItem_logGenerationSpeed.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void enableSmartPromptOptimizationsToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            SmartPromptOptimizationSettings.IsEnabled = this.enableSmartPromptOptimizationsToolStripMenuItem.Checked;
+            this._persistentSettings.SmartPromptEnabled = SmartPromptOptimizationSettings.IsEnabled;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripTextBox_promptSafetyRatio_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_promptSafetyRatio.Text.Trim();
+            if (double.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double value) && value > 0.1 && value <= 1.0)
+            {
+                SmartPromptOptimizationSettings.PromptSafetyRatio = value;
+                this.toolStripTextBox_promptSafetyRatio.Text = value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                this._persistentSettings.SmartPromptSafetyRatio = value;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid number between 0.10 and 1.00 for prompt safety ratio.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_promptSafetyRatio.Text = SmartPromptOptimizationSettings.PromptSafetyRatio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_smartBudgetRatio_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_smartBudgetRatio.Text.Trim();
+            if (double.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double value) && value > 0.1 && value <= 1.0)
+            {
+                SmartPromptOptimizationSettings.SmartBudgetRatio = value;
+                this.toolStripTextBox_smartBudgetRatio.Text = value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                this._persistentSettings.SmartPromptBudgetRatio = value;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid number between 0.10 and 1.00 for smart budget ratio.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_smartBudgetRatio.Text = SmartPromptOptimizationSettings.SmartBudgetRatio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_largeMessageThresholdChars_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_largeMessageThresholdChars.Text.Trim();
+            if (int.TryParse(entered, out int value) && value >= 256)
+            {
+                SmartPromptOptimizationSettings.LargeMessageThresholdChars = value;
+                this.toolStripTextBox_largeMessageThresholdChars.Text = value.ToString();
+                this._persistentSettings.SmartPromptLargeMessageThresholdChars = value;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid integer >= 256 for large message threshold chars.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_largeMessageThresholdChars.Text = SmartPromptOptimizationSettings.LargeMessageThresholdChars.ToString();
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_skeletonMaxLines_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_skeletonMaxLines.Text.Trim();
+            if (int.TryParse(entered, out int value) && value >= 5)
+            {
+                SmartPromptOptimizationSettings.SkeletonMaxLines = value;
+                this.toolStripTextBox_skeletonMaxLines.Text = value.ToString();
+                this._persistentSettings.SmartPromptSkeletonMaxLines = value;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid integer >= 5 for skeleton max lines.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_skeletonMaxLines.Text = SmartPromptOptimizationSettings.SkeletonMaxLines.ToString();
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_focusKeywordLimit_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_focusKeywordLimit.Text.Trim();
+            if (int.TryParse(entered, out int value) && value >= 1)
+            {
+                SmartPromptOptimizationSettings.FocusKeywordLimit = value;
+                this.toolStripTextBox_focusKeywordLimit.Text = value.ToString();
+                this._persistentSettings.SmartPromptFocusKeywordLimit = value;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid integer >= 1 for focus keyword limit.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_focusKeywordLimit.Text = SmartPromptOptimizationSettings.FocusKeywordLimit.ToString();
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_tailKeepBonusChars_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_tailKeepBonusChars.Text.Trim();
+            if (int.TryParse(entered, out int value) && value >= 0)
+            {
+                SmartPromptOptimizationSettings.TailKeepBonusChars = value;
+                this.toolStripTextBox_tailKeepBonusChars.Text = value.ToString();
+                this._persistentSettings.SmartPromptTailKeepBonusChars = value;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid integer >= 0 for tail keep bonus chars.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_tailKeepBonusChars.Text = SmartPromptOptimizationSettings.TailKeepBonusChars.ToString();
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
 
     }
