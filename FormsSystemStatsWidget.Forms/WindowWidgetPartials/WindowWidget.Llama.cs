@@ -137,6 +137,7 @@ namespace FormsSystemStatsWidget.Forms
         private void toolStripMenuItem_loadLlamaCppServer_Click(object? sender, EventArgs e)
         {
             string? selectedModel = this.toolStripComboBox_ggufModels.SelectedItem as string;
+            this.ContextMenuStrip?.Close();
             if (selectedModel == null)
             {
                 MessageBox.Show(this, "No model selected. Please select a model from the dropdown list.", "No Model Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -265,6 +266,7 @@ namespace FormsSystemStatsWidget.Forms
         private void toolStripMenuItem_execModelLoadBat_Click(object? sender, EventArgs e)
         {
             string? selectedBatName = this.toolStripComboBox_modelLoadBats.SelectedItem as string;
+            this.ContextMenuStrip?.Close();
             if (string.IsNullOrEmpty(selectedBatName))
             {
                 MessageBox.Show(this, "No batch file selected. Please select a batch file from the dropdown list.", "No Batch File Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -302,6 +304,7 @@ namespace FormsSystemStatsWidget.Forms
                 int? killed = WidgetStatics.KillLlamaServerProcesses();
                 Logger.Log($"[WindowWidget] Killed {killed} llama-server process(es).");
                 this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false; 
+                this.ContextMenuStrip?.Close();
             }
             catch (Exception ex)
             {
