@@ -262,8 +262,8 @@ namespace FormsSystemStatsWidget.Forms
                     FileName = "cmd.exe",
                     Arguments = $"/c {sb.ToString().Trim()}",
                     UseShellExecute = true,
-                    CreateNoWindow = false,
-                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+                    CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
+                    WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? System.Diagnostics.ProcessWindowStyle.Hidden : System.Diagnostics.ProcessWindowStyle.Normal
                 });
             }
             catch (Exception ex)
@@ -296,8 +296,8 @@ namespace FormsSystemStatsWidget.Forms
                     FileName = "cmd.exe",
                     Arguments = $"/c \"{batFilePath}\"",
                     UseShellExecute = true,
-                    CreateNoWindow = false,
-                    WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+                    CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
+                    WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? System.Diagnostics.ProcessWindowStyle.Hidden : System.Diagnostics.ProcessWindowStyle.Normal
                 });
             }
             catch (Exception ex)
