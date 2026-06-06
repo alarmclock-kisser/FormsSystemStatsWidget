@@ -34,6 +34,9 @@ namespace FormsSystemStatsWidget.Forms
         private Timer UpdateTimer;
         private GpuStats? Gpu;
         private GpuStats? Gpu2 = null;
+        private DynamicGradientProgressBar _progRam;
+        private DynamicGradientProgressBar _progVram;
+        private DynamicGradientProgressBar _progVram2;
         private volatile bool _closing = false;
         private int _tickInProgress = 0;
         private CancellationTokenSource? _recordingCancellationTokenSource;
@@ -65,6 +68,28 @@ namespace FormsSystemStatsWidget.Forms
             this._persistentSettings = WidgetPersistentSettingsStore.Load();
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
             this.ConfigureContextMenuAutoCloseBehavior();
+
+            // Initialize new progress bars with positions
+            this._progRam = new DynamicGradientProgressBar { Name = "progRam" };
+            this._progRam.Size = this.progressBar_ram.Size;
+            this._progRam.Location = this.progressBar_ram.Location;
+
+            this._progVram = new DynamicGradientProgressBar { Name = "progVram" };
+            this._progVram.Size = this.progressBar_vram.Size;
+            this._progVram.Location = this.progressBar_vram.Location;
+
+            this._progVram2 = new DynamicGradientProgressBar { Name = "progVram2" };
+            this._progVram2.Size = this.progressBar_vram2.Size;
+            this._progVram2.Location = this.progressBar_vram2.Location;
+
+            this.Controls.Add(this._progRam);
+            this.Controls.Add(this._progVram);
+            this.Controls.Add(this._progVram2);
+
+            // Hide old progress bars
+            this.progressBar_ram.Visible = false;
+            this.progressBar_vram.Visible = false;
+            this.progressBar_vram2.Visible = false;
 
             this.UpdateTimer = new Timer();
             this.UpdateTimer.Interval = this._updateIntervalMs;
@@ -328,7 +353,7 @@ namespace FormsSystemStatsWidget.Forms
             this.label_gpuLoad2.Visible = hasSecondGpu;
             this.label_gpuWatts2.Visible = hasSecondGpu;
             this.label_gpuVram2.Visible = hasSecondGpu;
-            this.progressBar_vram2.Visible = hasSecondGpu;
+            this._progVram2.Visible = hasSecondGpu;
 
             int clientHeight = hasSecondGpu ? MultiGpuClientHeight : SingleGpuClientHeight;
             this.ClientSize = new Size(this.ClientSize.Width, clientHeight);
@@ -589,7 +614,8 @@ namespace FormsSystemStatsWidget.Forms
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
 
             this.label_ram.Text = $"RAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
-            this.progressBar_ram.Value = Math.Clamp((int) percentUsed * 10, 0, this.progressBar_ram.Maximum);
+            this._progRam.Value = Math.Clamp((int) percentUsed, 0, this._progRam.Maximum);
+
 
             return Task.CompletedTask;
         }
@@ -603,11 +629,13 @@ namespace FormsSystemStatsWidget.Forms
 
             this.label_gpuUsage.Text = $"GPU: {usagePercent:0.00}%";
             this.label_wattage.Text = $"Watts: {wattage:0.00} W";
+            this.label_gpuUsage.ForeColor = usagePercent >= 80 ? Color.Red : Color.Black;
 
             if (this.Gpu2 != null)
             {
                 this.label_gpuLoad2.Text = $"GPU2: {this.Gpu2.CurrentLoad01 * 100:0.00}%";
                 this.label_gpuWatts2.Text = $"Watts: {this.Gpu2.CurrentPowerWatts ?? 0:0.00} W";
+                this.label_gpuLoad2.ForeColor = (this.Gpu2.CurrentLoad01 * 100) >= 80 ? Color.Red : Color.Black;
             }
 
             return Task.CompletedTask;
@@ -622,7 +650,7 @@ namespace FormsSystemStatsWidget.Forms
 
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
             this.label_vram.Text = $"VRAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
-            this.progressBar_vram.Value = Math.Clamp((int) percentUsed * 10, 0, this.progressBar_vram.Maximum);
+            this._progVram.Value = Math.Clamp((int) percentUsed, 0, this._progVram.Maximum);
 
             if (this.Gpu2 != null)
             {
@@ -633,7 +661,7 @@ namespace FormsSystemStatsWidget.Forms
                 double gpu2PercentUsed = gpu2TotalBytes > 0 ? (Math.Max(0.0, gpu2UsedBytes) / gpu2TotalBytes) * 100.0 : 0.0;
 
                 this.label_gpuVram2.Text = $"VRAM: {gpu2UsedGb} GB / {gpu2TotalGb} GB ({gpu2PercentUsed:0.00}%)";
-                this.progressBar_vram2.Value = Math.Clamp((int) (gpu2PercentUsed * 10), 0, this.progressBar_vram2.Maximum);
+                this._progVram2.Value = Math.Clamp((int) gpu2PercentUsed, 0, this._progVram2.Maximum);
             }
 
             return Task.CompletedTask;
@@ -852,6 +880,12 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripMenuItem_execModelLoadBat.Enabled = false;
                 this.toolStripMenuItem_loadLlamaCppServer.Text = $"Kill llama-server ({processes.Count})";
+
+                foreach (ToolStripItem item in this.toolStripMenuItem_loadLlamaCppServer.DropDownItems)
+                {
+                    item.Visible = false;
+                }
+
                 this.toolStripMenuItem_loadLlamaCppServer.Click -= this.toolStripMenuItem_loadLlamaCppServer_Click;
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.ToolStripMenuItem_killLlamaServer_Click;
             }
@@ -859,6 +893,12 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripMenuItem_execModelLoadBat.Enabled = true;
                 this.toolStripMenuItem_loadLlamaCppServer.Text = "Load Model (llama-server.exe)";
+
+                foreach (ToolStripItem item in this.toolStripMenuItem_loadLlamaCppServer.DropDownItems)
+                {
+                    item.Visible = true;
+                }
+
                 this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false;
                 this.toolStripMenuItem_loadLlamaCppServer.Click -= this.ToolStripMenuItem_killLlamaServer_Click;
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;

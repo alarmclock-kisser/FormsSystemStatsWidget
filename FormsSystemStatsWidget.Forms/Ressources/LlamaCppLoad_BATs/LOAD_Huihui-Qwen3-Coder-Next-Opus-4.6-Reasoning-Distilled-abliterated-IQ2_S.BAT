@@ -3,15 +3,15 @@ title llama-server: Huihui-Qwen3-Coder-Next-Opus-4.6-Reasoning-Distilled-abliter
 llama-server ^
  -m "D:\\Models\GGUF\Others\Huihui-Qwen3-Coder-Next-Opus-4.6-Reasoning-Distilled-abliterated-IQ2_S\Huihui-Qwen3-Coder-Next-Opus-4.6-Reasoning-Distilled-abliterated-IQ2_S.gguf" ^
  -c 65536 ^
- -b 4096 ^
- -sm row ^
+ -b 2048 ^
+ -sm layer ^
  -ts 16,12 ^
  -fa on ^
  -ngl 999 ^
- -np 2 ^
+ -np 1 ^
  --no-warmup ^
  --no-kv-offload ^
- -fit off ^
- -tb 8192
+ -fit on ^
+ -tb 16384
 
 pause

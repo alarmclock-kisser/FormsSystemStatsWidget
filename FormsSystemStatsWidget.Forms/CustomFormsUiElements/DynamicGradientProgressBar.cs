@@ -13,33 +13,33 @@ public class DynamicGradientProgressBar : Control
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int Minimum
     {
-        get => _minimum;
-        set { _minimum = value; Invalidate(); }
+        get => this._minimum;
+        set { this._minimum = value; this.Invalidate(); }
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int Maximum
     {
-        get => _maximum;
-        set { _maximum = value; Invalidate(); }
+        get => this._maximum;
+        set { this._maximum = value; this.Invalidate(); }
     }
 
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int Value
     {
-        get => _value;
+        get => this._value;
         set
         {
             // Begrenzen, um ArgumentExceptions zu verhindern
-            _value = Math.Max(_minimum, Math.Min(value, _maximum));
-            Invalidate(); // Löst Neuzeichnen aus
+            this._value = Math.Max(this._minimum, Math.Min(value, this._maximum));
+            this.Invalidate(); // Löst Neuzeichnen aus
         }
     }
 
     public DynamicGradientProgressBar()
     {
         // Aktiviert DoubleBuffering gegen Flackern und erlaubt transparentes/eigenes Zeichnen
-        SetStyle(ControlStyles.UserPaint |
+        this.SetStyle(ControlStyles.UserPaint |
                  ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.OptimizedDoubleBuffer |
                  ControlStyles.ResizeRedraw, true);
@@ -55,13 +55,13 @@ public class DynamicGradientProgressBar : Control
         // 1. Hintergrund zeichnen (Passend zu deinem hellgrauen Widget-Hintergrund)
         using (var bgBrush = new SolidBrush(Color.FromArgb(230, 230, 230)))
         {
-            g.FillRectangle(bgBrush, ClientRectangle);
+            g.FillRectangle(bgBrush, this.ClientRectangle);
         }
 
-        if (_maximum <= _minimum || _value <= _minimum) return;
+        if (this._maximum <= this._minimum || this._value <= this._minimum) return;
 
         // 2. Berechnen, wie breit die Füllung sein muss
-        float percent = (float) (_value - _minimum) / (_maximum - _minimum);
+        float percent = (this._value - this._minimum) / (float)(this._maximum - this._minimum);
         int fillWidth = (int) (this.Width * percent);
 
         if (fillWidth > 0)
@@ -69,7 +69,7 @@ public class DynamicGradientProgressBar : Control
             Rectangle fillRect = new Rectangle(0, 0, fillWidth, this.Height);
 
             // 3. Fließenden Farbverlauf über ColorBlend generieren
-            using (var brush = new LinearGradientBrush(ClientRectangle, Color.Black, Color.Black, 0f))
+            using (var brush = new LinearGradientBrush(this.ClientRectangle, Color.Black, Color.Black, 0f))
             {
                 ColorBlend blend = new ColorBlend();
 
@@ -90,7 +90,6 @@ public class DynamicGradientProgressBar : Control
             }
         }
 
-        // 4. Optional: Dezenter Rahmen (wie bei deinen restlichen Boxen)
         using (var pen = new Pen(Color.FromArgb(180, 180, 180)))
         {
             g.DrawRectangle(pen, 0, 0, this.Width - 1, this.Height - 1);

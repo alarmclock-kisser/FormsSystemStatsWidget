@@ -2,8 +2,9 @@
 title llama-server: gemma-4-A4B-98e-v6-coder-it-Q6_K_L
 llama-server ^
  -m "D:\\Models\GGUF\Others\gemma-4-A4B-98e-v6-coder-it-Q6_K_L\gemma-4-A4B-98e-v6-coder-it-Q6_K_L.gguf" ^
- -c 131072 ^
- -b 4096 ^
+ --mmproj "D:\Models\GGUF\Others\gemma-4-A4B-98e-v6-coder-it-Q6_K_L\mmproj-gemma4.gguf" ^
+ -c 65536 ^
+ -b 2048 ^
  -sm layer ^
  -ts 16,12 ^
  -fa on ^
@@ -12,6 +13,6 @@ llama-server ^
  --no-warmup ^
  --kv-offload ^
  -fit on ^
- -tb 16384
+ -tb 2048
 
 pause
