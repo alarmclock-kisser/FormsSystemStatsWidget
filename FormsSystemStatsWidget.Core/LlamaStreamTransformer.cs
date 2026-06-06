@@ -23,7 +23,7 @@ namespace FormsSystemStatsWidget.Core
             "this", "that", "with", "from", "were", "have", "just", "wenn", "dann", "oder", "aber", "nicht", "eine", "einer", "einem"
         };
 
-        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25)
+        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40)
         {
             try
             {
@@ -38,6 +38,9 @@ namespace FormsSystemStatsWidget.Core
 
                 root["temperature"] = temperature;
                 root["repetition_penalty"] = repetitionPenalty;
+                root["top_p"] = userDefinedTopP;
+                root["min_p"] = userDefinedMinP;
+                root["top_k"] = userDefinedTopK;
                 root.Remove("store");
 
                 if (root["messages"] is not JsonArray messages)

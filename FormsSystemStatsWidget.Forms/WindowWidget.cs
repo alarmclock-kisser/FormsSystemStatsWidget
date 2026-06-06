@@ -162,6 +162,9 @@ namespace FormsSystemStatsWidget.Forms
             LlamaOllamaBridge.UserDefinedTemperature = double.TryParse(this.toolStripTextBox_temperature.Text, out double temperature) ? temperature : 0.3;
             LlamaOllamaBridge.UserDefinedRepetitionPenalty = double.TryParse(this.toolStripTextBox_repetationPenalty.Text, out double repetitionPenalty) ? repetitionPenalty : 1.1;
             LlamaOllamaBridge.UserDefinedThinkingBudget = int.TryParse(this.toolStripTextBox_thinkingBudget.Text, out int thinkingBudget) ? thinkingBudget : 4096;
+            LlamaOllamaBridge.UserDefinedTopP = double.TryParse(this.toolStripTextBox_topP.Text, out double topP) ? topP : 0.9;
+            LlamaOllamaBridge.UserDefinedMinP = double.TryParse(this.toolStripTextBox_minP.Text, out double minP) ? minP : 0.1;
+            LlamaOllamaBridge.UserDefinedTopK = int.TryParse(this.toolStripTextBox_topK.Text, out int topK) ? topK : 40;
 
             this.enableSmartPromptOptimizationsToolStripMenuItem.Checked = SmartPromptOptimizationSettings.IsEnabled;
             this.toolStripTextBox_promptSafetyRatio.Text = SmartPromptOptimizationSettings.PromptSafetyRatio.ToString("0.00", CultureInfo.InvariantCulture);

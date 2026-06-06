@@ -169,6 +169,9 @@ namespace FormsSystemStatsWidget.Forms
             bool kvOffload = this.KVoffload_ToolStripMenuItem.Checked;
             bool fitMode = this.toolStripMenuItem_fitMode.Checked;
             int? thinkingBudget = this.toolStripTextBox_thinkingBudget.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_thinkingBudget.Text.Trim(), out int parsedThinkingBudget) ? parsedThinkingBudget : null;
+            float topP = this.toolStripTextBox_topP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_topP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedTopP) ? parsedTopP : 0.9f;
+            float minP = this.toolStripTextBox_minP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_minP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedMinP) ? parsedMinP : 0.0f;
+            int topK = this.toolStripTextBox_topK.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_topK.Text.Trim(), out int parsedTopK) ? parsedTopK : 40;
 
             // Aggregate CMD call (Single Line)
             var sb = new StringBuilder();
@@ -545,6 +548,75 @@ namespace FormsSystemStatsWidget.Forms
             {
                 MessageBox.Show(this, "Please enter a valid non-negative integer for thinking budget (tokens).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_thinkingBudget.Text = "0";
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_topP_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_topP.Text.Trim();
+            if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float topP) && topP > 0 && topP <= 1)
+            {
+                this.toolStripTextBox_topP.Text = topP.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                LlamaOllamaBridge.UserDefinedTopP = (double) topP;
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid number between 0 and 1 for top-p.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_topP.Text = "0.9";
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_minP_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_minP.Text.Trim();
+            if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float minP) && minP >= 0 && minP < 1)
+            {
+                this.toolStripTextBox_minP.Text = minP.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                LlamaOllamaBridge.UserDefinedMinP = (double) minP;
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid number between 0 and 1 for min-p.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_minP.Text = "0.0";
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_topK_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_topK.Text.Trim();
+            if (int.TryParse(entered, out int topK) && topK >= 0)
+            {
+                this.toolStripTextBox_topK.Text = topK.ToString();
+                LlamaOllamaBridge.UserDefinedTopK = topK;
+            }
+            else
+            {
+                MessageBox.Show(this, "Please enter a valid non-negative integer for top-k.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_topK.Text = "40";
             }
 
             e.SuppressKeyPress = true;
