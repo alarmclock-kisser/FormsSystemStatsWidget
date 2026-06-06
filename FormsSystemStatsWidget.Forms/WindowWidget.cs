@@ -200,6 +200,23 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_logGenerationSpeed.Checked = this._persistentSettings.DebugConsoleLogGenerationSpeed;
 
             LlamaOllamaBridge.EnableFormattedLogging = this.toolStripMenuItem_visuallyFormatLog.Checked;
+
+            // Load persisted Llama sampling parameters into UI and bridge
+            try
+            {
+                this.toolStripTextBox_topP.Text = this._persistentSettings.UserTopP.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                this.toolStripTextBox_minP.Text = this._persistentSettings.UserMinP.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                this.toolStripTextBox_topK.Text = this._persistentSettings.UserTopK.ToString(CultureInfo.InvariantCulture);
+
+                // Apply to bridge defaults
+                LlamaOllamaBridge.UserDefinedTopP = this._persistentSettings.UserTopP;
+                LlamaOllamaBridge.UserDefinedMinP = this._persistentSettings.UserMinP;
+                LlamaOllamaBridge.UserDefinedTopK = this._persistentSettings.UserTopK;
+            }
+            catch
+            {
+                // ignore malformed persisted values
+            }
             LlamaOllamaBridge.EnableRawChunkLogging = this.toolStripMenuItem_includeRawChunksLog.Checked;
 
             this.enableSmartPromptOptimizationsToolStripMenuItem.Checked = this._persistentSettings.SmartPromptEnabled;

@@ -38,6 +38,13 @@ namespace FormsSystemStatsWidget.Forms
         public int SmartPromptFocusKeywordLimit { get; set; } = 12;
 
         public int SmartPromptTailKeepBonusChars { get; set; } = 500;
+
+
+
+        // Persisted Llama sampling parameters (used for model load defaults / UI)
+        public double UserTopP { get; set; } = 0.9;
+        public double UserMinP { get; set; } = 0.0;
+        public int UserTopK { get; set; } = 40;
     }
 
     internal static class WidgetPersistentSettingsStore

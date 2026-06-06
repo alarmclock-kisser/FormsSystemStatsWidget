@@ -173,6 +173,12 @@ namespace FormsSystemStatsWidget.Forms
             float minP = this.toolStripTextBox_minP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_minP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedMinP) ? parsedMinP : 0.0f;
             int topK = this.toolStripTextBox_topK.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_topK.Text.Trim(), out int parsedTopK) ? parsedTopK : 40;
 
+            // Persist the chosen values so subsequent model loads use them
+            this._persistentSettings.UserTopP = topP;
+            this._persistentSettings.UserMinP = minP;
+            this._persistentSettings.UserTopK = topK;
+            this.SavePersistentSettings();
+
             // Aggregate CMD call (Single Line)
             var sb = new StringBuilder();
             sb.Append($"llama-server ");
@@ -566,6 +572,8 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripTextBox_topP.Text = topP.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 LlamaOllamaBridge.UserDefinedTopP = (double) topP;
+                this._persistentSettings.UserTopP = topP;
+                this.SavePersistentSettings();
             }
             else
             {
@@ -589,6 +597,8 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripTextBox_minP.Text = minP.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 LlamaOllamaBridge.UserDefinedMinP = (double) minP;
+                this._persistentSettings.UserMinP = minP;
+                this.SavePersistentSettings();
             }
             else
             {
@@ -612,6 +622,8 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripTextBox_topK.Text = topK.ToString();
                 LlamaOllamaBridge.UserDefinedTopK = topK;
+                this._persistentSettings.UserTopK = topK;
+                this.SavePersistentSettings();
             }
             else
             {
