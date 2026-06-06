@@ -16,12 +16,25 @@ namespace FormsSystemStatsWidget.Core
 {
     public static partial class LlamaOllamaBridge
     {
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int GetWindowLong(IntPtr hwnd, int nIndex);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int SetWindowLong(IntPtr hwnd, int nIndex, int dwNewLong);
+
+        private const int GWL_EXSTYLE = -20;
+        private const int WS_EX_LAYERED = 0x80000;
+
         private static HttpListener? _listener;
         private static bool _isRunning;
         private static string _detectedModelName = "local-llama-model";
         private static string _quantizationLevel = "unknown";
         private static string _parameterSize = "unknown";
         private static string _modelFamily = "llama";
+        private static bool _supportsVision;
         private static string _llamaServerBaseUrl = "http://localhost:8080";
         private static string _lastStartError = string.Empty;
 
@@ -137,9 +150,10 @@ namespace FormsSystemStatsWidget.Core
                         _quantizationLevel = ExtractQuantization(modelId);
                         _parameterSize = ExtractParameterSize(modelId);
                         _modelFamily = ExtractModelFamily(modelId);
+                        _supportsVision = DetectVisionSupportByModelName(modelId);
 
                         Logger.Log($"[LlamaBridge] Model detected: {_detectedModelName}");
-                        Logger.Log($"[LlamaBridge] Parser result: Family={_modelFamily}, Size={_parameterSize}, Quant={_quantizationLevel}");
+                        Logger.Log($"[LlamaBridge] Parser result: Family={_modelFamily}, Size={_parameterSize}, Quant={_quantizationLevel}, VisionHeuristic={_supportsVision}");
                     }
                 }
                 else
@@ -159,6 +173,12 @@ namespace FormsSystemStatsWidget.Core
                     var propsContent = await propsResponse.Content.ReadAsStringAsync();
                     var propsJson = JsonNode.Parse(propsContent);
 
+                    bool? supportsVisionFromProps = TryReadVisionSupportFromProps(propsJson);
+                    if (supportsVisionFromProps.HasValue)
+                    {
+                        _supportsVision = supportsVisionFromProps.Value;
+                    }
+
                     // Path-tolerant reading of n_ctx
                     var nCtxNode = propsJson?["default_generation_settings"]?["n_ctx"] ?? propsJson?["n_ctx"];
                     if (nCtxNode != null && int.TryParse(nCtxNode.ToString(), out int parsedCtx))
@@ -176,7 +196,7 @@ namespace FormsSystemStatsWidget.Core
                         _detectedTemperature = parsedTemp;
                     }
 
-                    Logger.Log($"[LlamaBridge] Server-Props loaded: Context={_detectedNumCtx}, Temp={_detectedTemperature}");
+                    Logger.Log($"[LlamaBridge] Server-Props loaded: Context={_detectedNumCtx}, Temp={_detectedTemperature}, Vision={_supportsVision}");
                 }
                 else
                 {
@@ -426,6 +446,10 @@ namespace FormsSystemStatsWidget.Core
                 {
                     string tempFormatted = _detectedTemperature.ToString("G", CultureInfo.InvariantCulture);
 
+                    var capabilities = _supportsVision
+                        ? new[] { "completion", "tools", "vision" }
+                        : new[] { "completion", "tools" };
+
                     var showData = new
                     {
                         modelfile = $"FROM {_detectedModelName}\nPARAMETER temperature {tempFormatted}\nPARAMETER num_ctx {_detectedNumCtx}",
@@ -440,7 +464,7 @@ namespace FormsSystemStatsWidget.Core
                             parameter_size = _parameterSize,
                             quantization_level = _quantizationLevel
                         },
-                        capabilities = new[] { "completion", "tools" }
+                        capabilities = capabilities
                     };
                     await SendJsonResponseAsync(response, showData);
                     return;
@@ -581,6 +605,66 @@ namespace FormsSystemStatsWidget.Core
             return commandRMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)) ? "command-r" : "llama";
         }
 
+        private static bool DetectVisionSupportByModelName(string modelName)
+        {
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return false;
+            }
+
+            string normalized = modelName.Trim().ToLowerInvariant();
+            string[] visionMarkers = { "vision", "vl", "mmproj", "multimodal", "gemma-3", "gemma-4", "llava", "pixtral", "minicpm-v", "qwen2.5-vl", "qwen-vl", "phi-3-vision" };
+            return visionMarkers.Any(marker => normalized.Contains(marker, StringComparison.Ordinal));
+        }
+
+        private static bool? TryReadVisionSupportFromProps(JsonNode? propsJson)
+        {
+            if (propsJson == null)
+            {
+                return null;
+            }
+
+            bool? knownBool = TryReadBooleanNode(propsJson?["supports_vision"])
+                             ?? TryReadBooleanNode(propsJson?["capabilities"]?["vision"])
+                             ?? TryReadBooleanNode(propsJson?["model"]?["capabilities"]?["vision"])
+                             ?? TryReadBooleanNode(propsJson?["llava"])
+                             ?? TryReadBooleanNode(propsJson?["has_vision_encoder"]);
+            if (knownBool.HasValue)
+            {
+                return knownBool.Value;
+            }
+
+            string[] markers = { "mmproj", "vision", "multimodal", "image_encoder", "clip" };
+            bool markerFound = markers.Any(marker => propsJson?.ToJsonString()?.Contains(marker, StringComparison.OrdinalIgnoreCase) ?? false);
+            return markerFound ? true : null;
+        }
+
+        private static bool? TryReadBooleanNode(JsonNode? node)
+        {
+            if (node == null)
+            {
+                return null;
+            }
+
+            string raw = node.ToString().Trim();
+            if (bool.TryParse(raw, out bool parsed))
+            {
+                return parsed;
+            }
+
+            if (raw == "1")
+            {
+                return true;
+            }
+
+            if (raw == "0")
+            {
+                return false;
+            }
+
+            return null;
+        }
+
         public static void Stop()
         {
             Logger.Log("[LlamaBridge] Shutting down bridge...");
@@ -666,7 +750,7 @@ namespace FormsSystemStatsWidget.Core
                 BufferedEntries.Enqueue(text);
                 while (BufferedEntries.Count > MaxBufferedLogEntries)
                 {
-                    BufferedEntries.Dequeue();
+                    _ = BufferedEntries.Dequeue();
                 }
 
                 MessageLogged?.Invoke(text);

@@ -84,7 +84,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             try
             {
-                Directory.CreateDirectory(SettingsDirectoryPath);
+                _ = Directory.CreateDirectory(SettingsDirectoryPath);
                 string json = JsonSerializer.Serialize(settings, SerializerOptions);
                 File.WriteAllText(SettingsFilePath, json);
             }

@@ -41,7 +41,7 @@ namespace FormsSystemStatsWidget.Core
                 root["top_p"] = userDefinedTopP;
                 root["min_p"] = userDefinedMinP;
                 root["top_k"] = userDefinedTopK;
-                root.Remove("store");
+                _ = root.Remove("store");
 
                 if (root["messages"] is not JsonArray messages)
                 {
@@ -50,9 +50,9 @@ namespace FormsSystemStatsWidget.Core
 
                 foreach (JsonObject message in messages.OfType<JsonObject>())
                 {
-                    message.Remove("audio");
-                    message.Remove("refusal");
-                    message.Remove("reasoning_content");
+                    _ = message.Remove("audio");
+                    _ = message.Remove("refusal");
+                    _ = message.Remove("reasoning_content");
                     NormalizeToolHistoryMessage(message, flattenToolHistory);
                 }
 
@@ -78,16 +78,11 @@ namespace FormsSystemStatsWidget.Core
                 if (GetTotalContentLength(messages) > hardCharLimit && messages.Count > 0)
                 {
                     JsonObject? lastMessage = messages.Last() as JsonObject;
-                    string content = lastMessage?["content"]?.ToString() ?? string.Empty;
-
-                    if (content.Length > hardCharLimit)
+                    if (lastMessage != null && TryGetStringContent(lastMessage, out string content) && content.Length > hardCharLimit)
                     {
                         int safeStart = Math.Max(0, content.Length - hardCharLimit + Math.Max(0, SmartPromptOptimizationSettings.TailKeepBonusChars));
                         string truncatedContent = string.Concat($"// [Context automatically rolled by proxy to fit dynamic limit of {numCtx} ctx]\r\n", content.AsSpan(safeStart));
-                        if (lastMessage != null)
-                        {
-                            lastMessage["content"] = truncatedContent;
-                        }
+                        lastMessage["content"] = truncatedContent;
                     }
                 }
 
@@ -123,14 +118,18 @@ namespace FormsSystemStatsWidget.Core
 
         private static int GetTotalContentLength(JsonArray messages)
         {
-            return messages.OfType<JsonObject>().Sum(message => message["content"]?.ToString().Length ?? 0);
+            return messages.OfType<JsonObject>().Sum(GetMessageTextLength);
         }
 
         private static void CompressLargeMessages(JsonArray messages)
         {
             foreach (JsonObject message in messages.OfType<JsonObject>())
             {
-                string content = message["content"]?.ToString() ?? string.Empty;
+                if (!TryGetStringContent(message, out string content))
+                {
+                    continue;
+                }
+
                 if (content.Length <= SmartPromptOptimizationSettings.LargeMessageThresholdChars)
                 {
                     continue;
@@ -325,7 +324,7 @@ namespace FormsSystemStatsWidget.Core
             }
 
             string role = message["role"]?.ToString() ?? string.Empty;
-            string content = message["content"]?.ToString() ?? string.Empty;
+            string content = GetMessageTextContent(message);
 
             double roleWeight = string.Equals(role, "user", StringComparison.OrdinalIgnoreCase)
                 ? 3.0
@@ -340,6 +339,64 @@ namespace FormsSystemStatsWidget.Core
             double lengthPenalty = Math.Min(content.Length / 5000d, 1d);
 
             return roleWeight + (recencyWeight * 2d) + (keywordHits * 0.75d) - lengthPenalty;
+        }
+
+        private static int GetMessageTextLength(JsonObject? message)
+        {
+            return GetMessageTextContent(message).Length;
+        }
+
+        private static string GetMessageTextContent(JsonObject? message)
+        {
+            if (message == null)
+            {
+                return string.Empty;
+            }
+
+            if (TryGetStringContent(message, out string stringContent))
+            {
+                return stringContent;
+            }
+
+            if (message["content"] is not JsonArray contentParts)
+            {
+                return string.Empty;
+            }
+
+            var textParts = contentParts
+                .OfType<JsonObject>()
+                .Select(part =>
+                {
+                    string partType = part["type"]?.ToString() ?? string.Empty;
+                    return string.Equals(partType, "text", StringComparison.OrdinalIgnoreCase)
+                        ? part["text"]?.ToString() ?? string.Empty
+                        : string.Empty;
+                })
+                .Where(text => !string.IsNullOrWhiteSpace(text));
+
+            return string.Join("\n", textParts);
+        }
+
+        private static bool TryGetStringContent(JsonObject message, out string content)
+        {
+            content = string.Empty;
+
+            if (message["content"] is not JsonValue contentValue)
+            {
+                return false;
+            }
+
+            string? candidate = contentValue.TryGetValue<string>(out string? parsedContent)
+                ? parsedContent
+                : contentValue.ToString();
+
+            if (string.IsNullOrEmpty(candidate))
+            {
+                return false;
+            }
+
+            content = candidate;
+            return true;
         }
 
         private static int CountKeywordHits(string content, HashSet<string> focusKeywords)
@@ -394,10 +451,10 @@ namespace FormsSystemStatsWidget.Core
             int latestUserIndex = FindLatestRoleIndex(messages, "user");
             if (latestUserIndex >= 0)
             {
-                return messages[latestUserIndex]?["content"]?.ToString() ?? string.Empty;
+                return GetMessageTextContent(messages[latestUserIndex] as JsonObject);
             }
 
-            return messages.Count > 0 ? messages[^1]?["content"]?.ToString() ?? string.Empty : string.Empty;
+            return messages.Count > 0 ? GetMessageTextContent(messages[^1] as JsonObject) : string.Empty;
         }
 
         private static string ShrinkWithHeadTail(string content, int maxChars)
@@ -434,7 +491,7 @@ namespace FormsSystemStatsWidget.Core
                         ? toolSummary
                         : $"{existingContent}\n{toolSummary}";
                 }
-                message.Remove("tool_calls");
+                _ = message.Remove("tool_calls");
                 return;
             }
 
@@ -457,8 +514,8 @@ namespace FormsSystemStatsWidget.Core
 
             message["content"] = baseContent + "\n\n(Tool execution finished. Proceed with the task or output the next tool call.)";
 
-            message.Remove("tool_call_id");
-            message.Remove("name");
+            _ = message.Remove("tool_call_id");
+            _ = message.Remove("name");
         }
 
         private static string BuildAssistantToolCallSummary(JsonNode? toolCallsNode)
@@ -576,7 +633,7 @@ namespace FormsSystemStatsWidget.Core
                 return false;
             }
 
-            toolObject?.Remove("command");
+            _ = (toolObject?.Remove("command"));
             toolCall = new JsonObject
             {
                 ["name"] = functionName,
@@ -773,7 +830,7 @@ namespace FormsSystemStatsWidget.Core
                         if (hasReasoning)
                         {
                             string rContent = delta["reasoning_content"]!.ToString();
-                            delta.Remove("reasoning_content");
+                            _ = delta.Remove("reasoning_content");
 
                             // Verwandelt Zeilenumbrüche im Gedankengang in Zitat-Umbrüche
                             rContent = rContent.Replace("\n", "\n> ");
@@ -819,10 +876,10 @@ namespace FormsSystemStatsWidget.Core
                                         inToolCall = false;
                                         toolCallTriggered = true;
 
-                                        delta.Remove("content");
-                                        delta.Remove("reasoning_content");
+                                        _ = delta.Remove("content");
+                                        _ = delta.Remove("reasoning_content");
                                         delta["tool_calls"] = toolCallsArray;
-                                        choice?["finish_reason"] = null;
+                                        _ = (choice?["finish_reason"] = null);
 
                                         await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
 

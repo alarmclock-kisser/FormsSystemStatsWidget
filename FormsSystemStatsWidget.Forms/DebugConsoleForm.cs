@@ -56,7 +56,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (this.InvokeRequired)
             {
-                this.BeginInvoke(new Action<string>(this.AppendLogLine), text);
+                _ = this.BeginInvoke(new Action<string>(this.AppendLogLine), text);
                 return;
             }
 
@@ -72,7 +72,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (this.InvokeRequired)
             {
-                this.BeginInvoke(new Action(this.ClearLogs));
+                _ = this.BeginInvoke(new Action(this.ClearLogs));
                 return;
             }
 
@@ -96,7 +96,7 @@ namespace FormsSystemStatsWidget.Forms
 
             string content = this._logTextBox.Text;
             string logsDirectory = WidgetStatics.GetRepositoryDirectory();
-            Directory.CreateDirectory(logsDirectory);
+            _ = Directory.CreateDirectory(logsDirectory);
 
             SaveFileDialog sfd = new()
             {
@@ -112,11 +112,11 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     File.WriteAllText(sfd.FileName, content);
                     PruneRepositoryLogFiles(logsDirectory, sfd.FileName);
-                    MessageBox.Show($"Logs saved successfully at \n{sfd.FileName}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _ = MessageBox.Show($"Logs saved successfully at \n{sfd.FileName}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Error saving logs to \n{sfd.FileName}: \n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _ = MessageBox.Show($"Error saving logs to \n{sfd.FileName}: \n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
 
             }

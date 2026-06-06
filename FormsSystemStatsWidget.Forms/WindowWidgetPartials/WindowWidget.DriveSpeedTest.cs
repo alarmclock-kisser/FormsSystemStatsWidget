@@ -411,35 +411,35 @@ namespace FormsSystemStatsWidget.Forms
             var (parReadAvg, parReadMin, parReadMax) = CalculateMetrics(parallelReadResults);
 
             StringBuilder reportBuilder = new();
-            reportBuilder.AppendLine("Drive Speed Test Report");
-            reportBuilder.AppendLine(new string('-', 32));
-            reportBuilder.AppendLine($"Drive: {rootPath}");
-            reportBuilder.AppendLine($"Temp Folder: {tempDirectoryPath}");
-            reportBuilder.AppendLine($"Target File Size: {this._driveTestFileSizeMb} MiB");
-            reportBuilder.AppendLine($"Block Size: {this._driveTestBlockSizeKb} KiB");
-            reportBuilder.AppendLine($"Passes: {passes}");
-            reportBuilder.AppendLine($"Threads: {this._driveTestWorkerThreads}");
-            reportBuilder.AppendLine($"Write Through: {(this.writeThroughToolStripMenuItem.Checked ? "On" : "Off")}");
-            reportBuilder.AppendLine($"Total Runtime: {totalStopwatch.Elapsed.TotalSeconds:0.00} s");
-            reportBuilder.AppendLine();
-            reportBuilder.AppendLine("Drive Hardware/Software Info:");
-            reportBuilder.AppendLine(new string('-', 32));
-            reportBuilder.AppendLine(WidgetStatics.BuildDriveEnvironmentInfoBlock(rootPath));
-            reportBuilder.AppendLine();
+            _ = reportBuilder.AppendLine("Drive Speed Test Report");
+            _ = reportBuilder.AppendLine(new string('-', 32));
+            _ = reportBuilder.AppendLine($"Drive: {rootPath}");
+            _ = reportBuilder.AppendLine($"Temp Folder: {tempDirectoryPath}");
+            _ = reportBuilder.AppendLine($"Target File Size: {this._driveTestFileSizeMb} MiB");
+            _ = reportBuilder.AppendLine($"Block Size: {this._driveTestBlockSizeKb} KiB");
+            _ = reportBuilder.AppendLine($"Passes: {passes}");
+            _ = reportBuilder.AppendLine($"Threads: {this._driveTestWorkerThreads}");
+            _ = reportBuilder.AppendLine($"Write Through: {(this.writeThroughToolStripMenuItem.Checked ? "On" : "Off")}");
+            _ = reportBuilder.AppendLine($"Total Runtime: {totalStopwatch.Elapsed.TotalSeconds:0.00} s");
+            _ = reportBuilder.AppendLine();
+            _ = reportBuilder.AppendLine("Drive Hardware/Software Info:");
+            _ = reportBuilder.AppendLine(new string('-', 32));
+            _ = reportBuilder.AppendLine(WidgetStatics.BuildDriveEnvironmentInfoBlock(rootPath));
+            _ = reportBuilder.AppendLine();
             foreach (string passLine in passLines)
             {
-                reportBuilder.AppendLine(passLine);
+                _ = reportBuilder.AppendLine(passLine);
             }
-            reportBuilder.AppendLine();
-            reportBuilder.AppendLine("Sequential:");
-            reportBuilder.AppendLine($"  Write Avg/Min/Max: {seqWriteAvg:0.00} / {seqWriteMin:0.00} / {seqWriteMax:0.00} MiB/s");
-            reportBuilder.AppendLine($"  Read  Avg/Min/Max: {seqReadAvg:0.00} / {seqReadMin:0.00} / {seqReadMax:0.00} MiB/s");
-            reportBuilder.AppendLine("Random small blocks:");
-            reportBuilder.AppendLine($"  Write Avg/Min/Max: {rndWriteAvg:0.00} / {rndWriteMin:0.00} / {rndWriteMax:0.00} MiB/s");
-            reportBuilder.AppendLine($"  Read  Avg/Min/Max: {rndReadAvg:0.00} / {rndReadMin:0.00} / {rndReadMax:0.00} MiB/s");
-            reportBuilder.AppendLine("Parallel small blocks:");
-            reportBuilder.AppendLine($"  Write Avg/Min/Max: {parWriteAvg:0.00} / {parWriteMin:0.00} / {parWriteMax:0.00} MiB/s");
-            reportBuilder.AppendLine($"  Read  Avg/Min/Max: {parReadAvg:0.00} / {parReadMin:0.00} / {parReadMax:0.00} MiB/s");
+            _ = reportBuilder.AppendLine();
+            _ = reportBuilder.AppendLine("Sequential:");
+            _ = reportBuilder.AppendLine($"  Write Avg/Min/Max: {seqWriteAvg:0.00} / {seqWriteMin:0.00} / {seqWriteMax:0.00} MiB/s");
+            _ = reportBuilder.AppendLine($"  Read  Avg/Min/Max: {seqReadAvg:0.00} / {seqReadMin:0.00} / {seqReadMax:0.00} MiB/s");
+            _ = reportBuilder.AppendLine("Random small blocks:");
+            _ = reportBuilder.AppendLine($"  Write Avg/Min/Max: {rndWriteAvg:0.00} / {rndWriteMin:0.00} / {rndWriteMax:0.00} MiB/s");
+            _ = reportBuilder.AppendLine($"  Read  Avg/Min/Max: {rndReadAvg:0.00} / {rndReadMin:0.00} / {rndReadMax:0.00} MiB/s");
+            _ = reportBuilder.AppendLine("Parallel small blocks:");
+            _ = reportBuilder.AppendLine($"  Write Avg/Min/Max: {parWriteAvg:0.00} / {parWriteMin:0.00} / {parWriteMax:0.00} MiB/s");
+            _ = reportBuilder.AppendLine($"  Read  Avg/Min/Max: {parReadAvg:0.00} / {parReadMin:0.00} / {parReadMax:0.00} MiB/s");
             return reportBuilder.ToString();
         }
 
@@ -492,7 +492,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (this.toolStripComboBox_drives.SelectedItem is not DriveSelection drive)
             {
-                MessageBox.Show(this, "Please select a drive first in Drive Speed Test > Select Drive.", "Drive Speed Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _ = MessageBox.Show(this, "Please select a drive first in Drive Speed Test > Select Drive.", "Drive Speed Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -521,7 +521,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"Drive speed test failed.\n\n{ex.Message}", "Drive Speed Test", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _ = MessageBox.Show(this, $"Drive speed test failed.\n\n{ex.Message}", "Drive Speed Test", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {
@@ -646,7 +646,7 @@ namespace FormsSystemStatsWidget.Forms
 
                 try
                 {
-                    Directory.CreateDirectory(candidate);
+                    _ = Directory.CreateDirectory(candidate);
                     string probeFilePath = Path.Combine(candidate, $".fssw-probe-{Guid.NewGuid():N}.tmp");
                     await using FileStream probe = new(probeFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.DeleteOnClose);
                     await probe.WriteAsync(new byte[] { 0xAA }, cancellationToken);

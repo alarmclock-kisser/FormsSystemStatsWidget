@@ -141,7 +141,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private static void EnsureMetricsDirectory(string directoryPath)
         {
-            Directory.CreateDirectory(directoryPath);
+            _ = Directory.CreateDirectory(directoryPath);
         }
 
         private static long GetRecordingLineByteCount(string line)
@@ -438,7 +438,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (this.InvokeRequired)
             {
-                this.BeginInvoke(new Action(() => this.CompleteRecording(filePath, failure, finalSummary)));
+                _ = this.BeginInvoke(new Action(() => this.CompleteRecording(filePath, failure, finalSummary)));
                 return;
             }
 
@@ -449,7 +449,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (failure != null)
             {
-                MessageBox.Show(this, $"Beim Aufzeichnen der Systemdaten ist ein Fehler aufgetreten.\n\n{failure.Message}", "Aufzeichnung fehlgeschlagen", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _ = MessageBox.Show(this, $"Beim Aufzeichnen der Systemdaten ist ein Fehler aufgetreten.\n\n{failure.Message}", "Aufzeichnung fehlgeschlagen", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -457,7 +457,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (!this._closing)
             {
-                MessageBox.Show(this, summaryText, "Aufzeichnung beendet", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _ = MessageBox.Show(this, summaryText, "Aufzeichnung beendet", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 

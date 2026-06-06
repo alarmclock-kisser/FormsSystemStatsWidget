@@ -71,7 +71,7 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 - Semantisch aussagekräftige Namen statt sprachspezifischer/typspezifischer Alias-Namen.
 
 ### Typen & Member
-- Schnittstellen beginnen with `I` (z. B. `IUserRepository`).
+- Schnittstellen beginnen mit `I` (z. B. `IUserRepository`).
 - Methoden sind Verben/Verbphrasen (z. B. `CreateReport`).
 - Eigenschaften sind Nomen/Adjektive (z. B. `ReportName`, `IsEnabled`).
 - Collection-Eigenschaften im Plural (z. B. `Orders`, nicht `OrderList`).
@@ -248,7 +248,7 @@ Wenn wichtige Kontextinfos fehlen (Zielplattform, Projekttyp, vorhandene Archite
 
 ### UI-Widgets & Layout
 - Optimiere Widgets für gängige Bildschirmauflösungen und DPI-Einstellungen.
-- Vermeide Überlagerungen durch Limitierung dargeststellter Einträge; passe Anzeigen an verfügbare Fläche an.
+- Vermeide Überlagerungen durch Limitierung dargestellter Einträge; passe Anzeigen an verfügbare Fläche an.
 - Top-Tasks-Anzeige: Zeige maximal 3 Einträge (statt 4), um Überlagerungen im Widget zu vermeiden.
 - Mache solche Anzeige-Limits konfigurierbar, wenn möglich (Einstellungen/Theme), und dokumentiere die Default-Werte.
 

@@ -93,6 +93,7 @@
             this.toolStripTextBox_topK = new ToolStripTextBox();
             this.toolStripMenuItem_execModelLoadBat = new ToolStripMenuItem();
             this.toolStripComboBox_modelLoadBats = new ToolStripComboBox();
+            this.toolStripMenuItem_hideCmd = new ToolStripMenuItem();
             this.rerouteAPILlamacppOllamaToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripMenuItem_openAiApi = new ToolStripMenuItem();
             this.toolStripTextBox_openAiApiUrl = new ToolStripTextBox();
@@ -133,7 +134,9 @@
             this.label_topTasksList = new Label();
             this.button_recordUsages = new Button();
             this.label_routingPortsInfo = new Label();
-            this.toolStripMenuItem_hideCmd = new ToolStripMenuItem();
+            this.toolStripMenuItem_opacity = new ToolStripMenuItem();
+            this.toolStripTextBox_opacity = new ToolStripTextBox();
+            this.toolStripSeparator5 = new ToolStripSeparator();
             ((System.ComponentModel.ISupportInitialize) this.pictureBox_cpu).BeginInit();
             this.contextMenuStrip_widget.SuspendLayout();
             this.SuspendLayout();
@@ -168,9 +171,9 @@
             // 
             // contextMenuStrip_widget
             // 
-            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.selectGPUToolStripMenuItem, this.diagramColorToolStripMenuItem, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.toolStripMenuItem_execModelLoadBat, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.smaprtPromptOptimizationsToolStripMenuItem, this.showTokenssToolStripMenuItem, this.toolStripSeparator2, this.openDebugConsoleToolStripMenuItem });
+            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.selectGPUToolStripMenuItem, this.diagramColorToolStripMenuItem, this.toolStripMenuItem_opacity, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.toolStripSeparator5, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.toolStripMenuItem_execModelLoadBat, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.smaprtPromptOptimizationsToolStripMenuItem, this.showTokenssToolStripMenuItem, this.toolStripSeparator2, this.openDebugConsoleToolStripMenuItem });
             this.contextMenuStrip_widget.Name = "contextMenuStrip_widget";
-            this.contextMenuStrip_widget.Size = new Size(254, 324);
+            this.contextMenuStrip_widget.Size = new Size(254, 352);
             this.contextMenuStrip_widget.Text = "Settings";
             this.contextMenuStrip_widget.Opening += this.contextMenuStrip_widget_Opening;
             // 
@@ -615,6 +618,15 @@
             this.toolStripComboBox_modelLoadBats.Size = new Size(300, 23);
             this.toolStripComboBox_modelLoadBats.Text = "Select a .BAT file";
             // 
+            // toolStripMenuItem_hideCmd
+            // 
+            this.toolStripMenuItem_hideCmd.Checked = true;
+            this.toolStripMenuItem_hideCmd.CheckOnClick = true;
+            this.toolStripMenuItem_hideCmd.CheckState = CheckState.Checked;
+            this.toolStripMenuItem_hideCmd.Name = "toolStripMenuItem_hideCmd";
+            this.toolStripMenuItem_hideCmd.Size = new Size(360, 22);
+            this.toolStripMenuItem_hideCmd.Text = "Start withoud CMD Window";
+            // 
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 
             this.rerouteAPILlamacppOllamaToolStripMenuItem.CheckOnClick = true;
@@ -936,14 +948,24 @@
             this.label_routingPortsInfo.Text = "Port: ----- to -----";
             this.label_routingPortsInfo.Visible = false;
             // 
-            // toolStripMenuItem_hideCmd
+            // toolStripMenuItem_opacity
             // 
-            this.toolStripMenuItem_hideCmd.Checked = true;
-            this.toolStripMenuItem_hideCmd.CheckOnClick = true;
-            this.toolStripMenuItem_hideCmd.CheckState = CheckState.Checked;
-            this.toolStripMenuItem_hideCmd.Name = "toolStripMenuItem_hideCmd";
-            this.toolStripMenuItem_hideCmd.Size = new Size(360, 22);
-            this.toolStripMenuItem_hideCmd.Text = "Start withoud CMD Window";
+            this.toolStripMenuItem_opacity.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_opacity });
+            this.toolStripMenuItem_opacity.Name = "toolStripMenuItem_opacity";
+            this.toolStripMenuItem_opacity.Size = new Size(253, 22);
+            this.toolStripMenuItem_opacity.Text = "Window Opacity ...";
+            // 
+            // toolStripTextBox_opacity
+            // 
+            this.toolStripTextBox_opacity.Name = "toolStripTextBox_opacity";
+            this.toolStripTextBox_opacity.Size = new Size(100, 23);
+            this.toolStripTextBox_opacity.Text = "0";
+            this.toolStripTextBox_opacity.KeyDown += this.toolStripTextBox_opacity_KeyDown;
+            // 
+            // toolStripSeparator5
+            // 
+            this.toolStripSeparator5.Name = "toolStripSeparator5";
+            this.toolStripSeparator5.Size = new Size(250, 6);
             // 
             // WindowWidget
             // 
@@ -1084,5 +1106,8 @@
         private ToolStripMenuItem toolStripMenuItem_topK;
         private ToolStripTextBox toolStripTextBox_topK;
         private ToolStripMenuItem toolStripMenuItem_hideCmd;
+        private ToolStripMenuItem toolStripMenuItem_opacity;
+        private ToolStripTextBox toolStripTextBox_opacity;
+        private ToolStripSeparator toolStripSeparator5;
     }
 }

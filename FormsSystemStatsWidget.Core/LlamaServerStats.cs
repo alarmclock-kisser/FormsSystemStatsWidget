@@ -17,7 +17,10 @@ namespace FormsSystemStatsWidget.Core
         private static DateTime _lastCheckTime = DateTime.MinValue;
         private static DateTime _lastPollTime = DateTime.MinValue;
         private static float _currentTps = 0f;
+        private static float _liveTpsFromStdOut = 0f;
+        private static DateTime _liveTpsFromStdOutUtc = DateTime.MinValue;
         private static readonly TimeSpan IdlePollingInterval = TimeSpan.FromSeconds(2);
+        private static readonly TimeSpan StdOutTpsTtl = TimeSpan.FromSeconds(3);
 
         // Zähler für kurzzeitige Aussetzer bei hoher Systemlast
         private static int _errorCount = 0;
@@ -26,9 +29,15 @@ namespace FormsSystemStatsWidget.Core
         {
             DateTime now = DateTime.UtcNow;
 
+            if (TryGetFreshStdOutTps(now, out float stdOutTps))
+            {
+                _currentTps = stdOutTps;
+                return stdOutTps;
+            }
+
             if (_lastTaskId == -1 && (now - _lastPollTime) < IdlePollingInterval)
             {
-                return _currentTps;
+                return 0f;
             }
 
             try
@@ -156,14 +165,14 @@ namespace FormsSystemStatsWidget.Core
                     {
                         if (currentNDecoded == 0)
                         {
-                            _currentTps = 0.001f; // Evaluating Prompt (Umgeht die UI Idle-Prüfung)
+                            _currentTps = 0f;
                         }
                         else
                         {
-                            _currentTps *= 0.85f;
-                            if (_currentTps < 0.001f)
+                            _currentTps *= 0.90f;
+                            if (_currentTps < 0.05f)
                             {
-                                _currentTps = 0.001f; // Prevent Idle status while actively processing
+                                _currentTps = 0f;
                             }
                         }
                         // Update Zeit für nächste Berechnung
@@ -177,6 +186,12 @@ namespace FormsSystemStatsWidget.Core
             {
                 _errorCount++;
 
+                if (TryGetFreshStdOutTps(DateTime.UtcNow, out float stdOutTpsFallback))
+                {
+                    _currentTps = stdOutTpsFallback;
+                    return stdOutTpsFallback;
+                }
+
                 // Wenn der Server gerade hart rechnet, blockiert der HTTP-Thread desllama-server 
                 // manchmal massiv. Wir buffern nun bis zu 15 Timeouts (~30-37s) ab!
                 if (_errorCount > 15)
@@ -187,13 +202,37 @@ namespace FormsSystemStatsWidget.Core
                     return null;
                 }
 
-                return _currentTps > 0 ? _currentTps : 0.001f;
+                return _currentTps > 0 ? _currentTps : 0f;
             }
         }
 
         public static void UpdateGenerationSpeed(float tokensPerSecond)
         {
+            if (tokensPerSecond <= 0f)
+            {
+                return;
+            }
+
+            _liveTpsFromStdOut = tokensPerSecond;
+            _liveTpsFromStdOutUtc = DateTime.UtcNow;
             _currentTps = tokensPerSecond;
+        }
+
+        private static bool TryGetFreshStdOutTps(DateTime now, out float tokensPerSecond)
+        {
+            tokensPerSecond = 0f;
+            if (_liveTpsFromStdOut <= 0f)
+            {
+                return false;
+            }
+
+            if ((now - _liveTpsFromStdOutUtc) > StdOutTpsTtl)
+            {
+                return false;
+            }
+
+            tokensPerSecond = _liveTpsFromStdOut;
+            return true;
         }
 
         private static bool TryReadInt(JsonNode node, out int value, params string[] propertyNames)

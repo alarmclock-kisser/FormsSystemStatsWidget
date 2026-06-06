@@ -114,7 +114,7 @@ public sealed class GpuStats : IDisposable
 
         try
         {
-            this._worker.Wait(500);
+            _ = this._worker.Wait(500);
         }
         catch { /* ignore */ }
 
@@ -426,7 +426,7 @@ public sealed class GpuStats : IDisposable
 
                     AppDomain.CurrentDomain.ProcessExit += (_, __) =>
                     {
-                        try { nvmlShutdown(); } catch { /* ignore */ }
+                        try { _ = nvmlShutdown(); } catch { /* ignore */ }
                     };
 
                     return true;

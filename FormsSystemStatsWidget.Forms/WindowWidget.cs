@@ -31,6 +31,18 @@ namespace FormsSystemStatsWidget.Forms
         private int _driveTestWorkerThreads = Math.Clamp(Environment.ProcessorCount / 4, 2, Environment.ProcessorCount);
         private bool _driveTestInProgress = false;
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int GetWindowLong(IntPtr hwnd, int nIndex);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern int SetWindowLong(IntPtr hwnd, int nIndex, int dwNewLong);
+
+        private const int GWL_EXSTYLE = -20;
+        private const int WS_EX_LAYERED = 0x80000;
+
         private Timer UpdateTimer;
         private GpuStats? Gpu;
         private GpuStats? Gpu2 = null;
@@ -51,7 +63,7 @@ namespace FormsSystemStatsWidget.Forms
         private Process? _llamaServerProcess;
         private CancellationTokenSource? _processCts;
         private readonly HashSet<Keys> _processingKeys = [];
-        private static readonly Regex TokensPerSecondRegex = new(@"(?<tps>\d+(?:\.\d+)?)\s+t/s\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex TokensPerSecondRegex = new(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private double _lastStdOutTokensPerSecond;
         private DateTime _lastStdOutTokensPerSecondUtc = DateTime.MinValue;
 
@@ -292,7 +304,7 @@ namespace FormsSystemStatsWidget.Forms
 
                 if (this.InvokeRequired)
                 {
-                    this.BeginInvoke(new Action(() =>
+                    _ = this.BeginInvoke(new Action(() =>
                     {
                         if (!this.IsDisposed && !this.Disposing)
                         {
@@ -342,6 +354,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this._lastStdOutTokensPerSecond = parsedTps;
                 this._lastStdOutTokensPerSecondUtc = DateTime.UtcNow;
+                LlamaServerStats.UpdateGenerationSpeed((float) parsedTps);
             }
 
             if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
@@ -462,7 +475,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             finally
             {
-                Interlocked.Exchange(ref this._tickInProgress, 0);
+                _ = Interlocked.Exchange(ref this._tickInProgress, 0);
             }
         }
 
@@ -490,12 +503,12 @@ namespace FormsSystemStatsWidget.Forms
                 genSpeed = await LlamaServerStats.GetCurrentLlamaServerGenerationStatsAsync(llamaPort) ?? 0f;
             }
 
-            string speedString = genSpeed > 0f ? $"{genSpeed:0.000} tokens/s" : "Idle (0.000 tokens/s)";
+            string speedString = genSpeed >= 0.01f ? $"{genSpeed:0.000} tokens/s" : "Idle (0.000 tokens/s)";
             string nextText = $"{baseText}{Environment.NewLine}{speedString}";
 
             if (this.InvokeRequired)
             {
-                this.BeginInvoke(new Action(() =>
+                _ = this.BeginInvoke(new Action(() =>
                 {
                     if (!this.IsDisposed && !this.Disposing)
                     {
@@ -805,7 +818,7 @@ namespace FormsSystemStatsWidget.Forms
         private void alwaysOnTopToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
             this.TopMost = this.alwaysOnTopToolStripMenuItem.Checked;
-            this._debugConsoleForm?.TopMost = this.alwaysOnTopToolStripMenuItem.Checked;
+            _ = (this._debugConsoleForm?.TopMost = this.alwaysOnTopToolStripMenuItem.Checked);
             this._persistentSettings.AlwaysOnTop = this.alwaysOnTopToolStripMenuItem.Checked;
             this.SavePersistentSettings();
         }
@@ -936,6 +949,49 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripComboBox_modelLoadBats.SelectedIndex = 0;
             }
+        }
+
+        private void toolStripTextBox_opacity_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            this.toolStripTextBox_opacity.Text = this.toolStripTextBox_opacity.Text.Trim().Replace(" ", "").Replace("%", "") + "%";
+
+            float opacity = 0.0f;
+            if (float.TryParse(this.toolStripTextBox_opacity.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsedOpacity))
+            {
+                opacity = parsedOpacity;
+            }
+            else
+            {
+                // Try parse with percentage sign, e.g. "80%" or as int
+                if (this.toolStripTextBox_opacity.Text.EndsWith("%") && float.TryParse(this.toolStripTextBox_opacity.Text.TrimEnd('%').Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float parsedPercentage))
+                {
+                    opacity = parsedPercentage / 100f;
+                }
+                else if (int.TryParse(this.toolStripTextBox_opacity.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedInt))
+                {
+                    opacity = parsedInt / 100f;
+                }
+                else
+                {
+                    opacity = 0.0f;
+                }
+            }
+
+            opacity = Math.Clamp(opacity, 0.1f, 1.0f);
+            this.toolStripTextBox_opacity.Text = (opacity >= 0.99f ? "100" : (opacity * 100).ToString("0")) + "%";
+
+            // Set form + elements + border opacity 
+            // this.Opacity = opacity;
+
+            // Wende die Opacity auf alle direkt enthaltenen Controls an
+            int initialStyle = GetWindowLong(this.Handle, GWL_EXSTYLE);
+            _ = SetWindowLong(this.Handle, GWL_EXSTYLE, initialStyle | WS_EX_LAYERED);
+            _ = SetLayeredWindowAttributes(this.Handle, 0, (byte) (opacity * 255), 0x00000002);
         }
     }
 }

@@ -60,7 +60,7 @@ namespace FormsSystemStatsWidget.Forms
                         ? $"Connection to llama-server (Port {llamaPort}) failed or Port {ollamaPort} is blocked!"
                         : $"Connection setup failed:{Environment.NewLine}{bridgeError}";
 
-                    MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _ = MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
             else
@@ -127,7 +127,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "The specified directory does not exist. Please enter a valid path.", "Invalid Directory", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "The specified directory does not exist. Please enter a valid path.", "Invalid Directory", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_modelsDirectory.Text = LlamaCppModelLoader.GgufModelsDirectory;
             }
         }
@@ -140,7 +140,7 @@ namespace FormsSystemStatsWidget.Forms
             this.ContextMenuStrip?.Close();
             if (selectedModel == null)
             {
-                MessageBox.Show(this, "No model selected. Please select a model from the dropdown list.", "No Model Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "No model selected. Please select a model from the dropdown list.", "No Model Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -150,7 +150,7 @@ namespace FormsSystemStatsWidget.Forms
                 selectedModel = LlamaCppModelLoader.ModelFilePaths.FirstOrDefault(path => path.Contains(selectedModel, StringComparison.OrdinalIgnoreCase));
                 if (!File.Exists(selectedModel))
                 {
-                    MessageBox.Show(this, $"The selected model file does not exist:\n{selectedModel}", "Model File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    _ = MessageBox.Show(this, $"The selected model file does not exist:\n{selectedModel}", "Model File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
             }
@@ -181,41 +181,41 @@ namespace FormsSystemStatsWidget.Forms
 
             // Aggregate CMD call (Single Line)
             var sb = new StringBuilder();
-            sb.Append($"llama-server ");
-            sb.Append($"-m \"{selectedModel}\" ");
+            _ = sb.Append($"llama-server ");
+            _ = sb.Append($"-m \"{selectedModel}\" ");
             if (mmprojFilePath != null)
             {
-                sb.Append($"--mmproj \"{mmprojFilePath}\" ");
+                _ = sb.Append($"--mmproj \"{mmprojFilePath}\" ");
             }
-            sb.Append($"-c {contextSize} ");
-            sb.Append($"-b {batchSize} ");
+            _ = sb.Append($"-c {contextSize} ");
+            _ = sb.Append($"-b {batchSize} ");
             if (splitMode != "none")
             {
-                sb.Append($"-sm {splitMode} ");
+                _ = sb.Append($"-sm {splitMode} ");
                 if (tensorSplit.Length > 0)
                 {
-                    sb.Append($"-ts {string.Join(",", tensorSplit)} ");
+                    _ = sb.Append($"-ts {string.Join(",", tensorSplit)} ");
                 }
             }
-            sb.Append("-fa " + (flashAttention ? "on " : "off "));
-            sb.Append("-ngl " + gpuLayersCount + " ");
-            sb.Append("-np " + numParallelSlots + " ");
+            _ = sb.Append("-fa " + (flashAttention ? "on " : "off "));
+            _ = sb.Append("-ngl " + gpuLayersCount + " ");
+            _ = sb.Append("-np " + numParallelSlots + " ");
             if (noWarmup)
             {
-                sb.Append("--no-warmup ");
+                _ = sb.Append("--no-warmup ");
             }
             if (kvOffload)
             {
-                sb.Append("--kv-offload ");
+                _ = sb.Append("--kv-offload ");
             }
             else
             {
-                sb.Append("--no-kv-offload ");
+                _ = sb.Append("--no-kv-offload ");
             }
-            sb.Append("-fit " + (fitMode ? "on " : "off "));
+            _ = sb.Append("-fit " + (fitMode ? "on " : "off "));
             if (thinkingBudget.HasValue)
             {
-                sb.Append($"-tb {thinkingBudget.Value} ");
+                _ = sb.Append($"-tb {thinkingBudget.Value} ");
             }
 
             // HIER DIE ANPASSUNG: Erzeugt das korrekte Multiline-Format mit dem Windows-Line-Continuation-Zeichen (^)
@@ -249,26 +249,18 @@ namespace FormsSystemStatsWidget.Forms
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show(this, $"Failed to save the batch file. Error: {ex.Message}", "Error Saving Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        _ = MessageBox.Show(this, $"Failed to save the batch file. Error: {ex.Message}", "Error Saving Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     }
                 }
             }
 
             try
             {
-                // Nutzt sb (die einzeilige Variante), da cmd.exe /c mit echten Zeilenumbrüchen in den Arguments zicken würde
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c {sb.ToString().Trim()}",
-                    UseShellExecute = true,
-                    CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
-                    WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? System.Diagnostics.ProcessWindowStyle.Hidden : System.Diagnostics.ProcessWindowStyle.Normal
-                });
+                this.StartLlamaServerProcess(sb.ToString().Trim());
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"Failed to start llama-server with the selected model. Error: {ex.Message}", "Error Starting Server", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _ = MessageBox.Show(this, $"Failed to start llama-server with the selected model. Error: {ex.Message}", "Error Starting Server", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -278,20 +270,20 @@ namespace FormsSystemStatsWidget.Forms
             this.ContextMenuStrip?.Close();
             if (string.IsNullOrEmpty(selectedBatName))
             {
-                MessageBox.Show(this, "No batch file selected. Please select a batch file from the dropdown list.", "No Batch File Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "No batch file selected. Please select a batch file from the dropdown list.", "No Batch File Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
             string batFilePath = Path.Combine(WidgetStatics.GetRepositoryDirectory(".Forms", "Ressources\\LlamaCppLoad_BATs"), selectedBatName + ".BAT");
             if (!File.Exists(batFilePath))
             {
-                MessageBox.Show(this, $"The selected batch file does not exist:\n{batFilePath}", "Batch File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _ = MessageBox.Show(this, $"The selected batch file does not exist:\n{batFilePath}", "Batch File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
             try
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "cmd.exe",
                     Arguments = $"/c \"{batFilePath}\"",
@@ -302,7 +294,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"Failed to execute the selected batch file. Error: {ex.Message}", "Error Executing Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _ = MessageBox.Show(this, $"Failed to execute the selected batch file. Error: {ex.Message}", "Error Executing Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -310,6 +302,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             try
             {
+                this.StopTrackedLlamaServerProcess();
                 int? killed = WidgetStatics.KillLlamaServerProcesses();
                 Logger.Log($"[WindowWidget] Killed {killed} llama-server process(es).");
                 this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false; 
@@ -317,8 +310,138 @@ namespace FormsSystemStatsWidget.Forms
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, $"Failed to kill llama-server processes. Error: {ex.Message}", "Error Killing Processes", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _ = MessageBox.Show(this, $"Failed to kill llama-server processes. Error: {ex.Message}", "Error Killing Processes", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private void StartLlamaServerProcess(string fullCommand)
+        {
+            if (string.IsNullOrWhiteSpace(fullCommand))
+            {
+                throw new InvalidOperationException("llama-server command is empty.");
+            }
+
+            this.StopTrackedLlamaServerProcess();
+
+            string trimmed = fullCommand.Trim();
+            const string executableName = "llama-server";
+            string arguments = trimmed.StartsWith(executableName + " ", StringComparison.OrdinalIgnoreCase)
+                ? trimmed[(executableName.Length + 1)..]
+                : string.Empty;
+
+            bool captureOutput = this.toolStripMenuItem_hideCmd.Checked;
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = executableName,
+                Arguments = arguments,
+                UseShellExecute = false,
+                RedirectStandardOutput = captureOutput,
+                RedirectStandardError = captureOutput,
+                CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
+                WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal
+            };
+
+            this._llamaServerProcess = new Process
+            {
+                StartInfo = startInfo,
+                EnableRaisingEvents = true
+            };
+
+            if (captureOutput)
+            {
+                this._llamaServerProcess.OutputDataReceived += this.HandleLlamaServerOutputDataReceived;
+                this._llamaServerProcess.ErrorDataReceived += this.HandleLlamaServerOutputDataReceived;
+            }
+
+            if (!this._llamaServerProcess.Start())
+            {
+                throw new InvalidOperationException("llama-server process could not be started.");
+            }
+
+            if (captureOutput)
+            {
+                this._llamaServerProcess.BeginOutputReadLine();
+                this._llamaServerProcess.BeginErrorReadLine();
+            }
+        }
+
+        private void StopTrackedLlamaServerProcess()
+        {
+            if (this._llamaServerProcess == null)
+            {
+                return;
+            }
+
+            try
+            {
+                this._llamaServerProcess.OutputDataReceived -= this.HandleLlamaServerOutputDataReceived;
+                this._llamaServerProcess.ErrorDataReceived -= this.HandleLlamaServerOutputDataReceived;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (!this._llamaServerProcess.HasExited)
+                {
+                    this._llamaServerProcess.Kill(true);
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                this._llamaServerProcess.Dispose();
+            }
+            catch
+            {
+            }
+
+            this._llamaServerProcess = null;
+        }
+
+        private void HandleLlamaServerOutputDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            string? line = e.Data;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return;
+            }
+
+            if (!TryExtractTokensPerSecondFromLlamaOutput(line, out double tokensPerSecond))
+            {
+                return;
+            }
+
+            this._lastStdOutTokensPerSecond = tokensPerSecond;
+            this._lastStdOutTokensPerSecondUtc = DateTime.UtcNow;
+            LlamaServerStats.UpdateGenerationSpeed((float) tokensPerSecond);
+        }
+
+        private static bool TryExtractTokensPerSecondFromLlamaOutput(string line, out double tokensPerSecond)
+        {
+            tokensPerSecond = 0d;
+            Match match = TokensPerSecondRegex.Match(line);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            if (!double.TryParse(match.Groups["tps"].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsedValue))
+            {
+                return false;
+            }
+
+            if (parsedValue <= 0.01d)
+            {
+                return false;
+            }
+
+            tokensPerSecond = parsedValue;
+            return true;
         }
 
 
@@ -389,7 +512,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid positive number for temperature.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid positive number for temperature.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_temperature.Text = "0.75";
             }
 
@@ -412,7 +535,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid positive number for repetition penalty.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid positive number for repetition penalty.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_repetationPenalty.Text = "1.1";
             }
 
@@ -434,7 +557,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid positive integer for context size.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid positive integer for context size.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_contextSize.Text = "16384";
             }
 
@@ -456,7 +579,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid positive integer for batch size.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid positive integer for batch size.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_batchSize.Text = "1024";
             }
 
@@ -484,7 +607,7 @@ namespace FormsSystemStatsWidget.Forms
                 string[] parts = entered.Split(',');
                 if (parts.Length > GpuStats.GpuNames.Count)
                 {
-                    MessageBox.Show(this, $"Please enter a valid tensor split configuration with at most {GpuStats.GpuNames.Count} values (for {GpuStats.GpuNames.Count} GPUs).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    _ = MessageBox.Show(this, $"Please enter a valid tensor split configuration with at most {GpuStats.GpuNames.Count} values (for {GpuStats.GpuNames.Count} GPUs).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     this.toolStripTextBox_tensorSplit.Text = "";
                 }
             }
@@ -507,7 +630,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid non-negative integer for GPU layers count.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid non-negative integer for GPU layers count.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_gpuLayersCount.Text = "0";
             }
 
@@ -529,7 +652,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid positive integer for number of parallel slots.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid positive integer for number of parallel slots.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_numberParallelSlots.Text = "1";
             }
 
@@ -552,7 +675,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid non-negative integer for thinking budget (tokens).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid non-negative integer for thinking budget (tokens).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_thinkingBudget.Text = "0";
             }
 
@@ -577,7 +700,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid number between 0 and 1 for top-p.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid number between 0 and 1 for top-p.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_topP.Text = "0.9";
             }
 
@@ -602,7 +725,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid number between 0 and 1 for min-p.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid number between 0 and 1 for min-p.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_minP.Text = "0.0";
             }
 
@@ -627,7 +750,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid non-negative integer for top-k.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid non-negative integer for top-k.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_topK.Text = "40";
             }
 
@@ -678,7 +801,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid number between 0.10 and 1.00 for prompt safety ratio.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid number between 0.10 and 1.00 for prompt safety ratio.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_promptSafetyRatio.Text = SmartPromptOptimizationSettings.PromptSafetyRatio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
             }
 
@@ -703,7 +826,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid number between 0.10 and 1.00 for smart budget ratio.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid number between 0.10 and 1.00 for smart budget ratio.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_smartBudgetRatio.Text = SmartPromptOptimizationSettings.SmartBudgetRatio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
             }
 
@@ -728,7 +851,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid integer >= 256 for large message threshold chars.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid integer >= 256 for large message threshold chars.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_largeMessageThresholdChars.Text = SmartPromptOptimizationSettings.LargeMessageThresholdChars.ToString();
             }
 
@@ -753,7 +876,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid integer >= 5 for skeleton max lines.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid integer >= 5 for skeleton max lines.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_skeletonMaxLines.Text = SmartPromptOptimizationSettings.SkeletonMaxLines.ToString();
             }
 
@@ -778,7 +901,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid integer >= 1 for focus keyword limit.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid integer >= 1 for focus keyword limit.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_focusKeywordLimit.Text = SmartPromptOptimizationSettings.FocusKeywordLimit.ToString();
             }
 
@@ -803,7 +926,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                MessageBox.Show(this, "Please enter a valid integer >= 0 for tail keep bonus chars.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _ = MessageBox.Show(this, "Please enter a valid integer >= 0 for tail keep bonus chars.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_tailKeepBonusChars.Text = SmartPromptOptimizationSettings.TailKeepBonusChars.ToString();
             }
 

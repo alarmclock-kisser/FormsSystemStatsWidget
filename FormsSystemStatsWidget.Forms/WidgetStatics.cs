@@ -52,28 +52,28 @@ namespace FormsSystemStatsWidget.Forms
         {
             StringBuilder infoBuilder = new();
 
-            infoBuilder.AppendLine("Environment:");
-            infoBuilder.AppendLine($"  OS: {RuntimeInformation.OSDescription}");
-            infoBuilder.AppendLine($"  Runtime: {RuntimeInformation.FrameworkDescription}");
-            infoBuilder.AppendLine($"  Process: {(Environment.Is64BitProcess ? "64-bit" : "32-bit")}, OS64: {(Environment.Is64BitOperatingSystem ? "Yes" : "No")}");
-            infoBuilder.AppendLine($"  Machine: {Environment.MachineName}");
-            infoBuilder.AppendLine($"  Logical CPU Cores: {Environment.ProcessorCount}");
+            _ = infoBuilder.AppendLine("Environment:");
+            _ = infoBuilder.AppendLine($"  OS: {RuntimeInformation.OSDescription}");
+            _ = infoBuilder.AppendLine($"  Runtime: {RuntimeInformation.FrameworkDescription}");
+            _ = infoBuilder.AppendLine($"  Process: {(Environment.Is64BitProcess ? "64-bit" : "32-bit")}, OS64: {(Environment.Is64BitOperatingSystem ? "Yes" : "No")}");
+            _ = infoBuilder.AppendLine($"  Machine: {Environment.MachineName}");
+            _ = infoBuilder.AppendLine($"  Logical CPU Cores: {Environment.ProcessorCount}");
 
             try
             {
                 DriveInfo driveInfo = new(rootPath);
-                infoBuilder.AppendLine("Logical Drive:");
-                infoBuilder.AppendLine($"  Name: {driveInfo.Name}");
-                infoBuilder.AppendLine($"  Type: {driveInfo.DriveType}");
-                infoBuilder.AppendLine($"  FileSystem: {driveInfo.DriveFormat}");
-                infoBuilder.AppendLine($"  Volume Label: {(string.IsNullOrWhiteSpace(driveInfo.VolumeLabel) ? "n/a" : driveInfo.VolumeLabel)}");
-                infoBuilder.AppendLine($"  Total: {FormatBytesToGiB(driveInfo.TotalSize)}");
-                infoBuilder.AppendLine($"  Free: {FormatBytesToGiB(driveInfo.TotalFreeSpace)}");
-                infoBuilder.AppendLine($"  Free (User): {FormatBytesToGiB(driveInfo.AvailableFreeSpace)}");
+                _ = infoBuilder.AppendLine("Logical Drive:");
+                _ = infoBuilder.AppendLine($"  Name: {driveInfo.Name}");
+                _ = infoBuilder.AppendLine($"  Type: {driveInfo.DriveType}");
+                _ = infoBuilder.AppendLine($"  FileSystem: {driveInfo.DriveFormat}");
+                _ = infoBuilder.AppendLine($"  Volume Label: {(string.IsNullOrWhiteSpace(driveInfo.VolumeLabel) ? "n/a" : driveInfo.VolumeLabel)}");
+                _ = infoBuilder.AppendLine($"  Total: {FormatBytesToGiB(driveInfo.TotalSize)}");
+                _ = infoBuilder.AppendLine($"  Free: {FormatBytesToGiB(driveInfo.TotalFreeSpace)}");
+                _ = infoBuilder.AppendLine($"  Free (User): {FormatBytesToGiB(driveInfo.AvailableFreeSpace)}");
             }
             catch
             {
-                infoBuilder.AppendLine("Logical Drive: n/a");
+                _ = infoBuilder.AppendLine("Logical Drive: n/a");
             }
 
             string driveId = (Path.GetPathRoot(rootPath) ?? rootPath).TrimEnd('\\').ToUpperInvariant();
@@ -82,16 +82,16 @@ namespace FormsSystemStatsWidget.Forms
                 using ManagementObjectSearcher logicalDiskSearcher = new($"SELECT * FROM Win32_LogicalDisk WHERE DeviceID='{driveId}'");
                 using ManagementObjectCollection logicalDisks = logicalDiskSearcher.Get();
 
-                infoBuilder.AppendLine("WMI Logical Disk:");
+                _ = infoBuilder.AppendLine("WMI Logical Disk:");
                 foreach (ManagementObject logicalDisk in logicalDisks.Cast<ManagementObject>())
                 {
-                    infoBuilder.AppendLine($"  DeviceID: {GetSafePropertyValue(logicalDisk, "DeviceID")}");
-                    infoBuilder.AppendLine($"  VolumeName: {GetSafePropertyValue(logicalDisk, "VolumeName")}");
-                    infoBuilder.AppendLine($"  VolumeSerialNumber: {GetSafePropertyValue(logicalDisk, "VolumeSerialNumber")}");
-                    infoBuilder.AppendLine($"  ProviderName: {GetSafePropertyValue(logicalDisk, "ProviderName")}");
-                    infoBuilder.AppendLine($"  Compressed: {GetSafePropertyValue(logicalDisk, "Compressed")}");
-                    infoBuilder.AppendLine($"  SupportsDiskQuotas: {GetSafePropertyValue(logicalDisk, "SupportsDiskQuotas")}");
-                    infoBuilder.AppendLine($"  SupportsFileBasedCompression: {GetSafePropertyValue(logicalDisk, "SupportsFileBasedCompression")}");
+                    _ = infoBuilder.AppendLine($"  DeviceID: {GetSafePropertyValue(logicalDisk, "DeviceID")}");
+                    _ = infoBuilder.AppendLine($"  VolumeName: {GetSafePropertyValue(logicalDisk, "VolumeName")}");
+                    _ = infoBuilder.AppendLine($"  VolumeSerialNumber: {GetSafePropertyValue(logicalDisk, "VolumeSerialNumber")}");
+                    _ = infoBuilder.AppendLine($"  ProviderName: {GetSafePropertyValue(logicalDisk, "ProviderName")}");
+                    _ = infoBuilder.AppendLine($"  Compressed: {GetSafePropertyValue(logicalDisk, "Compressed")}");
+                    _ = infoBuilder.AppendLine($"  SupportsDiskQuotas: {GetSafePropertyValue(logicalDisk, "SupportsDiskQuotas")}");
+                    _ = infoBuilder.AppendLine($"  SupportsFileBasedCompression: {GetSafePropertyValue(logicalDisk, "SupportsFileBasedCompression")}");
                 }
 
                 HashSet<string> diskDeviceIds = new(StringComparer.OrdinalIgnoreCase);
@@ -121,8 +121,8 @@ namespace FormsSystemStatsWidget.Forms
                 if (diskDrives.Count > 0)
                 {
                     bool raidCandidate = diskDrives.Count > 1;
-                    infoBuilder.AppendLine("Physical Disk Mapping:");
-                    infoBuilder.AppendLine($"  Mapped Physical Devices: {diskDrives.Count}");
+                    _ = infoBuilder.AppendLine("Physical Disk Mapping:");
+                    _ = infoBuilder.AppendLine($"  Mapped Physical Devices: {diskDrives.Count}");
 
                     for (int index = 0; index < diskDrives.Count; index++)
                     {
@@ -148,28 +148,28 @@ namespace FormsSystemStatsWidget.Forms
                             sizeText = $"{sizeRaw} ({FormatBytesToGiB(diskBytes)})";
                         }
 
-                        infoBuilder.AppendLine($"  Disk #{index + 1}:");
-                        infoBuilder.AppendLine($"    Model: {model}");
-                        infoBuilder.AppendLine($"    Caption: {caption}");
-                        infoBuilder.AppendLine($"    Manufacturer: {manufacturer}");
-                        infoBuilder.AppendLine($"    InterfaceType: {interfaceType}");
-                        infoBuilder.AppendLine($"    MediaType: {mediaType}");
-                        infoBuilder.AppendLine($"    Size: {sizeText}");
-                        infoBuilder.AppendLine($"    FirmwareRevision: {firmware}");
-                        infoBuilder.AppendLine($"    SerialNumber: {serialNumber}");
-                        infoBuilder.AppendLine($"    PNPDeviceID: {pnpDeviceId}");
+                        _ = infoBuilder.AppendLine($"  Disk #{index + 1}:");
+                        _ = infoBuilder.AppendLine($"    Model: {model}");
+                        _ = infoBuilder.AppendLine($"    Caption: {caption}");
+                        _ = infoBuilder.AppendLine($"    Manufacturer: {manufacturer}");
+                        _ = infoBuilder.AppendLine($"    InterfaceType: {interfaceType}");
+                        _ = infoBuilder.AppendLine($"    MediaType: {mediaType}");
+                        _ = infoBuilder.AppendLine($"    Size: {sizeText}");
+                        _ = infoBuilder.AppendLine($"    FirmwareRevision: {firmware}");
+                        _ = infoBuilder.AppendLine($"    SerialNumber: {serialNumber}");
+                        _ = infoBuilder.AppendLine($"    PNPDeviceID: {pnpDeviceId}");
                     }
 
-                    infoBuilder.AppendLine($"  RAID / Multi-Disk Hint: {(raidCandidate ? "Likely" : "Not detected")}");
+                    _ = infoBuilder.AppendLine($"  RAID / Multi-Disk Hint: {(raidCandidate ? "Likely" : "Not detected")}");
                 }
                 else
                 {
-                    infoBuilder.AppendLine("Physical Disk Mapping: n/a");
+                    _ = infoBuilder.AppendLine("Physical Disk Mapping: n/a");
                 }
             }
             catch (Exception ex)
             {
-                infoBuilder.AppendLine($"WMI Storage Details: unavailable ({ex.GetType().Name})");
+                _ = infoBuilder.AppendLine($"WMI Storage Details: unavailable ({ex.GetType().Name})");
             }
 
             return infoBuilder.ToString().TrimEnd();
