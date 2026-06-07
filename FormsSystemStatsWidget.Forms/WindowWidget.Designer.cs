@@ -41,6 +41,8 @@
             this.toolStripTextBox_diagramColor = new ToolStripTextBox();
             this.toolStripMenuItem_opacity = new ToolStripMenuItem();
             this.toolStripTextBox_opacity = new ToolStripTextBox();
+            this.toolStripMenuItem_clickThrough = new ToolStripMenuItem();
+            this.toolStripComboBox_clickOntoHotkey = new ToolStripComboBox();
             this.showUsageToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripTextBox_percentageColor = new ToolStripTextBox();
             this.alwaysOnTopToolStripMenuItem = new ToolStripMenuItem();
@@ -88,6 +90,8 @@
             this.toolStripTextBox_repetationPenalty = new ToolStripTextBox();
             this.toolStripMenuItem_thinkingBudget = new ToolStripMenuItem();
             this.toolStripTextBox_thinkingBudget = new ToolStripTextBox();
+            this.toolStripMenuItem_reasoningBudget = new ToolStripMenuItem();
+            this.toolStripTextBox_reasoningBudget = new ToolStripTextBox();
             this.toolStripMenuItem_topP = new ToolStripMenuItem();
             this.toolStripTextBox_topP = new ToolStripTextBox();
             this.toolStripMenuItem_minP = new ToolStripMenuItem();
@@ -223,7 +227,7 @@
             // 
             // toolStripMenuItem_opacity
             // 
-            this.toolStripMenuItem_opacity.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_opacity });
+            this.toolStripMenuItem_opacity.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_opacity, this.toolStripMenuItem_clickThrough, this.toolStripComboBox_clickOntoHotkey });
             this.toolStripMenuItem_opacity.Name = "toolStripMenuItem_opacity";
             this.toolStripMenuItem_opacity.Size = new Size(253, 22);
             this.toolStripMenuItem_opacity.Text = "Window Opacity ...";
@@ -234,6 +238,19 @@
             this.toolStripTextBox_opacity.Size = new Size(100, 23);
             this.toolStripTextBox_opacity.Text = "0";
             this.toolStripTextBox_opacity.KeyDown += this.toolStripTextBox_opacity_KeyDown;
+            // 
+            // toolStripMenuItem_clickThrough
+            // 
+            this.toolStripMenuItem_clickThrough.Name = "toolStripMenuItem_clickThrough";
+            this.toolStripMenuItem_clickThrough.Size = new Size(181, 22);
+            this.toolStripMenuItem_clickThrough.Text = "Click Through";
+            // 
+            // toolStripComboBox_clickOntoHotkey
+            // 
+            this.toolStripComboBox_clickOntoHotkey.Items.AddRange(new object[] { "Ctrl", "Alt", "Shift" });
+            this.toolStripComboBox_clickOntoHotkey.Name = "toolStripComboBox_clickOntoHotkey";
+            this.toolStripComboBox_clickOntoHotkey.Size = new Size(121, 23);
+            this.toolStripComboBox_clickOntoHotkey.Text = "Ctrl";
             // 
             // showUsageToolStripMenuItem
             // 
@@ -381,7 +398,7 @@
             // 
             // toolStripMenuItem_loadLlamaCppServer
             // 
-            this.toolStripMenuItem_loadLlamaCppServer.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_modelsDirectory, this.toolStripComboBox_ggufModels, this.toolStripMenuItem_loadMmproj, this.toolStripMenuItem_contextSize, this.toolStripMenuItem_batchSize, this.toolStripMenuItem_splitMode, this.toolStripMenuItem_tensorSplit, this.toolStripMenuItem_flashAttention, this.toolStripMenuItem_gpuLayersCount, this.toolStripMenuItem_parallelSlots, this.toolStripMenuItem_noWarmup, this.toolStripMenuItem_fitMode, this.KVoffload_ToolStripMenuItem, this.toolStripSeparator3, this.toolStripMenuItem_temperature, this.toolStripMenuItem_repetitionPenalty, this.toolStripMenuItem_thinkingBudget, this.toolStripMenuItem_topP, this.toolStripMenuItem_minP, this.toolStripMenuItem_topK });
+            this.toolStripMenuItem_loadLlamaCppServer.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_modelsDirectory, this.toolStripComboBox_ggufModels, this.toolStripMenuItem_loadMmproj, this.toolStripMenuItem_contextSize, this.toolStripMenuItem_batchSize, this.toolStripMenuItem_splitMode, this.toolStripMenuItem_tensorSplit, this.toolStripMenuItem_flashAttention, this.toolStripMenuItem_gpuLayersCount, this.toolStripMenuItem_parallelSlots, this.toolStripMenuItem_noWarmup, this.toolStripMenuItem_fitMode, this.KVoffload_ToolStripMenuItem, this.toolStripSeparator3, this.toolStripMenuItem_temperature, this.toolStripMenuItem_repetitionPenalty, this.toolStripMenuItem_thinkingBudget, this.toolStripMenuItem_reasoningBudget, this.toolStripMenuItem_topP, this.toolStripMenuItem_minP, this.toolStripMenuItem_topK });
             this.toolStripMenuItem_loadLlamaCppServer.Name = "toolStripMenuItem_loadLlamaCppServer";
             this.toolStripMenuItem_loadLlamaCppServer.Size = new Size(253, 22);
             this.toolStripMenuItem_loadLlamaCppServer.Text = "Load Model (llama-server.exe)";
@@ -453,7 +470,7 @@
             // 
             // toolStripComboBox_splitMode
             // 
-            this.toolStripComboBox_splitMode.Items.AddRange(new object[] { "none", "layer", "row" });
+            this.toolStripComboBox_splitMode.Items.AddRange(new object[] { "none", "layer", "row", "tensor" });
             this.toolStripComboBox_splitMode.Name = "toolStripComboBox_splitMode";
             this.toolStripComboBox_splitMode.Size = new Size(140, 23);
             this.toolStripComboBox_splitMode.Text = "Select a Split Mode";
@@ -580,6 +597,20 @@
             this.toolStripTextBox_thinkingBudget.Size = new Size(100, 23);
             this.toolStripTextBox_thinkingBudget.Text = "16384";
             this.toolStripTextBox_thinkingBudget.KeyDown += this.toolStripTextBox_thinkingBudget_KeyDown;
+            // 
+            // toolStripMenuItem_reasoningBudget
+            // 
+            this.toolStripMenuItem_reasoningBudget.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_reasoningBudget });
+            this.toolStripMenuItem_reasoningBudget.Name = "toolStripMenuItem_reasoningBudget";
+            this.toolStripMenuItem_reasoningBudget.Size = new Size(340, 22);
+            this.toolStripMenuItem_reasoningBudget.Text = "Reasoning Budget";
+            // 
+            // toolStripTextBox_reasoningBudget
+            // 
+            this.toolStripTextBox_reasoningBudget.Name = "toolStripTextBox_reasoningBudget";
+            this.toolStripTextBox_reasoningBudget.Size = new Size(100, 23);
+            this.toolStripTextBox_reasoningBudget.Text = "8192";
+            this.toolStripTextBox_reasoningBudget.KeyDown += this.toolStripTextBox_reasoningBudget_KeyDown;
             // 
             // toolStripMenuItem_topP
             // 
@@ -1109,5 +1140,9 @@
         private ToolStripMenuItem toolStripMenuItem_opacity;
         private ToolStripTextBox toolStripTextBox_opacity;
         private ToolStripSeparator toolStripSeparator5;
+        private ToolStripMenuItem toolStripMenuItem_clickThrough;
+        private ToolStripComboBox toolStripComboBox_clickOntoHotkey;
+        private ToolStripMenuItem toolStripMenuItem_reasoningBudget;
+        private ToolStripTextBox toolStripTextBox_reasoningBudget;
     }
 }

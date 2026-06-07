@@ -169,6 +169,7 @@ namespace FormsSystemStatsWidget.Forms
             bool kvOffload = this.KVoffload_ToolStripMenuItem.Checked;
             bool fitMode = this.toolStripMenuItem_fitMode.Checked;
             int? thinkingBudget = this.toolStripTextBox_thinkingBudget.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_thinkingBudget.Text.Trim(), out int parsedThinkingBudget) ? parsedThinkingBudget : null;
+            int? reasoningBudget = this.toolStripTextBox_reasoningBudget.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_reasoningBudget.Text.Trim(), out int parsedReasoningBudget) ? parsedReasoningBudget : null;
             float topP = this.toolStripTextBox_topP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_topP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedTopP) ? parsedTopP : 0.9f;
             float minP = this.toolStripTextBox_minP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_minP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedMinP) ? parsedMinP : 0.0f;
             int topK = this.toolStripTextBox_topK.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_topK.Text.Trim(), out int parsedTopK) ? parsedTopK : 40;
@@ -217,6 +218,10 @@ namespace FormsSystemStatsWidget.Forms
             {
                 _ = sb.Append($"-tb {thinkingBudget.Value} ");
             }
+            if (reasoningBudget.HasValue)
+            {
+                _ = sb.Append($"--reasoning-budget {reasoningBudget.Value} ");
+            }
 
             // HIER DIE ANPASSUNG: Erzeugt das korrekte Multiline-Format mit dem Windows-Line-Continuation-Zeichen (^)
             string command = sb.ToString().Trim();
@@ -237,7 +242,7 @@ namespace FormsSystemStatsWidget.Forms
                     Title = "Save Model Load Configuration as Batch File",
                     Filter = "Batch Files (*.bat)|*.bat",
                     FileName = batName,
-                    InitialDirectory = WidgetStatics.GetRepositoryDirectory(".Forms", "Ressources\\LlamaCppLoad_BATs")
+                    InitialDirectory = AppDomain.CurrentDomain.BaseDirectory
                 };
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
@@ -274,7 +279,7 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
-            string batFilePath = Path.Combine(WidgetStatics.GetRepositoryDirectory(".Forms", "Ressources\\LlamaCppLoad_BATs"), selectedBatName + ".BAT");
+            string batFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs", selectedBatName + ".BAT");
             if (!File.Exists(batFilePath))
             {
                 _ = MessageBox.Show(this, $"The selected batch file does not exist:\n{batFilePath}", "Batch File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -372,7 +377,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.Invoke((System.Windows.Forms.MethodInvoker) delegate {
                     if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
                     {
-                        openDebugConsoleToolStripMenuItem_Click(this, EventArgs.Empty);
+                        this.openDebugConsoleToolStripMenuItem_Click(this, EventArgs.Empty);
                     }
                 });
             }
@@ -538,7 +543,7 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             string entered = this.toolStripTextBox_temperature.Text.Trim();
-            if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float temperature) && temperature > 0)
+            if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float temperature) && temperature >= 0)
             {
                 this.toolStripTextBox_temperature.Text = temperature.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 LlamaOllamaBridge.UserDefinedTemperature = (double) temperature;
@@ -714,6 +719,26 @@ namespace FormsSystemStatsWidget.Forms
 
             e.SuppressKeyPress = true;
             e.Handled = true;
+        }
+
+        private void toolStripTextBox_reasoningBudget_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_reasoningBudget.Text.Trim();
+            if (int.TryParse(entered, out int reasoningBudget) && reasoningBudget >= 0)
+            {
+                this.toolStripTextBox_reasoningBudget.Text = reasoningBudget.ToString();
+                LlamaOllamaBridge.UserDefinedReasoningBudget = reasoningBudget;
+            }
+            else
+            {
+                _ = MessageBox.Show(this, "Please enter a valid non-negative integer for reasoning budget (tokens).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_reasoningBudget.Text = "0";
+            }
         }
 
         private void toolStripTextBox_topP_KeyDown(object sender, KeyEventArgs e)

@@ -25,7 +25,7 @@ namespace FormsSystemStatsWidget.Forms
         private int _updateIntervalMs = 420;
         private Color _diagramColor = Color.White;
         private Color? _percentageColor = Color.BlueViolet;
-        
+
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern int SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
@@ -934,8 +934,13 @@ namespace FormsSystemStatsWidget.Forms
             }
 
 
-            // Get & fill all .BAT files from Ressources\LlamaCppLoad_BATs\
-            string batsDirectory = WidgetStatics.GetRepositoryDirectory(".Forms", "Ressources\\LlamaCppLoad_BATs");
+            // Get & fill all .BAT files from EXE directory \ llama.cpp_load_BATs \ 
+            string batsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs");
+            if (!Directory.Exists(batsDirectory))
+            {
+                Directory.CreateDirectory(batsDirectory);
+            }
+
             string[] batFilePaths = Directory.GetFiles(batsDirectory, "*.bat").Concat(Directory.GetFiles(batsDirectory, "*.BAT")).ToArray();
             batFilePaths = batFilePaths.OrderByDescending(File.GetLastWriteTime).ToArray();
             string[] batFileNames = batFilePaths.Select(path => Path.GetFileNameWithoutExtension(path)).ToArray();
@@ -989,6 +994,8 @@ namespace FormsSystemStatsWidget.Forms
             _ = SetWindowLong(this.Handle, GWL_EXSTYLE, initialStyle | WS_EX_LAYERED);
             _ = SetLayeredWindowAttributes(this.Handle, 0, (byte) (opacity * 255), 0x00000002);
         }
+
+        
     }
 }
 

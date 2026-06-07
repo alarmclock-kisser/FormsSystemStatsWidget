@@ -53,9 +53,10 @@ namespace FormsSystemStatsWidget.Core
         public static double UserDefinedTemperature { get; set; } = 0.7;
         public static double UserDefinedRepetitionPenalty { get; set; } = 1.1;
         public static int UserDefinedThinkingBudget { get; set; } = 4096;
-        public static Double UserDefinedTopP { get; set; }
-        public static Double UserDefinedMinP { get; set; }
-        public static Int32 UserDefinedTopK { get; set; }
+        public static double UserDefinedTopP { get; set; }
+        public static double UserDefinedMinP { get; set; }
+        public static int UserDefinedTopK { get; set; }
+        public static int UserDefinedReasoningBudget { get; set; }
 
         private static readonly HttpClient _httpClient = new();
 
