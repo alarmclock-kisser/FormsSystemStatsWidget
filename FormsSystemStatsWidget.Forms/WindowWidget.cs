@@ -25,11 +25,7 @@ namespace FormsSystemStatsWidget.Forms
         private int _updateIntervalMs = 420;
         private Color _diagramColor = Color.White;
         private Color? _percentageColor = Color.BlueViolet;
-        private int _driveTestFileSizeMb = 4096;
-        private int _driveTestBlockSizeKb = 1024;
-        private int _driveTestPasses = 2;
-        private int _driveTestWorkerThreads = Math.Clamp(Environment.ProcessorCount / 4, 2, Environment.ProcessorCount);
-        private bool _driveTestInProgress = false;
+        
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern int SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);

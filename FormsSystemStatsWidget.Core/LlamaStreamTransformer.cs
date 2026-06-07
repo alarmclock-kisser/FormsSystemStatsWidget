@@ -837,7 +837,7 @@ namespace FormsSystemStatsWidget.Core
 
                             if (!isReceivingReasoning)
                             {
-                                rContent = "\n\n> 🧠 **Gedankengang:**\n> " + rContent;
+                                rContent = "\n\n> 🧠 \n> " + rContent;
                                 isReceivingReasoning = true;
                             }
 

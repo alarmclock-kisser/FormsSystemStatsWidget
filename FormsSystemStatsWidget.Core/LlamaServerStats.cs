@@ -1,13 +1,14 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http;
 using System.Text.Json.Nodes;
-using System.Threading;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace FormsSystemStatsWidget.Core
 {
-    public static class LlamaServerStats
+    public static partial class LlamaServerStats
     {
         // Timeout deutlich erhöht! 250ms war viel zu kurz für einen ausgelasteten KI-Server.
         private static readonly HttpClient _statsClient = new() { Timeout = TimeSpan.FromMilliseconds(2500) };
@@ -20,10 +21,44 @@ namespace FormsSystemStatsWidget.Core
         private static float _liveTpsFromStdOut = 0f;
         private static DateTime _liveTpsFromStdOutUtc = DateTime.MinValue;
         private static readonly TimeSpan IdlePollingInterval = TimeSpan.FromSeconds(2);
-        private static readonly TimeSpan StdOutTpsTtl = TimeSpan.FromSeconds(3);
 
-        // Zähler für kurzzeitige Aussetzer bei hoher Systemlast
+        // FEHLENDER WERT HINZUGEFÜGT: Wie lange ein StdOut-TPS-Wert gültig bleibt (z.B. 4 Sekunden)
+        private static readonly TimeSpan StdOutTpsTtl = TimeSpan.FromSeconds(4);
+
+        private static readonly Regex TimingRegex = TokensPerSecondRegex();
         private static int _errorCount = 0;
+
+        /// <summary>
+        /// Verbindet die Klasse direkt mit dem laufenden llama-server Prozess, 
+        /// um die Konsolenausgaben in Echtzeit abzufangen.
+        /// </summary>
+        public static void AttachToProcess(Process llamaServerProcess)
+        {
+            if (llamaServerProcess == null) return;
+
+            // WICHTIG: llama.cpp sendet fast alle Logs (auch Info) an StandardError!
+            llamaServerProcess.ErrorDataReceived += (sender, e) =>
+            {
+                ParseStdOutLine(e.Data);
+            };
+
+            // Zur Sicherheit auch StandardOutput anbinden
+            llamaServerProcess.OutputDataReceived += (sender, e) =>
+            {
+                ParseStdOutLine(e.Data);
+            };
+        }
+
+        public static void ParseStdOutLine(string? line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return;
+
+            var match = TimingRegex.Match(line);
+            if (match.Success && float.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float tokensPerSecond))
+            {
+                UpdateGenerationSpeed(tokensPerSecond);
+            }
+        }
 
         public static async Task<float?> GetCurrentLlamaServerGenerationStatsAsync(int llamacppPort = 8080)
         {
@@ -121,7 +156,7 @@ namespace FormsSystemStatsWidget.Core
                     }
                 }
 
-                _errorCount = 0; // Fehler-Zähler zurücksetzen bei erfolgreichem Pull
+                _errorCount = 0;
 
                 if (!anySlotActive)
                 {
@@ -144,42 +179,6 @@ namespace FormsSystemStatsWidget.Core
                     return _currentTps > 0 ? _currentTps : 0f;
                 }
 
-                int deltaTokens = currentNDecoded - _lastNDecoded;
-                double deltaSeconds = (now - _lastCheckTime).TotalSeconds;
-
-                if (directTokensPerSecond > 0f)
-                {
-                    _currentTps = directTokensPerSecond;
-                    _lastNDecoded = currentNDecoded;
-                    _lastCheckTime = now;
-                }
-                else if (deltaSeconds > 0 && deltaTokens >= 0)
-                {
-                    if (deltaTokens > 0)
-                    {
-                        _currentTps = (float) (deltaTokens / deltaSeconds);
-                        _lastNDecoded = currentNDecoded;
-                        _lastCheckTime = now;
-                    }
-                    else
-                    {
-                        if (currentNDecoded == 0)
-                        {
-                            _currentTps = 0f;
-                        }
-                        else
-                        {
-                            _currentTps *= 0.90f;
-                            if (_currentTps < 0.05f)
-                            {
-                                _currentTps = 0f;
-                            }
-                        }
-                        // Update Zeit für nächste Berechnung
-                        _lastCheckTime = now;
-                    }
-                }
-
                 return _currentTps;
             }
             catch
@@ -192,8 +191,6 @@ namespace FormsSystemStatsWidget.Core
                     return stdOutTpsFallback;
                 }
 
-                // Wenn der Server gerade hart rechnet, blockiert der HTTP-Thread desllama-server 
-                // manchmal massiv. Wir buffern nun bis zu 15 Timeouts (~30-37s) ab!
                 if (_errorCount > 15)
                 {
                     _lastTaskId = -1;
@@ -246,7 +243,6 @@ namespace FormsSystemStatsWidget.Core
                     return true;
                 }
             }
-
             return false;
         }
 
@@ -261,8 +257,11 @@ namespace FormsSystemStatsWidget.Core
                     return true;
                 }
             }
-
             return false;
         }
+
+        // Die Regex passt perfekt auf dein Log: "tg =  19.14 t/s"
+        [GeneratedRegex(@"tg\s*=\s*([\d.]+)\s*t\/s", RegexOptions.Compiled)]
+        private static partial Regex TokensPerSecondRegex();
     }
 }

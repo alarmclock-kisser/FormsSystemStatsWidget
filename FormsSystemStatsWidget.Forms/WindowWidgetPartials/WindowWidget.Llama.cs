@@ -329,7 +329,12 @@ namespace FormsSystemStatsWidget.Forms
                 ? trimmed[(executableName.Length + 1)..]
                 : string.Empty;
 
-            bool captureOutput = this.toolStripMenuItem_hideCmd.Checked;
+            // --- DER TRICK ---
+            // Wir MÜSSEN den Stream immer umleiten, damit die TPS jederzeit (auch nachträglich) 
+            // geparst werden können. Windows erlaubt kein nachträgliches Einklinken!
+            bool captureOutput = true;
+            bool hideCmd = this.toolStripMenuItem_hideCmd.Checked;
+
             var startInfo = new ProcessStartInfo
             {
                 FileName = executableName,
@@ -337,8 +342,11 @@ namespace FormsSystemStatsWidget.Forms
                 UseShellExecute = false,
                 RedirectStandardOutput = captureOutput,
                 RedirectStandardError = captureOutput,
-                CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
-                WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal
+                // Wenn hideCmd aus ist, wollte der User eigentlich das CMD-Fenster sehen.
+                // Da wir die Streams umleiten, wäre das CMD-Fenster aber komplett schwarz.
+                // Daher verstecken wir die native CMD *immer*...
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
             };
 
             this._llamaServerProcess = new Process
@@ -358,12 +366,78 @@ namespace FormsSystemStatsWidget.Forms
                 throw new InvalidOperationException("llama-server process could not be started.");
             }
 
+            // ... und öffnen stattdessen deine eigene Debug-Konsole, falls der User Logs sehen will!
+            if (!hideCmd)
+            {
+                this.Invoke((System.Windows.Forms.MethodInvoker) delegate {
+                    if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
+                    {
+                        openDebugConsoleToolStripMenuItem_Click(this, EventArgs.Empty);
+                    }
+                });
+            }
+
             if (captureOutput)
             {
                 this._llamaServerProcess.BeginOutputReadLine();
                 this._llamaServerProcess.BeginErrorReadLine();
             }
         }
+
+        private void HandleLlamaServerOutputDataReceived(object sender, DataReceivedEventArgs e)
+        {
+            string? line = e.Data;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return;
+            }
+
+            // Wenn der User die CMD eigentlich nicht verstecken wollte, routen wir 
+            // den llama-server Output stattdessen in deine interne Debug-Konsole!
+            if (!this.toolStripMenuItem_hideCmd.Checked)
+            {
+                Logger.Log(line);
+            }
+
+            if (!TryExtractTokensPerSecondFromLlamaOutput(line, out double tokensPerSecond))
+            {
+                return;
+            }
+
+            this._lastStdOutTokensPerSecond = tokensPerSecond;
+            this._lastStdOutTokensPerSecondUtc = DateTime.UtcNow;
+
+            // Dies läuft im Hintergrund immer mit. Wenn "Show tokens/s" aus ist,
+            // fragt die UI den Wert einfach nicht ab. Schaltest du es ein, ist der Wert da!
+            LlamaServerStats.UpdateGenerationSpeed((float) tokensPerSecond);
+        }
+
+        private static bool TryExtractTokensPerSecondFromLlamaOutput(string line, out double tokensPerSecond)
+        {
+            tokensPerSecond = 0d;
+
+            // BUGFIX: () hinzugefügt, da GeneratedRegex eine Methode erzeugt!
+            Match match = TokensPerSecondRegex.Match(line);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            // BUGFIX: Wir greifen auf Groups[1] zu, da die Regex `([\d.]+)` nutzt (ohne Namen "tps")
+            if (!double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsedValue))
+            {
+                return false;
+            }
+
+            if (parsedValue <= 0.01d)
+            {
+                return false;
+            }
+
+            tokensPerSecond = parsedValue;
+            return true;
+        }
+
 
         private void StopTrackedLlamaServerProcess()
         {
@@ -401,47 +475,6 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             this._llamaServerProcess = null;
-        }
-
-        private void HandleLlamaServerOutputDataReceived(object sender, DataReceivedEventArgs e)
-        {
-            string? line = e.Data;
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                return;
-            }
-
-            if (!TryExtractTokensPerSecondFromLlamaOutput(line, out double tokensPerSecond))
-            {
-                return;
-            }
-
-            this._lastStdOutTokensPerSecond = tokensPerSecond;
-            this._lastStdOutTokensPerSecondUtc = DateTime.UtcNow;
-            LlamaServerStats.UpdateGenerationSpeed((float) tokensPerSecond);
-        }
-
-        private static bool TryExtractTokensPerSecondFromLlamaOutput(string line, out double tokensPerSecond)
-        {
-            tokensPerSecond = 0d;
-            Match match = TokensPerSecondRegex.Match(line);
-            if (!match.Success)
-            {
-                return false;
-            }
-
-            if (!double.TryParse(match.Groups["tps"].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsedValue))
-            {
-                return false;
-            }
-
-            if (parsedValue <= 0.01d)
-            {
-                return false;
-            }
-
-            tokensPerSecond = parsedValue;
-            return true;
         }
 
 

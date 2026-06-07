@@ -7,6 +7,13 @@ namespace FormsSystemStatsWidget.Forms
 {
     public partial class WindowWidget
     {
+        private int _driveTestFileSizeMb = 4096;
+        private int _driveTestBlockSizeKb = 1024;
+        private int _driveTestPasses = 2;
+        private int _driveTestWorkerThreads = Math.Clamp(Environment.ProcessorCount / 4, 2, Environment.ProcessorCount);
+        private bool _driveTestInProgress = false;
+
+
         private void PopulateDriveSelections()
         {
             string? previousSelection = (this.toolStripComboBox_drives.SelectedItem as DriveSelection)?.RootPath;
