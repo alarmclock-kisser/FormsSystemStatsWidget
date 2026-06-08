@@ -12,12 +12,16 @@ namespace FormsSystemStatsWidget.Forms
         private readonly TextBox _logTextBox;
         private readonly ContextMenuStrip _contextMenuStrip_textBox_log;
 
+        internal static int FormWidth { get; private set; } = 700;
+        internal static int FormHeight { get; private set; } = 520;
+
+
         public DebugConsoleForm()
         {
             this.Text = "Debug Console";
             this.StartPosition = FormStartPosition.Manual;
-            this.Width = 900;
-            this.Height = 520;
+            this.Width = FormWidth;
+            this.Height = FormHeight;
 
             this._logTextBox = new TextBox
             {
@@ -38,6 +42,12 @@ namespace FormsSystemStatsWidget.Forms
                 }
             };
             this._logTextBox.ContextMenuStrip = this._contextMenuStrip_textBox_log;
+
+            this.Resize += (s, e) =>
+            {
+                FormWidth = this.Width;
+                FormHeight = this.Height;
+            };
 
             this.Controls.Add(this._logTextBox);
         }

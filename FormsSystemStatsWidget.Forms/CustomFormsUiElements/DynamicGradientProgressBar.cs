@@ -66,12 +66,12 @@ public class DynamicGradientProgressBar : Control
 
         if (fillWidth > 0)
         {
-            Rectangle fillRect = new Rectangle(0, 0, fillWidth, this.Height);
+            Rectangle fillRect = new(0, 0, fillWidth, this.Height);
 
             // 3. Fließenden Farbverlauf über ColorBlend generieren
             using (var brush = new LinearGradientBrush(this.ClientRectangle, Color.Black, Color.Black, 0f))
             {
-                ColorBlend blend = new ColorBlend();
+                ColorBlend blend = new();
 
                 // Deine Farbstufen (0% bis 100%)
                 blend.Colors = new Color[] {

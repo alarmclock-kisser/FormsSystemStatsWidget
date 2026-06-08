@@ -8,9 +8,10 @@
 
   <ItemGroup>
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="NAudio" Version="2.3.0" />
     <PackageReference Include="OpenHardwareMonitorLib" Version="1.0.9513" />
-    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.3" />
-    <PackageReference Include="System.Drawing.Common" Version="10.0.3" />
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="10.0.8" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.8" />
   </ItemGroup>
 
 </Project>

@@ -527,8 +527,8 @@ namespace FormsSystemStatsWidget.Core
             // Das lässt sich hier zentral erweitern, wenn neue Modelle kommen.
             var sizeMapping = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                { "e2b", "9B" },   // Beispiel: Gemma-4-E2B (kleinstes)
-                { "e4b", "26B" },  // Beispiel: Gemma-4-E4B
+                { "e2b", "5B" },   // Beispiel: Gemma-4-E2B (kleinstes)
+                { "e4b", "9B" },  // Beispiel: Gemma-4-E4B
                 { "a4b", "26B" },  // Beispiel: Gemma-4-A4B
                 { "a3b", "30B" }   // Beispiel: Qwen3-A3B
             };
@@ -696,8 +696,37 @@ namespace FormsSystemStatsWidget.Core
 
         public static event Action<string>? MessageLogged;
 
+        public static string[] FilteredLoggingPhrases = new[]
+        {
+            // Source API URL
+            "Source API URL"
+        };
+
+        // Logging phrases that shall not be repeated / consecutively logged more than once (e.g. "model loaded successfully" or "model loading failed")
+        public static string[] NonRepeatingLoggingPhrases = new[]
+        {
+            // Polling idle every 2 seconds
+            "all slots are idle", "update_slots"
+            // ...
+       };
+
+        private static int SuppressedRepeatedMessageCount = 0;
+
         public static void Log(string text)
         {
+            //if (FilteredLoggingPhrases.Any(phrase => text.Contains(phrase)))
+            //{
+            //    return;
+            //}
+
+            //string lastLogString = BufferedEntries.Count > 0 ? BufferedEntries.Last() : string.Empty;
+            //if (NonRepeatingLoggingPhrases.Any(phrase => text.Contains(phrase) && lastLogString.Contains(phrase)))
+            //{
+            //    // Over-print last log entry with a note about repeated message, instead of adding a new log line (using \r)
+            //    SuppressedRepeatedMessageCount++;
+            //    text = '\r' + text + $" ({SuppressedRepeatedMessageCount} times)";
+            //}
+
             lock (SyncRoot)
             {
                 if (!LlamaOllamaBridge.EnableRawChunkLogging)
@@ -763,6 +792,16 @@ namespace FormsSystemStatsWidget.Core
             lock (SyncRoot)
             {
                 return BufferedEntries.ToArray();
+            }
+        }
+
+        public static void Clear()
+        {
+            lock (SyncRoot)
+            {
+                BufferedEntries.Clear();
+                _isStreaming = false;
+                _streamChunkCount = 0;
             }
         }
     }

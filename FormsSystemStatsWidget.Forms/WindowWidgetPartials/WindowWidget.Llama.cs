@@ -26,6 +26,9 @@ namespace FormsSystemStatsWidget.Forms
 
             if (menuItem.Checked)
             {
+                var cur = this.Cursor;
+                this.Cursor = Cursors.WaitCursor;
+
                 string apiUrl = this.toolStripTextBox_openAiApiUrl.Text.Trim();
                 int? apiUrlPort = apiUrl != "" && Uri.TryCreate(apiUrl, UriKind.Absolute, out Uri? parsedUri) && parsedUri.IsLoopback ? parsedUri.Port : null;
                 apiUrl = apiUrl.Replace("http://", "").Replace("https://", "").Split(':').FirstOrDefault() ?? apiUrl;
@@ -35,6 +38,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripTextBox_ollamaPort.Text = ollamaPort.ToString();
 
                 bool isStarted = await LlamaOllamaBridge.StartAsync(apiUrl, llamaPort, ollamaPort);
+                this.Cursor = cur;
 
                 // Jetzt ContextMenu wieder einklappen / schließen
                 this.ContextMenuStrip?.Close();
@@ -321,12 +325,17 @@ namespace FormsSystemStatsWidget.Forms
 
         private void StartLlamaServerProcess(string fullCommand)
         {
+            Logger.Clear();
+
             if (string.IsNullOrWhiteSpace(fullCommand))
             {
                 throw new InvalidOperationException("llama-server command is empty.");
             }
 
             this.StopTrackedLlamaServerProcess();
+
+            var cur = this.Cursor;
+            this.Cursor = Cursors.WaitCursor;
 
             string trimmed = fullCommand.Trim();
             const string executableName = "llama-server";
@@ -387,6 +396,8 @@ namespace FormsSystemStatsWidget.Forms
                 this._llamaServerProcess.BeginOutputReadLine();
                 this._llamaServerProcess.BeginErrorReadLine();
             }
+
+            this.Cursor = cur;
         }
 
         private void HandleLlamaServerOutputDataReceived(object sender, DataReceivedEventArgs e)

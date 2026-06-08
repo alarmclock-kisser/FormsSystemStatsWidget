@@ -802,7 +802,7 @@ namespace FormsSystemStatsWidget.Core
                     var chunk = JsonNode.Parse(dataStr);
                     if (chunk?["choices"] is not JsonArray choicesArray || choicesArray.Count == 0)
                     {
-                        if (!toolCallTriggered)
+                        if (!toolCallTriggered && chunk?["content"] != null)
                         {
                             await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
                             await writer.FlushAsync();
@@ -857,6 +857,26 @@ namespace FormsSystemStatsWidget.Core
                             // Beendet das Zitat sauber, falls der Stream abrupt endet
                             delta["content"] = (delta["content"]?.ToString() ?? "") + "\n\n";
                             isReceivingReasoning = false;
+
+                            if (inToolCall && !toolCallTriggered)
+                            {
+                                // Fallback: Wenn wir in einem Tool-Call waren, aber keinen validen gefunden haben, 
+                                // senden wir zumindest ein leeres choices-Objekt, um den Fehler zu vermeiden.
+                                var fallbackChunk = new JsonObject
+                                {
+                                    ["choices"] = new JsonArray {
+                                        new JsonObject {
+                                            ["delta"] = new JsonObject { ["content"] = detectBuffer },
+                                            ["index"] = 0,
+                                            ["finish_reason"] = "length"
+                                        }
+                                    }
+                                };
+                                await writer.WriteLineAsync("data: " + fallbackChunk.ToJsonString());
+                                await writer.FlushAsync();
+                                detectBuffer = "";
+                                inToolCall = false;
+                            }
                         }
                         // ====================================================================
 
