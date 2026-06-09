@@ -9,7 +9,7 @@ public class DynamicGradientProgressBar : Control
     private int _value = 0;
     private int _minimum = 0;
     private int _maximum = 100;
-    
+
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public int Minimum
     {
@@ -61,7 +61,7 @@ public class DynamicGradientProgressBar : Control
         if (this._maximum <= this._minimum || this._value <= this._minimum) return;
 
         // 2. Berechnen, wie breit die Füllung sein muss
-        float percent = (this._value - this._minimum) / (float)(this._maximum - this._minimum);
+        float percent = (this._value - this._minimum) / (float) (this._maximum - this._minimum);
         int fillWidth = (int) (this.Width * percent);
 
         if (fillWidth > 0)

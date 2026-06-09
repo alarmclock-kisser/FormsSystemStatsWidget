@@ -132,7 +132,7 @@ namespace FormsSystemStatsWidget.Forms
             }
         }
 
-        
+
 
         public static void PruneRepositoryLogFiles(string logsDirectory, string preserveFilePath)
         {

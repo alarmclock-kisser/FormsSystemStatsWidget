@@ -1,0 +1,93 @@
+## WORKSPACE EXECUTIVE SUMMARY (YAML)
+# Generated: 2026-06-09T01:26:06.8189972+02:00
+# Root: C:\Users\marce\source\repos\alarmclock-kisser\FormsSystemStatsWidget
+Architecture:
+  Type: Backend (C#/.NET)
+  Scale: 35 relevant source files
+  Components: 0
+  Controllers: 0
+  Models: 0
+  Services: 0
+---
+- File: FormsSystemStatsWidget.Core\FormsSystemStatsWidget.Core.csproj
+  Preview: "<Project Sdk='Microsoft.NET.Sdk'>  <PropertyGroup>   <TargetFramework>net10.0</TargetFramework>   <ImplicitUsings>enable</ImplicitUsings>   <Nullable>..."
+- File: FormsSystemStatsWidget.Forms\FormsSystemStatsWidget.Forms.csproj
+  Preview: "<Project Sdk='Microsoft.NET.Sdk'>  <PropertyGroup>   <OutputType>WinExe</OutputType>   <TargetFramework>net10.0-windows</TargetFramework>   <Nullable>..."
+- File: FormsSystemStatsWidget.slnx
+  Preview: "<Solution>  <Project Path='FormsSystemStatsWidget.Core/FormsSystemStatsWidget.Core.csproj' />  <Project Path='FormsSystemStatsWidget.Forms/FormsSystem..."
+- File: .github\copilot-instructions.md
+  Preview: "# Custom.Instructions.md (C# / .NET Projekte) ## Rolle & Ziel Du bist mein Coding-Assistant für C#/.NET-Projekte. Erzeuge Code, Tests und Dokumentatio..."
+- File: FormsSystemStatsWidget.Core\AudioHandling.cs
+  Preview: "using System; using System.Collections.Concurrent; using System.Collections.Generic; using System.ComponentModel; using System.IO; using System.Linq; ..."
+- File: FormsSystemStatsWidget.Core\AudioObj.cs
+  Preview: "using System; using System.Collections.Generic; using System.Data; using System.Text; using Microsoft.VisualBasic; using NAudio.Wave; using NAudio.Wav..."
+- File: FormsSystemStatsWidget.Core\CpuStats.cs
+  Preview: "using System; using System.Collections.Generic; using System.ComponentModel; using System.Diagnostics; using System.Drawing; using System.Runtime.Inte..."
+- File: FormsSystemStatsWidget.Core\GpuStats.cs
+  Symbols: [GpuStats]
+  Preview: "using System; using System.Collections.Generic; using System.Linq; using System.Runtime.InteropServices; using System.Threading; using System.Threadin..."
+- File: FormsSystemStatsWidget.Core\LlamaCppModelLoader.cs
+  Symbols: [LlamaCppModelLoader]
+  Preview: "using System; using System.Collections.Generic; using System.Text; namespace FormsSystemStatsWidget.Core {   public static class LlamaCppModelLoader  ..."
+- File: FormsSystemStatsWidget.Core\LlamaOllamaBridge.cs
+  Preview: "using System; using System.Diagnostics; using System.Globalization; using System.IO; using System.Net; using System.Net.Http; using System.Runtime.Com..."
+- File: FormsSystemStatsWidget.Core\LlamaServerStats.cs
+  Preview: "using System; using System.Diagnostics; using System.Globalization; using System.Net.Http; using System.Text.Json.Nodes; using System.Text.RegularExpr..."
+- File: FormsSystemStatsWidget.Core\LlamaStreamTransformer.cs
+  Preview: "using System; using System.Collections.Generic; using System.Globalization; using System.IO; using System.Linq; using System.Text; using System.Text.J..."
+- File: FormsSystemStatsWidget.Core\LlamaToolExecutor.cs
+  Preview: "using System; using System.Collections.Generic; using System.Text; using System.Text.RegularExpressions; using System.Net.Http; using System.Threading..."
+- File: FormsSystemStatsWidget.Core\SmartPromptOptimizationSettings.cs
+  Symbols: [SmartPromptOptimizationSettings]
+  Preview: "namespace FormsSystemStatsWidget.Core {   /// <summary>   /// Zentrale Stellschrauben für die Smart-Prompt-Optimierung im Llama-Request-Sanitizer.   /..."
+- File: FormsSystemStatsWidget.Core\TrafficStats.cs
+  Preview: "using System; using System.Collections.Generic; using System.Diagnostics; using System.Net.NetworkInformation; using System.Runtime.InteropServices; n..."
+- File: FormsSystemStatsWidget.Forms\DebugConsoleForm.cs
+  Symbols: [DebugConsoleForm]
+  Preview: "using System; using System.IO; using System.Linq; using System.Reflection; using System.Windows.Forms; namespace FormsSystemStatsWidget.Forms {   inte..."
+- File: FormsSystemStatsWidget.Forms\Program.cs
+  Symbols: [Main, Program]
+  Preview: "namespace FormsSystemStatsWidget.Forms {   internal static class Program   {     /// <summary>     /// The main entry point for the application.     /..."
+- File: FormsSystemStatsWidget.Forms\WidgetDtos.cs
+  Symbols: [DriveSelection]
+  Preview: "using System; using System.Collections.Generic; using System.Text; namespace FormsSystemStatsWidget.Forms {   internal sealed class DriveSelection   {..."
+- File: FormsSystemStatsWidget.Forms\WidgetPersistentSettingsStore.cs
+  Symbols: [WidgetPersistentSettings]
+  Preview: "using System; using System.IO; using System.Text.Json; using FormsSystemStatsWidget.Core; namespace FormsSystemStatsWidget.Forms {   internal sealed c..."
+- File: FormsSystemStatsWidget.Forms\WidgetStatics.cs
+  Preview: "using System; using System.Collections.Generic; using System.Diagnostics; using System.Management; using System.Net.NetworkInformation; using System.R..."
+- File: FormsSystemStatsWidget.Forms\WindowWidget.cs
+  Preview: "using FormsSystemStatsWidget.Core; using System.Diagnostics; using System.Globalization; using System.Management; using System.Runtime.InteropServices..."
+- File: FormsSystemStatsWidget.Forms\WindowWidget.Designer.cs
+  Symbols: [WindowWidget]
+  Preview: "namespace FormsSystemStatsWidget.Forms {   partial class WindowWidget   {     /// <summary>     /// Required designer variable.     /// </summary>    ..."
+- File: .github\workflows\build.yml
+  Preview: "name: Build and Release WinForms App FSS Widget on:  push:   branches: [ 'master' ] permissions:  contents: write jobs:  build:   runs-on: windows-lat..."
+- File: FormsSystemStatsWidget.Forms\CustomFormsUiElements\DynamicGradientProgressBar.cs
+  Symbols: [DynamicGradientProgressBar]
+  Preview: "using System; using System.Drawing; using System.Drawing.Drawing2D; using System.Windows.Forms; using System.ComponentModel; public class DynamicGradi..."
+- File: FormsSystemStatsWidget.Forms\Ressources\Projekt_und_Klassenstruktur.txt
+  Preview: "================================================================================ 		  PROJEKT- UND KLASSENSTRUKTUR - FORMS SYSTEM STATS WIDGET ========..."
+- File: FormsSystemStatsWidget.Forms\WindowWidgetPartials\WindowWidget.CustomKeymapper.cs
+  Symbols: [WindowWidget]
+  Preview: "using System; using System.Collections.Generic; using System.Text; namespace FormsSystemStatsWidget.Forms {   public partial class WindowWidget   {   ..."
+- File: FormsSystemStatsWidget.Forms\WindowWidgetPartials\WindowWidget.DriveSpeedTest.cs
+  Symbols: [WindowWidget]
+  Preview: "using System; using System.Collections.Generic; using System.Diagnostics; using System.Text; namespace FormsSystemStatsWidget.Forms {   public partial..."
+- File: FormsSystemStatsWidget.Forms\WindowWidgetPartials\WindowWidget.Llama.cs
+  Preview: "using FormsSystemStatsWidget.Core; using System; using System.Collections.Generic; using System.Diagnostics; using System.Reflection; using System.Tex..."
+- File: FormsSystemStatsWidget.Forms\WindowWidgetPartials\WindowWidget.MetricsRecording.cs
+  Symbols: [WindowWidget]
+  Preview: "using FormsSystemStatsWidget.Core; using System; using System.Collections.Generic; using System.Globalization; using System.Text; namespace FormsSyste..."
+- File: FormsSystemStatsWidget.Forms\Ressources\Logs\FSSWidget_Logs_2026-06-04_17-38-50.txt
+  Preview: " 17:34:20.943 :: Found 31 model(s) in GGUF models directory: D:\\Models\GGUF\Others 17:34:20.948 :: Found smaller GGUF file: D:\Models\GGUF\Others\gem..."
+- File: FormsSystemStatsWidget.Forms\Ressources\Logs\FSSWidget_Logs_2026-06-04_17-52-55_qwen3-coder_one-toolcall-then-stopped.txt
+  Preview: " 17:47:33.185 :: Model root dir D:\Models\GGUF\Others\Qwen3-Coder-30B-A3B-Instruct-UD-Q5_K_XL does not contain more than 1 GGUF file, skip searching f..."
+- File: FormsSystemStatsWidget.Forms\Ressources\Logs\FSSWidget_Logs_2026-06-04_18-06-38_qwen-coder-next_not-finalizing-looping-end.txt
+  Preview: " 17:53:42.068 :: Model root dir D:\Models\GGUF\Others\Huihui-Qwen3-Coder-Next-Opus-4.6-Reasoning-Distilled-abliterated-IQ2_S does not contain more tha..."
+- File: FormsSystemStatsWidget.Forms\Ressources\Logs\FSSWidget_Logs_2026-06-04_18-19-04-gemma-4-coder_ctx-full-stopped_400.txt
+  Preview: " 18:10:06.732 :: Found 31 model(s) in GGUF models directory: D:\\Models\GGUF\Others 18:10:06.736 :: Found smaller GGUF file: D:\Models\GGUF\Others\gem..."
+- File: FormsSystemStatsWidget.Forms\Ressources\Logs\FSSWidget_Logs_2026-06-04_20-30-25-gemma-4-coder_plan-created_tools-called_half-ctx-full_no-errs.txt
+  Preview: " 19:09:46.248 :: Found 31 model(s) in GGUF models directory: D:\\Models\GGUF\Others 19:09:46.253 :: Found smaller GGUF file: D:\Models\GGUF\Others\gem..."
+- File: FormsSystemStatsWidget.Forms\Ressources\Logs\FSSWidget_Logs_2026-06-05_07-52-30-gemma-4-coder-v6.txt
+  Preview: " 07:08:54.500 :: Found 32 model(s) in GGUF models directory: D:\\Models\GGUF\Others 07:08:57.970 :: -- Saved batch file for loading model: C:\Users\op..."

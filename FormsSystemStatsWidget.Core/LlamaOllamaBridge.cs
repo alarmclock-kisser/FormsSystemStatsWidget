@@ -682,6 +682,7 @@ namespace FormsSystemStatsWidget.Core
         private static partial Regex ModelSizeClassicRegex();
         [GeneratedRegex(@"(?i)\b(?:E|A)(\d+)B\b", RegexOptions.None, "de-DE")]
         private static partial Regex ModelSizeModernRegex();
+        public static void RefreshModels() => Logger.Log("[LlamaBridge] RefreshModels called - currently no caching implemented, so this is a placeholder for potential future functionality.");
     }
 
 

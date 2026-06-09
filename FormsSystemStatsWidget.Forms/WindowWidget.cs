@@ -914,6 +914,10 @@ namespace FormsSystemStatsWidget.Forms
         // Init / Update / Fill ctxmenu items etc.
         private void contextMenuStrip_widget_Opening(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            // Refresh Models
+            LlamaOllamaBridge.RefreshModels();
+
+
             // Get llama-server.exe Processes running
             var processes = WidgetStatics.GetLlamaServerProcesses();
 
@@ -1081,6 +1085,7 @@ namespace FormsSystemStatsWidget.Forms
 
         [GeneratedRegex(@"\((.*?)\)")]
         private static partial Regex SetVoiceInputHotkeyRegex();
+
     }
 }
 

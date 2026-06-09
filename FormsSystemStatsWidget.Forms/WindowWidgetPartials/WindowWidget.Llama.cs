@@ -314,7 +314,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.StopTrackedLlamaServerProcess();
                 int? killed = WidgetStatics.KillLlamaServerProcesses();
                 Logger.Log($"[WindowWidget] Killed {killed} llama-server process(es).");
-                this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false; 
+                this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false;
                 this.ContextMenuStrip?.Close();
             }
             catch (Exception ex)
@@ -383,7 +383,8 @@ namespace FormsSystemStatsWidget.Forms
             // ... und öffnen stattdessen deine eigene Debug-Konsole, falls der User Logs sehen will!
             if (!hideCmd)
             {
-                this.Invoke((System.Windows.Forms.MethodInvoker) delegate {
+                this.Invoke((System.Windows.Forms.MethodInvoker) delegate
+                {
                     if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
                     {
                         this.openDebugConsoleToolStripMenuItem_Click(this, EventArgs.Empty);
