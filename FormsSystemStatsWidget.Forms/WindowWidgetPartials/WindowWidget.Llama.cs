@@ -246,7 +246,7 @@ namespace FormsSystemStatsWidget.Forms
                     Title = "Save Model Load Configuration as Batch File",
                     Filter = "Batch Files (*.bat)|*.bat",
                     FileName = batName,
-                    InitialDirectory = AppDomain.CurrentDomain.BaseDirectory
+                    InitialDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs")
                 };
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {

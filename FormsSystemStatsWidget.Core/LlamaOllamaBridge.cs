@@ -67,6 +67,7 @@ namespace FormsSystemStatsWidget.Core
         public static async Task<bool> StartAsync(string? apiUrl = null, int llamacppPort = 8080, int ollamaPort = 11434)
         {
             _lastStartError = string.Empty;
+            _httpClient.Timeout = TimeSpan.FromSeconds(600);
             Logger.Log($"[LlamaBridge] Starting Bridge: llama-server ({llamacppPort}) -> Ollama ({ollamaPort})");
             Logger.Log($"[LlamaBridge] Configured Source API URL: '{apiUrl ?? "<null>"}'");
 

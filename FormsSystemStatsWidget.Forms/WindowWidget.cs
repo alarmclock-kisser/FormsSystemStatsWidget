@@ -191,6 +191,12 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_focusKeywordLimit.Text = SmartPromptOptimizationSettings.FocusKeywordLimit.ToString(CultureInfo.InvariantCulture);
             this.toolStripTextBox_tailKeepBonusChars.Text = SmartPromptOptimizationSettings.TailKeepBonusChars.ToString(CultureInfo.InvariantCulture);
 
+            string batsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs");
+            if (!Directory.Exists(batsDirectory))
+            {
+                Directory.CreateDirectory(batsDirectory);
+            }
+
             this.ApplyPersistentSettings();
         }
 
@@ -961,7 +967,7 @@ namespace FormsSystemStatsWidget.Forms
                 Directory.CreateDirectory(batsDirectory);
             }
 
-            string[] batFilePaths = Directory.GetFiles(batsDirectory, "*.bat").Concat(Directory.GetFiles(batsDirectory, "*.BAT")).ToArray();
+            string[] batFilePaths = Directory.GetFiles(batsDirectory, "*.bat").ToArray();
             batFilePaths = batFilePaths.OrderByDescending(File.GetLastWriteTime).ToArray();
             string[] batFileNames = batFilePaths.Select(path => Path.GetFileNameWithoutExtension(path)).ToArray();
             this.toolStripComboBox_modelLoadBats.Items.Clear();
