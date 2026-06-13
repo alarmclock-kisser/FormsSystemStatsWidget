@@ -20,7 +20,7 @@ namespace FormsSystemStatsWidget.Core
         private static readonly HashSet<string> IgnoredKeywords = new(StringComparer.OrdinalIgnoreCase)
         {
             "using", "namespace", "class", "public", "private", "protected", "internal", "static", "void", "string", "int", "bool",
-            "this", "that", "with", "from", "were", "have", "just", "wenn", "dann", "oder", "aber", "nicht", "eine", "einer", "einem"
+            "this", "that", "with", "from", "were", "have", "just"
         };
 
         public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40)

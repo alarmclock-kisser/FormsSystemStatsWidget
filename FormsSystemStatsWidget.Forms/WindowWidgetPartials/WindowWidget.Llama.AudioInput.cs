@@ -88,16 +88,20 @@ namespace FormsSystemStatsWidget.Forms
         {
             Logger.Log("Audio recording triggered via hotkey...");
 
-            // Start timer for blinking effect in UI
-            this._recordingBlinkerTimer.Start();
+            this.RunOnUiThread(() => this._recordingBlinkerTimer.Start());
 
-            // Auto-Stop durch Stille setzen wir hier auf null, da die Steuerung 
-            // exklusiv durch den Hotkey (Toggle/Hold) erledigt wird.
+            // Silence-based auto-stop is disabled here because control is handled
+            // exclusively by the hotkey (toggle/hold).
             AudioObj? audioObj = await this._audioHandler.RecordAudioAutoAsync(autoStopSilenceSeconds: null);
 
-            // Flags zurücksetzen, falls die Aufnahme anderweitig (z.B. Fehler) abbrach
+            // Reset flags if recording ended through another path (for example an error)
             this._isAudioRecording = false;
             this._waitForToggleStop = false;
+            this.RunOnUiThread(() =>
+            {
+                this._recordingBlinkerTimer.Stop();
+                this.SetFormBorderColor(null);
+            });
 
             if (audioObj == null)
             {
@@ -118,16 +122,48 @@ namespace FormsSystemStatsWidget.Forms
             string durationStr = $"{(int) audioObj.Duration.TotalMinutes:D2}:{audioObj.Duration.Seconds:D2}";
             string uiNotification = $" + 🎤 ({durationStr} | ~{approxTokens} tok.)";
 
-            // DEBUG OPEN MSGBOX
-            MessageBox.Show(this, $"Audio recording completed!{Environment.NewLine}Duration: {durationStr}{Environment.NewLine}Approx. Tokens: {approxTokens}{Environment.NewLine}Base64 Size: {audioBase64.Length / 1024} KB{Environment.NewLine}{Environment.NewLine}This info would be sent to the API for processing.", "Audio Recorded", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (!LlamaOllamaBridge.IsRunning)
+            {
+                Logger.Log("[AudioInput] Llama-Ollama bridge is not active. Audio will not be sent.");
+                return;
+            }
+
+            bool sent = await LlamaOllamaBridge.SendAudioInputAsync(uiNotification, audioBase64);
+            if (!sent)
+            {
+                Logger.Log("[AudioInput] Sending the audio input to the bridge failed.");
+                return;
+            }
+
+            Logger.Log($"[AudioInput] Audio was successfully sent to the bridge.{uiNotification}");
         }
 
         private void StopAudioRecording()
         {
             this._isAudioRecording = false;
             this._waitForToggleStop = false;
-            this._audioHandler.StopRecording(); // Triggert das CancellationToken aus der neuen Methode
-            this._recordingBlinkerTimer.Stop();
+            this._audioHandler.StopRecording(); // Triggers the cancellation token from the recording method
+            this.RunOnUiThread(() =>
+            {
+                this._recordingBlinkerTimer.Stop();
+                this.SetFormBorderColor(null);
+            });
+        }
+
+        private void RunOnUiThread(Action action)
+        {
+            if (this.IsDisposed || this.Disposing)
+            {
+                return;
+            }
+
+            if (this.InvokeRequired)
+            {
+                _ = this.BeginInvoke(action);
+                return;
+            }
+
+            action();
         }
 
         private void SetFormBorderColor(Color? color = null)
@@ -165,7 +201,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                // Aufnahme ist nicht aktiv, stelle sicher, dass der Rahmen auf Standard zurückgesetzt ist
+                // Recording is not active, ensure the border is reset to the default state
                 this.SetFormBorderColor(null);
             }
         }

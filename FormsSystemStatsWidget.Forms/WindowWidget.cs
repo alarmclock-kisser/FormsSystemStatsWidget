@@ -267,7 +267,7 @@ namespace FormsSystemStatsWidget.Forms
             if (e.CloseReason != CloseReason.WindowsShutDown && !this._explicitWidgetCloseRequested)
             {
                 e.Cancel = true;
-                Logger.Log("[WindowWidget] Unerwartetes FormClosing wurde blockiert.");
+                Logger.Log("[WindowWidget] Unexpected form closing was blocked.");
                 return;
             }
 

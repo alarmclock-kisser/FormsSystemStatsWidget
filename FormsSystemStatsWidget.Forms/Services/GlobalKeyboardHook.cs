@@ -36,6 +36,8 @@ namespace FormsSystemStatsWidget.Forms.Services
         private const int WH_KEYBOARD_LL = 13;
         private const int WM_KEYDOWN = 0x0100;
         private const int WM_KEYUP = 0x0101;
+        private const int WM_SYSKEYDOWN = 0x0104;
+        private const int WM_SYSKEYUP = 0x0105;
 
         private IntPtr _hookId = IntPtr.Zero;
         private LowLevelKeyboardProc? _proc;
@@ -74,8 +76,8 @@ namespace FormsSystemStatsWidget.Forms.Services
         {
             if (nCode >= 0)
             {
-                bool isKeyDown = (wParam == (IntPtr) WM_KEYDOWN);
-                bool isKeyUp = (wParam == (IntPtr) WM_KEYUP);
+                bool isKeyDown = (wParam == (IntPtr) WM_KEYDOWN || wParam == (IntPtr) WM_SYSKEYDOWN);
+                bool isKeyUp = (wParam == (IntPtr) WM_KEYUP || wParam == (IntPtr) WM_SYSKEYUP);
 
                 if (isKeyDown || isKeyUp)
                 {
@@ -84,8 +86,7 @@ namespace FormsSystemStatsWidget.Forms.Services
 
                     if (pressedKey == this.TargetKey)
                     {
-                        // Verify if the modifier is currently held down
-                        bool modifiersHeld = this.TargetModifiers.Select(mod => (GetKeyState((int) mod) & 0x8000) != 0).All(held => held);
+                        bool modifiersHeld = this.TargetModifiers.All(this.IsModifierHeld);
 
                         if (modifiersHeld)
                         {
@@ -96,6 +97,19 @@ namespace FormsSystemStatsWidget.Forms.Services
                 }
             }
             return CallNextHookEx(this._hookId, nCode, wParam, lParam);
+        }
+
+        private bool IsModifierHeld(Keys modifier)
+        {
+            int virtualKey = modifier switch
+            {
+                Keys.Control => (int) Keys.ControlKey,
+                Keys.Shift => (int) Keys.ShiftKey,
+                Keys.Alt => (int) Keys.Menu,
+                _ => (int) modifier
+            };
+
+            return (GetKeyState(virtualKey) & 0x8000) != 0;
         }
 
         public void Dispose() { this.Dispose(true); GC.SuppressFinalize(this); }

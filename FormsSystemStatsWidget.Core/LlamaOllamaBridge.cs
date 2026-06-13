@@ -36,6 +36,7 @@ namespace FormsSystemStatsWidget.Core
         private static string _modelFamily = "llama";
         private static bool _supportsVision;
         private static string _llamaServerBaseUrl = "http://localhost:8080";
+        private static string _bridgeBaseUrl = "http://localhost:11434";
         private static string _lastStartError = string.Empty;
 
         // Logging settings
@@ -43,6 +44,7 @@ namespace FormsSystemStatsWidget.Core
         public static bool EnableRawChunkLogging = true;
 
         public static string LastStartError => _lastStartError;
+        public static bool IsRunning => _isRunning;
 
         // Dynamische Fallbacks, falls der /props-Endpunkt unerwartet fehlschlägt
         private static int _detectedNumCtx = 4096;
@@ -61,17 +63,18 @@ namespace FormsSystemStatsWidget.Core
         private static readonly HttpClient _httpClient = new();
 
         /// <summary>
-        /// Prüft die Erreichbarkeit von llama-server, liest die Modellkonfiguration aus 
-        /// und startet den nativen HTTP-Ollama-Proxy.
+        /// Checks llama-server reachability, reads model configuration,
+        /// and starts the native HTTP Ollama proxy.
         /// </summary>
         public static async Task<bool> StartAsync(string? apiUrl = null, int llamacppPort = 8080, int ollamaPort = 11434)
         {
             _lastStartError = string.Empty;
+            _bridgeBaseUrl = $"http://localhost:{ollamaPort}";
             _httpClient.Timeout = TimeSpan.FromSeconds(600);
             Logger.Log($"[LlamaBridge] Starting Bridge: llama-server ({llamacppPort}) -> Ollama ({ollamaPort})");
             Logger.Log($"[LlamaBridge] Configured Source API URL: '{apiUrl ?? "<null>"}'");
 
-            // 1. Verbindungstest & detaillierte Metadaten-Abfrage zu llama-server
+            // 1. Reachability test and detailed metadata query for llama-server
             try
             {
                 string normalizedApiHost = string.Empty;
@@ -135,10 +138,10 @@ namespace FormsSystemStatsWidget.Core
                 _llamaServerBaseUrl = selectedBaseUrl;
                 Logger.Log($"[LlamaBridge] Using llama-server endpoint: {_llamaServerBaseUrl}");
 
-                // Lokalen Token-Timer für den ersten Verbindungs-Ping erstellen
+                // Create a local timeout token for the first connection probe
                 using var ctsModels = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
-                // A. Echten Modellnamen holen via /v1/models
+                // A. Read the actual model name via /v1/models
                 var response = await _httpClient.GetAsync($"{_llamaServerBaseUrl}/v1/models", ctsModels.Token);
                 if (response.IsSuccessStatusCode)
                 {
@@ -165,10 +168,10 @@ namespace FormsSystemStatsWidget.Core
                     return false;
                 }
 
-                // Create local token timer for the second props ping
+                // Create a local timeout token for the second props probe
                 using var ctsProps = new CancellationTokenSource(TimeSpan.FromSeconds(3));
 
-                // B. Extract context size and default temperature live from /props
+                // B. Extract context size and default temperature from /props
                 var propsResponse = await _httpClient.GetAsync($"{_llamaServerBaseUrl}/props", ctsProps.Token);
                 if (propsResponse.IsSuccessStatusCode)
                 {
@@ -181,14 +184,14 @@ namespace FormsSystemStatsWidget.Core
                         _supportsVision = supportsVisionFromProps.Value;
                     }
 
-                    // Path-tolerant reading of n_ctx
+                // Path-tolerant read of n_ctx
                     var nCtxNode = propsJson?["default_generation_settings"]?["n_ctx"] ?? propsJson?["n_ctx"];
                     if (nCtxNode != null && int.TryParse(nCtxNode.ToString(), out int parsedCtx))
                     {
                         _detectedNumCtx = parsedCtx;
                     }
 
-                    // Path-tolerant reading of default temperature
+                // Path-tolerant read of the default temperature
                     var tempNode = propsJson?["default_generation_settings"]?["temperature"]
                                    ?? propsJson?["default_generation_settings"]?["params"]?["temperature"]
                                    ?? propsJson?["params"]?["temperature"];
@@ -212,7 +215,7 @@ namespace FormsSystemStatsWidget.Core
                 return false; // llama-server is offline or unreachable
             }
 
-            // 2. Start native HttpListener instance on the Ollama standard port
+            // 2. Start a native HttpListener instance on the Ollama standard port
             try
             {
                 _listener = new HttpListener();
@@ -221,7 +224,7 @@ namespace FormsSystemStatsWidget.Core
                 _listener.Start();
                 _isRunning = true;
 
-                // Den Listening-Loop entkoppelt in den ThreadPool schieben
+                // Dispatch the listening loop to the thread pool
                 _ = Task.Run(() => ListenLoopAsync(llamacppPort));
                 Logger.Log("[LlamaBridge] HttpListener successfully started.");
                 return true;
@@ -245,7 +248,7 @@ namespace FormsSystemStatsWidget.Core
                 }
                 catch
                 {
-                    break; // Abbruch bei Stop()
+                    break; // Exit when Stop() is called
                 }
             }
         }
@@ -260,12 +263,12 @@ namespace FormsSystemStatsWidget.Core
 
             try
             {
-                // --- ENDPUNKT 1: Der moderne OpenAI-Pass-Through ---
+                // --- ENDPOINT 1: Modern OpenAI pass-through ---
                 if (request.HttpMethod == "POST" && path == "/v1/chat/completions")
                 {
                     Logger.Log("[LlamaBridge] Processing OpenAI-compatible direct stream...");
 
-                    // Read incoming stream to pass it through the sanitize filter
+                    // Read the incoming stream and pass it through the sanitizer
                     using var reader = new StreamReader(request.InputStream);
                     var requestBody = await reader.ReadToEndAsync();
                     string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK);
@@ -286,7 +289,7 @@ namespace FormsSystemStatsWidget.Core
                     response.ContentType = upstreamRes.Content.Headers.ContentType?.ToString() ?? "text/event-stream";
                     response.SendChunked = true;
 
-                    // Stream-Verarbeitung an die spezialisierte Transformator-Klasse übergeben
+                    // Delegate stream processing to the specialized transformer class
                     using (var upstreamStream = await upstreamRes.Content.ReadAsStreamAsync())
                     {
                         await LlamaStreamTransformer.TransformOpenAiStreamAsync(upstreamStream, response.OutputStream, _detectedModelName);
@@ -297,7 +300,7 @@ namespace FormsSystemStatsWidget.Core
                     return;
                 }
 
-                // --- ENDPUNKT 2: Legacy/Alternativer Ollama Chat-Übersetzer (Falls Agent-Tools umschalten) ---
+                // --- ENDPOINT 2: Legacy/alternative Ollama chat translator (if agent tools switch) ---
                 if (request.HttpMethod == "POST" && path == "/api/chat")
                 {
                     Logger.Log("[LlamaBridge] Translating NDJSON-Ollama request...");
@@ -388,7 +391,7 @@ namespace FormsSystemStatsWidget.Core
                     return;
                 }
 
-                // --- ENDPOINT 3: Model Tags Manifest for VS Copilot Recognition (GET) ---
+                // --- ENDPOINT 3: Model tags manifest for VS Copilot recognition (GET) ---
                 if (request.HttpMethod == "GET" && path == "/api/tags")
                 {
                     var tagsData = new
@@ -416,7 +419,7 @@ namespace FormsSystemStatsWidget.Core
                     return;
                 }
 
-                // --- ENDPUNKT 4: Aktive VRAM-Modelle (GET) ---
+                // --- ENDPOINT 4: Active VRAM models (GET) ---
                 if (request.HttpMethod == "GET" && path == "/api/ps")
                 {
                     var psData = new
@@ -443,7 +446,7 @@ namespace FormsSystemStatsWidget.Core
                     return;
                 }
 
-                // --- ENDPUNKT 5: Detaillierte Capabilities-Injektion für das Chat-Dropdown (POST) ---
+                // --- ENDPOINT 5: Detailed capability injection for the chat dropdown (POST) ---
                 if (request.HttpMethod == "POST" && path == "/api/show")
                 {
                     string tempFormatted = _detectedTemperature.ToString("G", CultureInfo.InvariantCulture);
@@ -472,7 +475,7 @@ namespace FormsSystemStatsWidget.Core
                     return;
                 }
 
-                // --- KOSMETISCHER ENDPUNKT 6: Browser-Root-Aufruf ---
+                // --- COSMETIC ENDPOINT 6: Browser root request ---
                 if (request.HttpMethod == "GET" && path == "/")
                 {
                     var responseString = "Ollama is running (routed via LlamaOllamaBridge Widget)";
@@ -484,7 +487,7 @@ namespace FormsSystemStatsWidget.Core
                     return;
                 }
 
-                // Fallback für ungemappte Routen
+                // Fallback for unmapped routes
                 Logger.Log($"[LlamaBridge] Unknown path rejected (404): {path}");
                 response.StatusCode = (int) HttpStatusCode.NotFound;
                 response.OutputStream.Close();
@@ -677,6 +680,146 @@ namespace FormsSystemStatsWidget.Core
                 _listener = null;
             }
             Logger.Log("[LlamaBridge] Bridge successfully stopped.");
+        }
+
+        /// <summary>
+        /// Sendet aufgenommenes Audio als User-Message über die aktive Bridge in ein OpenAI-kompatibles Chat-Completion-Request.
+        /// </summary>
+        /// <param name="uiNotification">Kurzer sichtbarer Hinweistext für den User-Context.</param>
+        /// <param name="audioBase64">WAV-Audiodaten als Base64-String.</param>
+        /// <param name="cancellationToken">CancellationToken für den HTTP-Aufruf.</param>
+        /// <returns><see langword="true"/>, wenn das Audio erfolgreich verarbeitet wurde; sonst <see langword="false"/>.</returns>
+        public static async Task<bool> SendAudioInputAsync(string uiNotification, string audioBase64, CancellationToken cancellationToken = default)
+        {
+            if (!_isRunning)
+            {
+                Logger.Log("[LlamaBridge-Audio] Bridge is not running. Audio request skipped.");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(audioBase64))
+            {
+                Logger.Log("[LlamaBridge-Audio] Audio payload is empty.");
+                return false;
+            }
+
+            string[] audioContentTypes = ["input_audio", "audio_input"];
+            foreach (string audioContentType in audioContentTypes)
+            {
+                JsonObject requestBody = CreateAudioInputRequest(uiNotification, audioBase64, audioContentType);
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{_bridgeBaseUrl}/v1/chat/completions")
+                {
+                    Content = new StringContent(requestBody.ToJsonString(), Encoding.UTF8, "application/json")
+                };
+
+                try
+                {
+                    using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
+                    string responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Logger.Log($"[LlamaBridge-Audio] Attempt '{audioContentType}' failed: {(int) response.StatusCode} {response.StatusCode} - {responseBody}");
+                        continue;
+                    }
+
+                    Logger.Log($"[LlamaBridge-Audio] Audio request accepted using '{audioContentType}'.");
+
+                    string modelResponse = ExtractAssistantResponseText(responseBody);
+                    if (!string.IsNullOrWhiteSpace(modelResponse))
+                    {
+                        Logger.Log($"\n{modelResponse}\n");
+                    }
+
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[LlamaBridge-Audio] Attempt '{audioContentType}' failed with exception: {ex.GetType().Name}: {ex.Message}");
+                }
+            }
+
+            return false;
+        }
+
+        private static JsonObject CreateAudioInputRequest(string uiNotification, string audioBase64, string audioContentType)
+        {
+            string notificationText = string.IsNullOrWhiteSpace(uiNotification)
+                ? "🎤 Audio input"
+                : uiNotification;
+
+            var audioPayload = new JsonObject
+            {
+                ["data"] = audioBase64,
+                ["format"] = "wav"
+            };
+
+            var audioPart = new JsonObject
+            {
+                ["type"] = audioContentType,
+                [audioContentType] = audioPayload
+            };
+
+            return new JsonObject
+            {
+                ["model"] = _detectedModelName,
+                ["stream"] = false,
+                ["messages"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["role"] = "user",
+                        ["content"] = new JsonArray
+                        {
+                            new JsonObject
+                            {
+                                ["type"] = "text",
+                                ["text"] = notificationText
+                            },
+                            audioPart
+                        }
+                    }
+                }
+            };
+        }
+
+        private static string ExtractAssistantResponseText(string responseBody)
+        {
+            if (string.IsNullOrWhiteSpace(responseBody))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                JsonNode? responseNode = JsonNode.Parse(responseBody);
+                JsonNode? messageContentNode = responseNode?["choices"]?[0]?["message"]?["content"];
+                if (messageContentNode == null)
+                {
+                    return string.Empty;
+                }
+
+                if (messageContentNode is JsonValue)
+                {
+                    return messageContentNode.ToString();
+                }
+
+                if (messageContentNode is JsonArray parts)
+                {
+                    IEnumerable<string> textParts = parts
+                        .OfType<JsonObject>()
+                        .Where(part => string.Equals(part["type"]?.ToString(), "text", StringComparison.OrdinalIgnoreCase))
+                        .Select(part => part["text"]?.ToString() ?? string.Empty)
+                        .Where(text => !string.IsNullOrWhiteSpace(text));
+                    return string.Join(Environment.NewLine, textParts);
+                }
+
+                return messageContentNode.ToJsonString();
+            }
+            catch
+            {
+                return responseBody;
+            }
         }
 
         [GeneratedRegex(@"(?i)\b(\d+(?:\.\d+)?[BM])\b", RegexOptions.None, "de-DE")]

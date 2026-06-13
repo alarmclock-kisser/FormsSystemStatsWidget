@@ -23,10 +23,10 @@ namespace FormsSystemStatsWidget.Core
 
 
         /// <summary>
-        /// Verarbeitet einen Chunk des Ausgabestreams und sucht nach <api> Tags.
+        /// Processes a chunk of the output stream and looks for <api> tags.
         /// </summary>
-        /// <param name="chunk">Der eingehende Text-Chunk vom LLM-Server.</param>
-        /// <returns>Das Ergebnis der ausgeführten API-Aufrufe.</returns>
+        /// <param name="chunk">The incoming text chunk from the LLM server.</param>
+        /// <returns>The result of the executed API calls.</returns>
         public async Task<string> ProcessStreamChunkAsync(string chunk)
         {
             this._streamBuffer.Append(chunk);
@@ -48,7 +48,7 @@ namespace FormsSystemStatsWidget.Core
                     result += $"\n[API Error ({fullUrl})]: {ex.Message}";
                 }
 
-                // Entferne den verarbeiteten Teil aus dem Buffer
+                // Remove the processed section from the buffer
                 this._streamBuffer.Remove(0, match.Index + match.Length);
             }
 
@@ -56,12 +56,12 @@ namespace FormsSystemStatsWidget.Core
         }
 
         /// <summary>
-        /// Erweitert eine relative URL (z.B. "1290/route") zu einer vollständigen URL (z.B. "https://localhost:1290/route").
+        /// Expands a relative URL (for example "1290/route") into a full URL (for example "https://localhost:1290/route").
         /// </summary>
         private string ExpandUrl(string content)
         {
             string url = content;
-            // Wenn kein Doppelpunkt vorhanden ist, nehmen wir an, dass der erste Teil der Port ist.
+            // If no colon is present, assume the first segment is the port.
             if (!url.Contains(":"))
             {
                 var parts = url.Split('/', 2);
@@ -79,7 +79,7 @@ namespace FormsSystemStatsWidget.Core
         }
 
         /// <summary>
-        /// Führt einen API-Aufruf aus.
+        /// Executes an API call.
         /// </summary>
         private async Task<string> ExecuteApiCallAsync(string url)
         {
@@ -89,7 +89,7 @@ namespace FormsSystemStatsWidget.Core
         }
 
         /// <summary>
-        /// Führt einen CMD-Befehl aus.
+        /// Executes a CMD command.
         /// </summary>
         public async Task<string> ExecuteCommandAsync(string command)
         {
@@ -117,7 +117,7 @@ namespace FormsSystemStatsWidget.Core
         }
 
         /// <summary>
-        /// Liest den Inhalt einer Datei.
+        /// Reads the contents of a file.
         /// </summary>
         public async Task<string> ReadFileAsync(string path)
         {
@@ -130,7 +130,7 @@ namespace FormsSystemStatsWidget.Core
         }
 
         /// <summary>
-        /// Schreibt Inhalt in eine Datei.
+        /// Writes content to a file.
         /// </summary>
         public async Task<string> WriteFileAsync(string path, string content)
         {
@@ -146,7 +146,7 @@ namespace FormsSystemStatsWidget.Core
         }
 
         /// <summary>
-        /// Gibt das aktuelle Datum und die Uhrzeit zurück.
+        /// Returns the current date and time.
         /// </summary>
         public string GetDateTime()
         {

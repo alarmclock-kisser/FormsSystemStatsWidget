@@ -323,7 +323,7 @@
             this.testSettingsToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.fileSizeMBToolStripMenuItem, this.blockSizeKBToolStripMenuItem, this.passesToolStripMenuItem, this.threadsToolStripMenuItem, this.writeThroughToolStripMenuItem });
             this.testSettingsToolStripMenuItem.Name = "testSettingsToolStripMenuItem";
             this.testSettingsToolStripMenuItem.Size = new Size(181, 22);
-            this.testSettingsToolStripMenuItem.Text = "Test-Settings ...";
+            this.testSettingsToolStripMenuItem.Text = "Test Settings ...";
             // 
             // fileSizeMBToolStripMenuItem
             // 
@@ -678,7 +678,7 @@
             this.toolStripMenuItem_hideCmd.CheckState = CheckState.Checked;
             this.toolStripMenuItem_hideCmd.Name = "toolStripMenuItem_hideCmd";
             this.toolStripMenuItem_hideCmd.Size = new Size(360, 22);
-            this.toolStripMenuItem_hideCmd.Text = "Start withoud CMD Window";
+            this.toolStripMenuItem_hideCmd.Text = "Start without CMD window";
             // 
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 

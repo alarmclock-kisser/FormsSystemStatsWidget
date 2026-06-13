@@ -218,29 +218,29 @@ namespace FormsSystemStatsWidget.Forms
 
     public static void CaptureKey(KeyEventArgs e)
     {
-        // 1. Überprüfung auf einfache Key-Code-Abmatches (MappedKeyCodeValues)
+        // 1. Check simple key-code matches (MappedKeyCodeValues)
         foreach (var entry in MappedKeys)
         {
             if (entry.MappedKeyCodeValues != null && entry.MappedKeyCodeValues.ToList().Contains(e.KeyCode.ToString()))
             {
-                // Aktion ausführen (Platzhalter)
+                // Execute action (placeholder)
                 System.Diagnostics.Debug.WriteLine($"Mapped Key Action Executed for KeyCode: {e.KeyCode}");
                 return;
             }
         }
 
-        // 2. Überprüfung auf TargetKey-Abmatches (TargetKey)
+        // 2. Check TargetKey matches (TargetKey)
         foreach (var entry in MappedKeys)
         {
             if (entry.TargetKey != null && entry.TargetKey.Equals(e.KeyCode))
             {
-                // Aktion ausführen (Platzhalter)
+                // Execute action (placeholder)
                 System.Diagnostics.Debug.WriteLine($"Mapped Target Key Action Executed for Key: {e.KeyCode}");
                 return;
             }
         }
 
-        // Hier müsste die Logik für MappedKeyDownValues, Timings und InputStringSerially implementiert werden.
+        // Logic for MappedKeyDownValues, timings, and InputStringSerially still needs to be implemented here.
     }
 }
 

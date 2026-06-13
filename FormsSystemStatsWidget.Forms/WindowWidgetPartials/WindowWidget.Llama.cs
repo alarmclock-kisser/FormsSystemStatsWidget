@@ -51,7 +51,7 @@ namespace FormsSystemStatsWidget.Forms
                 bool isStarted = await LlamaOllamaBridge.StartAsync(apiUrl, llamaPort, ollamaPort);
                 this.Cursor = cur;
 
-                // Jetzt ContextMenu wieder einklappen / schließen
+                // Close the context menu again
                 this.ContextMenuStrip?.Close();
 
                 if (isStarted)
@@ -80,7 +80,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             else
             {
-                LlamaOllamaBridge.Stop(); // Keine asynchrone Task mehr nötig beim Stoppen
+                LlamaOllamaBridge.Stop(); // No asynchronous task is required when stopping
 
                 this.label_routingPortsInfo.Text = "Port ----- to -----";
                 this.label_routingPortsInfo.ForeColor = Color.Black;
@@ -238,7 +238,7 @@ namespace FormsSystemStatsWidget.Forms
                 _ = sb.Append($"--reasoning-budget {reasoningBudget.Value} ");
             }
 
-            // HIER DIE ANPASSUNG: Erzeugt das korrekte Multiline-Format mit dem Windows-Line-Continuation-Zeichen (^)
+            // Generate the correct multiline format with the Windows line-continuation character (^)
             string command = sb.ToString().Trim();
             command = ArgsSplitRegex().Replace(command, " ^" + Environment.NewLine + " ");
 
@@ -263,7 +263,7 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     try
                     {
-                        // Schreibt den Header, den sauber umgebrochenen Befehl und das abschließende "pause"
+                        // Write the header, the wrapped command, and the final "pause"
                         File.WriteAllText(dlg.FileName, $"@echo off{Environment.NewLine}title llama-server: {Path.GetFileNameWithoutExtension(selectedModel)}{Environment.NewLine}{command}{Environment.NewLine}{Environment.NewLine}pause");
                         Logger.Log($" -- Saved batch file for loading model: {dlg.FileName} -- ");
                     }
@@ -354,9 +354,8 @@ namespace FormsSystemStatsWidget.Forms
                 ? trimmed[(executableName.Length + 1)..]
                 : string.Empty;
 
-            // --- DER TRICK ---
-            // Wir MÜSSEN den Stream immer umleiten, damit die TPS jederzeit (auch nachträglich) 
-            // geparst werden können. Windows erlaubt kein nachträgliches Einklinken!
+            // Always redirect the stream so tokens/sec can be parsed at any time.
+            // Windows does not allow attaching to it later.
             bool captureOutput = true;
             bool hideCmd = this.toolStripMenuItem_hideCmd.Checked;
 
@@ -367,9 +366,9 @@ namespace FormsSystemStatsWidget.Forms
                 UseShellExecute = false,
                 RedirectStandardOutput = captureOutput,
                 RedirectStandardError = captureOutput,
-                // Wenn hideCmd aus ist, wollte der User eigentlich das CMD-Fenster sehen.
-                // Da wir die Streams umleiten, wäre das CMD-Fenster aber komplett schwarz.
-                // Daher verstecken wir die native CMD *immer*...
+                // If hideCmd is off, the user intended to see a console window.
+                // Because the streams are redirected, that window would stay blank.
+                // Therefore the native console is always hidden.
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden
             };
@@ -391,7 +390,7 @@ namespace FormsSystemStatsWidget.Forms
                 throw new InvalidOperationException("llama-server process could not be started.");
             }
 
-            // ... und öffnen stattdessen deine eigene Debug-Konsole, falls der User Logs sehen will!
+            // Open the internal debug console instead if the user wants to see logs.
             if (!hideCmd)
             {
                 this.Invoke((System.Windows.Forms.MethodInvoker) delegate
@@ -420,8 +419,8 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
-            // Wenn der User die CMD eigentlich nicht verstecken wollte, routen wir 
-            // den llama-server Output stattdessen in deine interne Debug-Konsole!
+            // If the user did not want to hide the console, route llama-server output
+            // into the internal debug console instead.
             if (!this.toolStripMenuItem_hideCmd.Checked)
             {
                 Logger.Log(line);
@@ -435,8 +434,8 @@ namespace FormsSystemStatsWidget.Forms
             this._lastStdOutTokensPerSecond = tokensPerSecond;
             this._lastStdOutTokensPerSecondUtc = DateTime.UtcNow;
 
-            // Dies läuft im Hintergrund immer mit. Wenn "Show tokens/s" aus ist,
-            // fragt die UI den Wert einfach nicht ab. Schaltest du es ein, ist der Wert da!
+            // This always runs in the background. If "Show tokens/s" is disabled,
+            // the UI simply does not read the value. When enabled, the value is ready.
             LlamaServerStats.UpdateGenerationSpeed((float) tokensPerSecond);
         }
 
@@ -444,14 +443,14 @@ namespace FormsSystemStatsWidget.Forms
         {
             tokensPerSecond = 0d;
 
-            // BUGFIX: () hinzugefügt, da GeneratedRegex eine Methode erzeugt!
+            // Bug fix: GeneratedRegex produces a method, so () is required.
             Match match = TokensPerSecondRegex.Match(line);
             if (!match.Success)
             {
                 return false;
             }
 
-            // BUGFIX: Wir greifen auf Groups[1] zu, da die Regex `([\d.]+)` nutzt (ohne Namen "tps")
+            // Bug fix: Use Groups[1] because the regex uses `([\d.]+)` without a named group.
             if (!double.TryParse(match.Groups[1].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsedValue))
             {
                 return false;

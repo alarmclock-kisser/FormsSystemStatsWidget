@@ -1,42 +1,42 @@
 namespace FormsSystemStatsWidget.Core
 {
     /// <summary>
-    /// Zentrale Stellschrauben für die Smart-Prompt-Optimierung im Llama-Request-Sanitizer.
+    /// Central tuning options for smart prompt optimization in the Llama request sanitizer.
     /// </summary>
     public static class SmartPromptOptimizationSettings
     {
         /// <summary>
-        /// Aktiviert oder deaktiviert die Smart-Prompt-Optimierung vor der Hard-Limit-Kappung.
+        /// Enables or disables smart prompt optimization before hard-limit trimming.
         /// </summary>
         public static bool IsEnabled { get; set; } = true;
 
         /// <summary>
-        /// Anteil des Kontextfensters, der maximal für den Prompt genutzt werden darf.
+        /// Maximum share of the context window that may be used for the prompt.
         /// </summary>
         public static double PromptSafetyRatio { get; set; } = 0.90;
 
         /// <summary>
-        /// Anteil vom Hard-Limit, auf den Smart-Optimierung frühzeitig trimmt.
+        /// Share of the hard limit that smart optimization trims to early.
         /// </summary>
         public static double SmartBudgetRatio { get; set; } = 0.75;
 
         /// <summary>
-        /// Schwellwert, ab dem eine Nachricht als groß gilt und komprimiert wird.
+        /// Threshold at which a message is considered large and gets compressed.
         /// </summary>
         public static int LargeMessageThresholdChars { get; set; } = 2400;
 
         /// <summary>
-        /// Maximale Anzahl strukturierter Zeilen bei der Code-Skeleton-Reduktion.
+        /// Maximum number of structural lines for code skeleton reduction.
         /// </summary>
         public static int SkeletonMaxLines { get; set; } = 60;
 
         /// <summary>
-        /// Maximale Anzahl extrahierter Fokus-Keywords für Relevanz-Scoring.
+        /// Maximum number of extracted focus keywords for relevance scoring.
         /// </summary>
         public static int FocusKeywordLimit { get; set; } = 12;
 
         /// <summary>
-        /// Zusätzliche Zeichen, die bei finaler Last-Message-Kürzung bevorzugt vom Ende erhalten bleiben.
+        /// Extra characters that are preferentially preserved from the end during final last-message trimming.
         /// </summary>
         public static int TailKeepBonusChars { get; set; } = 500;
     }
