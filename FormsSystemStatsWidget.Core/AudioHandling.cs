@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
@@ -32,29 +31,17 @@ namespace FormsSystemStatsWidget.Core
             {
                 ExportDirectory = Path.GetFullPath(customExportDir);
             }
+
             if (additionalRessourcePaths != null)
             {
                 foreach (var path in additionalRessourcePaths)
                 {
-                    // Get every file in the directory or if it's a file, just take that
-                    if (Directory.Exists(path))
-                    {
-                        var files = Directory.GetFiles(path);
-                        foreach (var file in files)
-                        {
-                            this.ImportAudio(file);
-                        }
-                    }
-                    else if (File.Exists(path))
-                    {
-                        this.ImportAudio(path);
-                    }
+                    this.ImportResourcePath(path);
                 }
             }
         }
 
 
-        // Add & Import
         public bool AddAudio(AudioObj audioObj)
         {
             this.Audios.Add(audioObj);
@@ -68,10 +55,7 @@ namespace FormsSystemStatsWidget.Core
                 return null;
             }
 
-            if (!Path.GetExtension(filePath).Equals(".wav", StringComparison.OrdinalIgnoreCase) &&
-                !Path.GetExtension(filePath).Equals(".mp3", StringComparison.OrdinalIgnoreCase) &&
-                !Path.GetExtension(filePath).Equals(".flac", StringComparison.OrdinalIgnoreCase) &&
-                !Path.GetExtension(filePath).Equals(".ogg", StringComparison.OrdinalIgnoreCase))
+            if (!IsSupportedAudioExtension(filePath))
             {
                 return null;
             }
@@ -108,7 +92,6 @@ namespace FormsSystemStatsWidget.Core
         }
 
 
-        // Audio Capture & record AudioObj
         public int FindActiveMicrophoneIndex()
         {
             int deviceCount = WaveInEvent.DeviceCount;
@@ -120,7 +103,6 @@ namespace FormsSystemStatsWidget.Core
             int bestDevice = 0;
             float maxPeak = 0f;
 
-            // Wir testen jedes Gerät kurz (200ms)
             for (int i = 0; i < deviceCount; i++)
             {
                 float currentPeak = this.TestDevicePeak(i);
@@ -153,7 +135,7 @@ namespace FormsSystemStatsWidget.Core
             };
 
             waveIn.StartRecording();
-            Thread.Sleep(200); // Kurze Zeit lauschen
+            Thread.Sleep(200);
             waveIn.StopRecording();
 
             return peak;
@@ -169,28 +151,18 @@ namespace FormsSystemStatsWidget.Core
 
         public async Task<AudioObj?> RecordAudioAsync(WaveFormat waveFormat, int? deviceIndex = null, Action<float>? onLevel = null)
         {
-            if (deviceIndex == null)
+            if (!this.TryResolveRecordingDeviceIndex(ref deviceIndex))
             {
-                deviceIndex = this.FindActiveMicrophoneIndex();
-                if (deviceIndex == -1)
-                {
-                    Logger.Log("No recording devices found.");
-                    return null;
-                }
+                return null;
             }
 
-            if (this.recordingCts != null)
+            if (!this.TryStartRecordingSession(out CancellationToken ct))
             {
-                Logger.Log("Recording already in progress.");
                 return null;
             }
 
             var tcs = new TaskCompletionSource<AudioObj>(TaskCreationOptions.RunContinuationsAsynchronously);
-            this.recordingCts = new CancellationTokenSource();
-            var ct = this.recordingCts.Token;
-
             var sampleList = new List<float>();
-
             var bytesPerSample = waveFormat.BitsPerSample / 8;
 
             using var waveIn = new WaveInEvent
@@ -201,44 +173,18 @@ namespace FormsSystemStatsWidget.Core
 
             waveIn.DataAvailable += (s, e) =>
             {
-                // Convert byte buffer to floats (-1.0 .. 1.0), keep interleaved channels
                 int step = bytesPerSample;
                 float peak = 0f;
+
                 for (int i = 0; i + (step - 1) < e.BytesRecorded; i += step)
                 {
-                    try
+                    if (!TryReadSample(e.Buffer, i, bytesPerSample, out float sample))
                     {
-                        float sample = 0f;
-                        if (bytesPerSample == 1)
-                        {
-                            // 8-bit PCM unsigned
-                            byte b = e.Buffer[i];
-                            sample = (b - 128) / 128f;
-                        }
-                        else if (bytesPerSample == 2)
-                        {
-                            short s16 = BitConverter.ToInt16(e.Buffer, i);
-                            sample = s16 / 32768f;
-                        }
-                        else if (bytesPerSample == 4)
-                        {
-                            int s32 = BitConverter.ToInt32(e.Buffer, i);
-                            sample = s32 / 2147483648f;
-                        }
-                        else
-                        {
-                            // fallback: read 16-bit
-                            short s16 = BitConverter.ToInt16(e.Buffer, i);
-                            sample = s16 / 32768f;
-                        }
+                        continue;
+                    }
 
-                        sampleList.Add(sample);
-                        peak = Math.Max(peak, Math.Abs(sample));
-                    }
-                    catch
-                    {
-                        // ignore malformed frames
-                    }
+                    sampleList.Add(sample);
+                    peak = Math.Max(peak, Math.Abs(sample));
                 }
 
                 try { onLevel?.Invoke(Math.Clamp(peak, 0f, 1f)); } catch { }
@@ -254,25 +200,18 @@ namespace FormsSystemStatsWidget.Core
             waveIn.StartRecording();
             Logger.Log($"Recording started on device {deviceIndex.Value} with format {waveFormat.SampleRate}Hz, {waveFormat.BitsPerSample}bit, {waveFormat.Channels}ch");
 
-            // Wait until cancellation requested
             try
             {
                 await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                try
-                {
-                    waveIn.StopRecording();
-                }
-                catch { }
+                StopWaveInSafely(waveIn);
             }
 
             Logger.Log("Recording stopped. Processing audio...");
             var result = await tcs.Task.ConfigureAwait(false);
-
-            this.recordingCts.Dispose();
-            this.recordingCts = null;
+            this.EndRecordingSession();
 
             return result;
         }
@@ -286,29 +225,18 @@ namespace FormsSystemStatsWidget.Core
                 return null;
             }
 
-            if (this.recordingCts != null)
+            if (!this.TryStartRecordingSession(ct, out CancellationToken linkedToken))
             {
-                Logger.Log("Recording already in progress.");
                 return null;
             }
 
-            // Für multimodale Modelle und Whisper-Transkriptionen ist 16kHz, 16-bit, Mono 
-            // der absolute Goldstandard. Das vermeidet nachträgliches Resampling vor der Inferenz.
             var waveFormat = new WaveFormat(16000, 16, 1);
-
-            // Verbinde das externe CancellationToken (ct) mit dem internen,
-            // damit sowohl externe Abbrüche als auch this.StopRecording() sauber triggern.
-            this.recordingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            var linkedToken = this.recordingCts.Token;
 
             var tcs = new TaskCompletionSource<AudioObj>(TaskCreationOptions.RunContinuationsAsynchronously);
             var sampleList = new List<float>();
 
             int bytesPerSample = waveFormat.BitsPerSample / 8;
             double currentSilenceSeconds = 0.0;
-
-            // Ein Schwellenwert von ~1.5% Amplitude reicht in der Regel, um Grundrauschen 
-            // von Sprache zu unterscheiden. Je nach Mikrofon anpassbar.
             float silenceThreshold = 0.015f;
 
             using var waveIn = new WaveInEvent
@@ -320,50 +248,30 @@ namespace FormsSystemStatsWidget.Core
             waveIn.DataAvailable += (s, e) =>
             {
                 float peak = 0f;
-                int step = bytesPerSample; // 2 Bytes bei 16-bit Mono
+                int step = bytesPerSample;
 
                 for (int i = 0; i + (step - 1) < e.BytesRecorded; i += step)
                 {
-                    try
+                    if (!TryReadSample(e.Buffer, i, bytesPerSample, out float sample))
                     {
-                        float sample = 0f;
-                        if (bytesPerSample == 2)
-                        {
-                            short s16 = BitConverter.ToInt16(e.Buffer, i);
-                            sample = s16 / 32768f;
-                        }
-                        else if (bytesPerSample == 4)
-                        {
-                            int s32 = BitConverter.ToInt32(e.Buffer, i);
-                            sample = s32 / 2147483648f;
-                        }
-                        else if (bytesPerSample == 1)
-                        {
-                            byte b = e.Buffer[i];
-                            sample = (b - 128) / 128f;
-                        }
-
-                        sampleList.Add(sample);
-                        peak = Math.Max(peak, Math.Abs(sample));
+                        continue;
                     }
-                    catch { /* Fehlerhafte Frames ignorieren */ }
+
+                    sampleList.Add(sample);
+                    peak = Math.Max(peak, Math.Abs(sample));
                 }
 
-                // Silence Detection Logik
                 if (autoStopSilenceSeconds.HasValue)
                 {
                     if (peak > silenceThreshold)
                     {
-                        // Reset, sobald jemand spricht
                         currentSilenceSeconds = 0.0;
                     }
                     else
                     {
-                        // Berechne die Dauer dieses exakten Chunks in Sekunden und addiere sie
                         double chunkDuration = (double) e.BytesRecorded / waveFormat.AverageBytesPerSecond;
                         currentSilenceSeconds += chunkDuration;
 
-                        // Sobald die Stille-Dauer überschritten ist, triggern wir das Cancellation Token
                         if (currentSilenceSeconds >= autoStopSilenceSeconds.Value && !this.recordingCts.IsCancellationRequested)
                         {
                             Logger.Log($"Silence of {autoStopSilenceSeconds}s detected. Stopping recording.");
@@ -385,20 +293,15 @@ namespace FormsSystemStatsWidget.Core
 
             try
             {
-                // Task blockiert hier, bis das Token ausgelöst wird (durch Stille, externes CT oder StopRecording)
                 await Task.Delay(Timeout.Infinite, linkedToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                try { waveIn.StopRecording(); } catch { }
+                StopWaveInSafely(waveIn);
             }
 
-            // Auf das Finalisieren in RecordingStopped warten
             var result = await tcs.Task.ConfigureAwait(false);
-
-            // Aufräumen und State zurücksetzen
-            this.recordingCts?.Dispose();
-            this.recordingCts = null;
+            this.EndRecordingSession();
 
             return result;
         }
@@ -423,9 +326,133 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
+        private void ImportResourcePath(string path)
+        {
+            if (Directory.Exists(path))
+            {
+                foreach (string file in Directory.GetFiles(path))
+                {
+                    this.ImportAudio(file);
+                }
 
+                return;
+            }
 
-        // Get estimate duration from file without fully loading it
+            if (File.Exists(path))
+            {
+                this.ImportAudio(path);
+            }
+        }
+
+        private static bool IsSupportedAudioExtension(string filePath)
+        {
+            string extension = Path.GetExtension(filePath);
+            return extension.Equals(".wav", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".mp3", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".flac", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".ogg", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool TryResolveRecordingDeviceIndex(ref int? deviceIndex)
+        {
+            if (deviceIndex.HasValue)
+            {
+                return true;
+            }
+
+            int resolvedDeviceIndex = this.FindActiveMicrophoneIndex();
+            if (resolvedDeviceIndex == -1)
+            {
+                Logger.Log("No recording devices found.");
+                return false;
+            }
+
+            deviceIndex = resolvedDeviceIndex;
+            return true;
+        }
+
+        private bool TryStartRecordingSession(out CancellationToken token)
+        {
+            token = default;
+            if (this.recordingCts != null)
+            {
+                Logger.Log("Recording already in progress.");
+                return false;
+            }
+
+            this.recordingCts = new CancellationTokenSource();
+            token = this.recordingCts.Token;
+            return true;
+        }
+
+        private bool TryStartRecordingSession(CancellationToken externalToken, out CancellationToken token)
+        {
+            token = default;
+            if (this.recordingCts != null)
+            {
+                Logger.Log("Recording already in progress.");
+                return false;
+            }
+
+            this.recordingCts = CancellationTokenSource.CreateLinkedTokenSource(externalToken);
+            token = this.recordingCts.Token;
+            return true;
+        }
+
+        private void EndRecordingSession()
+        {
+            this.recordingCts?.Dispose();
+            this.recordingCts = null;
+        }
+
+        private static void StopWaveInSafely(WaveInEvent waveIn)
+        {
+            try
+            {
+                waveIn.StopRecording();
+            }
+            catch
+            {
+            }
+        }
+
+        private static bool TryReadSample(byte[] buffer, int offset, int bytesPerSample, out float sample)
+        {
+            sample = 0f;
+
+            try
+            {
+                if (bytesPerSample == 1)
+                {
+                    byte b = buffer[offset];
+                    sample = (b - 128) / 128f;
+                    return true;
+                }
+
+                if (bytesPerSample == 2)
+                {
+                    short s16 = BitConverter.ToInt16(buffer, offset);
+                    sample = s16 / 32768f;
+                    return true;
+                }
+
+                if (bytesPerSample == 4)
+                {
+                    int s32 = BitConverter.ToInt32(buffer, offset);
+                    sample = s32 / 2147483648f;
+                    return true;
+                }
+
+                short fallback = BitConverter.ToInt16(buffer, offset);
+                sample = fallback / 32768f;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         public static TimeSpan? GetAudioDuration(string filePath)
         {
             try

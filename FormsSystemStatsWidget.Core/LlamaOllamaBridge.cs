@@ -263,240 +263,305 @@ namespace FormsSystemStatsWidget.Core
 
             try
             {
-                // --- ENDPOINT 1: Modern OpenAI pass-through ---
-                if (request.HttpMethod == "POST" && path == "/v1/chat/completions")
+                if (await TryHandleOpenAiCompletionsAsync(request, response))
                 {
-                    Logger.Log("[LlamaBridge] Processing OpenAI-compatible direct stream...");
-
-                    // Read the incoming stream and pass it through the sanitizer
-                    using var reader = new StreamReader(request.InputStream);
-                    var requestBody = await reader.ReadToEndAsync();
-                    string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK);
-
-                    Logger.Log("========================================");
-                    Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
-                    Logger.Log(sanitizedBody);
-                    Logger.Log("========================================");
-
-                    var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
-                    {
-                        Content = new StringContent(sanitizedBody, Encoding.UTF8, "application/json")
-                    };
-
-                    var upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
-
-                    response.StatusCode = (int) upstreamRes.StatusCode;
-                    response.ContentType = upstreamRes.Content.Headers.ContentType?.ToString() ?? "text/event-stream";
-                    response.SendChunked = true;
-
-                    // Delegate stream processing to the specialized transformer class
-                    using (var upstreamStream = await upstreamRes.Content.ReadAsStreamAsync())
-                    {
-                        await LlamaStreamTransformer.TransformOpenAiStreamAsync(upstreamStream, response.OutputStream, _detectedModelName);
-                    }
-
-                    response.OutputStream.Close();
-                    Logger.Log("[LlamaBridge] OpenAI direct stream successfully ended.");
                     return;
                 }
 
-                // --- ENDPOINT 2: Legacy/alternative Ollama chat translator (if agent tools switch) ---
-                if (request.HttpMethod == "POST" && path == "/api/chat")
+                if (await TryHandleOllamaChatAsync(request, response))
                 {
-                    Logger.Log("[LlamaBridge] Translating NDJSON-Ollama request...");
-
-                    using var reader = new StreamReader(request.InputStream);
-                    var body = await reader.ReadToEndAsync();
-                    var ollamaReq = JsonNode.Parse(body);
-
-                    var openAiReq = new JsonObject
-                    {
-                        ["model"] = _detectedModelName,
-                        ["messages"] = ollamaReq?["messages"]?.DeepClone(),
-                        ["stream"] = ollamaReq?["stream"] ?? true
-                    };
-
-                    var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
-                    {
-                        Content = new StringContent(openAiReq.ToJsonString(), Encoding.UTF8, "application/json")
-                    };
-
-                    var upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
-                    response.ContentType = "application/x-javascript; charset=utf-8";
-                    response.StatusCode = (int) upstreamRes.StatusCode;
-                    response.SendChunked = true;
-
-                    if (ollamaReq?["stream"]?.GetValue<bool>() == false)
-                    {
-                        var resContent = await upstreamRes.Content.ReadAsStringAsync();
-                        var openAiRes = JsonNode.Parse(resContent);
-                        var text = openAiRes?["choices"]?[0]?["message"]?["content"]?.ToString() ?? "";
-
-                        var ollamaRes = new JsonObject
-                        {
-                            ["model"] = _detectedModelName,
-                            ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = text },
-                            ["done"] = true
-                        };
-                        byte[] buffer = Encoding.UTF8.GetBytes(ollamaRes.ToJsonString() + "\n");
-                        await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-                    }
-                    else
-                    {
-                        using var responseStream = await upstreamRes.Content.ReadAsStreamAsync();
-                        using var streamReader = new StreamReader(responseStream);
-                        using var writer = new StreamWriter(response.OutputStream, new UTF8Encoding(false));
-
-                        string? line;
-                        while ((line = await streamReader.ReadLineAsync()) != null)
-                        {
-                            if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
-                            {
-                                continue;
-                            }
-
-                            var data = line["data: ".Length..].Trim();
-                            if (data == "[DONE]")
-                            {
-                                break;
-                            }
-
-                            try
-                            {
-                                var openAiChunk = JsonNode.Parse(data);
-                                var contentChunk = openAiChunk?["choices"]?[0]?["delta"]?["content"]?.ToString() ?? "";
-
-                                if (!string.IsNullOrEmpty(contentChunk))
-                                {
-                                    var ollamaChunk = new JsonObject
-                                    {
-                                        ["model"] = _detectedModelName,
-                                        ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = contentChunk },
-                                        ["done"] = false
-                                    };
-                                    await writer.WriteLineAsync(ollamaChunk.ToJsonString());
-                                    await writer.FlushAsync();
-                                }
-                            }
-                            catch { }
-                        }
-
-                        var finalChunk = new JsonObject { ["model"] = _detectedModelName, ["done"] = true };
-                        await writer.WriteLineAsync(finalChunk.ToJsonString());
-                        await writer.FlushAsync();
-                    }
-
-                    response.OutputStream.Close();
-                    Logger.Log("[LlamaBridge] Ollama NDJSON stream successfully ended.");
                     return;
                 }
 
-                // --- ENDPOINT 3: Model tags manifest for VS Copilot recognition (GET) ---
-                if (request.HttpMethod == "GET" && path == "/api/tags")
+                if (await TryHandleApiTagsAsync(request, response))
                 {
-                    var tagsData = new
-                    {
-                        models = new[]
-                        {
-                            new {
-                                name = _detectedModelName,
-                                model = _detectedModelName,
-                                modified_at = DateTime.UtcNow,
-                                size = 0,
-                                digest = "proxy_identity_digest",
-                                details = new {
-                                    parent_model = "",
-                                    format = "gguf",
-                                    family = _modelFamily,
-                                    families = new[] { _modelFamily },
-                                    parameter_size = _parameterSize,
-                                    quantization_level = _quantizationLevel
-                                }
-                            }
-                        }
-                    };
-                    await SendJsonResponseAsync(response, tagsData);
                     return;
                 }
 
-                // --- ENDPOINT 4: Active VRAM models (GET) ---
-                if (request.HttpMethod == "GET" && path == "/api/ps")
+                if (await TryHandleApiPsAsync(request, response))
                 {
-                    var psData = new
-                    {
-                        models = new[]
-                        {
-                            new {
-                                name = _detectedModelName,
-                                model = _detectedModelName,
-                                size = 0,
-                                digest = "proxy_identity_digest",
-                                details = new {
-                                    parent_model = "",
-                                    format = "gguf",
-                                    family = _modelFamily,
-                                    families = new[] { _modelFamily },
-                                    parameter_size = _parameterSize,
-                                    quantization_level = _quantizationLevel
-                                }
-                            }
-                        }
-                    };
-                    await SendJsonResponseAsync(response, psData);
                     return;
                 }
 
-                // --- ENDPOINT 5: Detailed capability injection for the chat dropdown (POST) ---
-                if (request.HttpMethod == "POST" && path == "/api/show")
+                if (await TryHandleApiShowAsync(request, response))
                 {
-                    string tempFormatted = _detectedTemperature.ToString("G", CultureInfo.InvariantCulture);
-
-                    var capabilities = _supportsVision
-                        ? new[] { "completion", "tools", "vision" }
-                        : ["completion", "tools"];
-
-                    var showData = new
-                    {
-                        modelfile = $"FROM {_detectedModelName}\nPARAMETER temperature {tempFormatted}\nPARAMETER num_ctx {_detectedNumCtx}",
-                        parameters = $"temperature {tempFormatted}\nnum_ctx {_detectedNumCtx}",
-                        template = "{{ .System }}\n{{ .Prompt }}",
-                        details = new
-                        {
-                            parent_model = "",
-                            format = "gguf",
-                            family = _modelFamily,
-                            families = new[] { _modelFamily },
-                            parameter_size = _parameterSize,
-                            quantization_level = _quantizationLevel
-                        },
-                        capabilities = capabilities
-                    };
-                    await SendJsonResponseAsync(response, showData);
                     return;
                 }
 
-                // --- COSMETIC ENDPOINT 6: Browser root request ---
-                if (request.HttpMethod == "GET" && path == "/")
+                if (await TryHandleRootAsync(request, response))
                 {
-                    var responseString = "Ollama is running (routed via LlamaOllamaBridge Widget)";
-                    byte[] buffer = Encoding.UTF8.GetBytes(responseString);
-                    response.ContentType = "text/plain; charset=utf-8";
-                    response.ContentLength64 = buffer.Length;
-                    await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-                    response.OutputStream.Close();
                     return;
                 }
 
-                // Fallback for unmapped routes
-                Logger.Log($"[LlamaBridge] Unknown path rejected (404): {path}");
-                response.StatusCode = (int) HttpStatusCode.NotFound;
-                response.OutputStream.Close();
+                await HandleUnknownRouteAsync(response, path);
             }
             catch (Exception ex)
             {
                 Logger.Log($"[LlamaBridge-Exception] Error processing request: {ex.Message}");
                 try { response.StatusCode = (int) HttpStatusCode.InternalServerError; response.OutputStream.Close(); } catch { }
             }
+        }
+
+        private static bool IsEndpoint(HttpListenerRequest request, string method, string path)
+        {
+            return request.HttpMethod == method && string.Equals(request.Url?.AbsolutePath, path, StringComparison.Ordinal);
+        }
+
+        private static async Task<bool> TryHandleOpenAiCompletionsAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!IsEndpoint(request, "POST", "/v1/chat/completions"))
+            {
+                return false;
+            }
+
+            Logger.Log("[LlamaBridge] Processing OpenAI-compatible direct stream...");
+            using var reader = new StreamReader(request.InputStream);
+            string requestBody = await reader.ReadToEndAsync();
+            string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK);
+
+            Logger.Log("========================================");
+            Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
+            Logger.Log(sanitizedBody);
+            Logger.Log("========================================");
+
+            using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
+            {
+                Content = new StringContent(sanitizedBody, Encoding.UTF8, "application/json")
+            };
+
+            using HttpResponseMessage upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
+            response.StatusCode = (int) upstreamRes.StatusCode;
+            response.ContentType = upstreamRes.Content.Headers.ContentType?.ToString() ?? "text/event-stream";
+            response.SendChunked = true;
+
+            using Stream upstreamStream = await upstreamRes.Content.ReadAsStreamAsync();
+            await LlamaStreamTransformer.TransformOpenAiStreamAsync(upstreamStream, response.OutputStream, _detectedModelName);
+
+            response.OutputStream.Close();
+            Logger.Log("[LlamaBridge] OpenAI direct stream successfully ended.");
+            return true;
+        }
+
+        private static async Task<bool> TryHandleOllamaChatAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!IsEndpoint(request, "POST", "/api/chat"))
+            {
+                return false;
+            }
+
+            Logger.Log("[LlamaBridge] Translating NDJSON-Ollama request...");
+            using var reader = new StreamReader(request.InputStream);
+            string body = await reader.ReadToEndAsync();
+            JsonNode? ollamaReq = JsonNode.Parse(body);
+
+            var openAiReq = new JsonObject
+            {
+                ["model"] = _detectedModelName,
+                ["messages"] = ollamaReq?["messages"]?.DeepClone(),
+                ["stream"] = ollamaReq?["stream"] ?? true
+            };
+
+            using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
+            {
+                Content = new StringContent(openAiReq.ToJsonString(), Encoding.UTF8, "application/json")
+            };
+
+            using HttpResponseMessage upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
+            response.ContentType = "application/x-javascript; charset=utf-8";
+            response.StatusCode = (int) upstreamRes.StatusCode;
+            response.SendChunked = true;
+
+            if (ollamaReq?["stream"]?.GetValue<bool>() == false)
+            {
+                await WriteNonStreamingOllamaResponseAsync(response, upstreamRes);
+            }
+            else
+            {
+                await WriteStreamingOllamaResponseAsync(response, upstreamRes);
+            }
+
+            response.OutputStream.Close();
+            Logger.Log("[LlamaBridge] Ollama NDJSON stream successfully ended.");
+            return true;
+        }
+
+        private static async Task WriteNonStreamingOllamaResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamRes)
+        {
+            string resContent = await upstreamRes.Content.ReadAsStringAsync();
+            JsonNode? openAiRes = JsonNode.Parse(resContent);
+            string text = openAiRes?["choices"]?[0]?["message"]?["content"]?.ToString() ?? string.Empty;
+
+            var ollamaRes = new JsonObject
+            {
+                ["model"] = _detectedModelName,
+                ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = text },
+                ["done"] = true
+            };
+
+            byte[] buffer = Encoding.UTF8.GetBytes(ollamaRes.ToJsonString() + "\n");
+            await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+        }
+
+        private static async Task WriteStreamingOllamaResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamRes)
+        {
+            using Stream responseStream = await upstreamRes.Content.ReadAsStreamAsync();
+            using var streamReader = new StreamReader(responseStream);
+            using var writer = new StreamWriter(response.OutputStream, new UTF8Encoding(false));
+
+            string? line;
+            while ((line = await streamReader.ReadLineAsync()) != null)
+            {
+                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
+                {
+                    continue;
+                }
+
+                string data = line["data: ".Length..].Trim();
+                if (data == "[DONE]")
+                {
+                    break;
+                }
+
+                try
+                {
+                    JsonNode? openAiChunk = JsonNode.Parse(data);
+                    string contentChunk = openAiChunk?["choices"]?[0]?["delta"]?["content"]?.ToString() ?? string.Empty;
+                    if (string.IsNullOrEmpty(contentChunk))
+                    {
+                        continue;
+                    }
+
+                    var ollamaChunk = new JsonObject
+                    {
+                        ["model"] = _detectedModelName,
+                        ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = contentChunk },
+                        ["done"] = false
+                    };
+
+                    await writer.WriteLineAsync(ollamaChunk.ToJsonString());
+                    await writer.FlushAsync();
+                }
+                catch
+                {
+                }
+            }
+
+            var finalChunk = new JsonObject { ["model"] = _detectedModelName, ["done"] = true };
+            await writer.WriteLineAsync(finalChunk.ToJsonString());
+            await writer.FlushAsync();
+        }
+
+        private static async Task<bool> TryHandleApiTagsAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!IsEndpoint(request, "GET", "/api/tags"))
+            {
+                return false;
+            }
+
+            var tagsData = new
+            {
+                models = new[]
+                {
+                    new {
+                        name = _detectedModelName,
+                        model = _detectedModelName,
+                        modified_at = DateTime.UtcNow,
+                        size = 0,
+                        digest = "proxy_identity_digest",
+                        details = CreateModelDetails()
+                    }
+                }
+            };
+
+            await SendJsonResponseAsync(response, tagsData);
+            return true;
+        }
+
+        private static async Task<bool> TryHandleApiPsAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!IsEndpoint(request, "GET", "/api/ps"))
+            {
+                return false;
+            }
+
+            var psData = new
+            {
+                models = new[]
+                {
+                    new {
+                        name = _detectedModelName,
+                        model = _detectedModelName,
+                        size = 0,
+                        digest = "proxy_identity_digest",
+                        details = CreateModelDetails()
+                    }
+                }
+            };
+
+            await SendJsonResponseAsync(response, psData);
+            return true;
+        }
+
+        private static async Task<bool> TryHandleApiShowAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!IsEndpoint(request, "POST", "/api/show"))
+            {
+                return false;
+            }
+
+            string tempFormatted = _detectedTemperature.ToString("G", CultureInfo.InvariantCulture);
+            var capabilities = _supportsVision
+                ? new[] { "completion", "tools", "vision" }
+                : ["completion", "tools"];
+
+            var showData = new
+            {
+                modelfile = $"FROM {_detectedModelName}\nPARAMETER temperature {tempFormatted}\nPARAMETER num_ctx {_detectedNumCtx}",
+                parameters = $"temperature {tempFormatted}\nnum_ctx {_detectedNumCtx}",
+                template = "{{ .System }}\n{{ .Prompt }}",
+                details = CreateModelDetails(),
+                capabilities = capabilities
+            };
+
+            await SendJsonResponseAsync(response, showData);
+            return true;
+        }
+
+        private static async Task<bool> TryHandleRootAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!IsEndpoint(request, "GET", "/"))
+            {
+                return false;
+            }
+
+            string responseString = "Ollama is running (routed via LlamaOllamaBridge Widget)";
+            byte[] buffer = Encoding.UTF8.GetBytes(responseString);
+            response.ContentType = "text/plain; charset=utf-8";
+            response.ContentLength64 = buffer.Length;
+            await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+            response.OutputStream.Close();
+            return true;
+        }
+
+        private static async Task HandleUnknownRouteAsync(HttpListenerResponse response, string path)
+        {
+            Logger.Log($"[LlamaBridge] Unknown path rejected (404): {path}");
+            response.StatusCode = (int) HttpStatusCode.NotFound;
+            await response.OutputStream.FlushAsync();
+            response.OutputStream.Close();
+        }
+
+        private static object CreateModelDetails()
+        {
+            return new
+            {
+                parent_model = "",
+                format = "gguf",
+                family = _modelFamily,
+                families = new[] { _modelFamily },
+                parameter_size = _parameterSize,
+                quantization_level = _quantizationLevel
+            };
         }
 
         private static async Task SendJsonResponseAsync(HttpListenerResponse response, object data)
@@ -682,13 +747,6 @@ namespace FormsSystemStatsWidget.Core
             Logger.Log("[LlamaBridge] Bridge successfully stopped.");
         }
 
-        /// <summary>
-        /// Sendet aufgenommenes Audio als User-Message über die aktive Bridge in ein OpenAI-kompatibles Chat-Completion-Request.
-        /// </summary>
-        /// <param name="uiNotification">Kurzer sichtbarer Hinweistext für den User-Context.</param>
-        /// <param name="audioBase64">WAV-Audiodaten als Base64-String.</param>
-        /// <param name="cancellationToken">CancellationToken für den HTTP-Aufruf.</param>
-        /// <returns><see langword="true"/>, wenn das Audio erfolgreich verarbeitet wurde; sonst <see langword="false"/>.</returns>
         public static async Task<bool> SendAudioInputAsync(string uiNotification, string audioBase64, CancellationToken cancellationToken = default)
         {
             if (!_isRunning)
@@ -843,53 +901,31 @@ namespace FormsSystemStatsWidget.Core
 
         public static string[] FilteredLoggingPhrases =
         [
-            // Source API URL
             "Source API URL"
         ];
 
-        // Logging phrases that shall not be repeated / consecutively logged more than once (e.g. "model loaded successfully" or "model loading failed")
         public static string[] NonRepeatingLoggingPhrases =
         [
-            // Polling idle every 2 seconds
             "all slots are idle", "update_slots"
-            // ...
        ];
-
-        private static int SuppressedRepeatedMessageCount = 0;
 
         public static void Log(string text)
         {
-            //if (FilteredLoggingPhrases.Any(phrase => text.Contains(phrase)))
-            //{
-            //    return;
-            //}
-
-            //string lastLogString = BufferedEntries.Count > 0 ? BufferedEntries.Last() : string.Empty;
-            //if (NonRepeatingLoggingPhrases.Any(phrase => text.Contains(phrase) && lastLogString.Contains(phrase)))
-            //{
-            //    // Over-print last log entry with a note about repeated message, instead of adding a new log line (using \r)
-            //    SuppressedRepeatedMessageCount++;
-            //    text = '\r' + text + $" ({SuppressedRepeatedMessageCount} times)";
-            //}
-
             lock (SyncRoot)
             {
                 if (!LlamaOllamaBridge.EnableRawChunkLogging)
                 {
-                    // WICHTIG: Erst prüfen, BEVOR ein Timestamp hinzugefügt wird!
                     if (text.Contains("[RAW CHUNK]"))
                     {
                         _isStreaming = true;
                         _streamChunkCount++;
-                        // Nur Konsole updaten, ohne neue Zeile (\r)
                         Console.Write($"\r ==> Streaming Response: Received {_streamChunkCount} chunks...");
                         return;
                     }
 
-                    // Sobald das Streaming aufhört, packen wir die Zusammenfassung ins UI
                     if (_isStreaming)
                     {
-                        Console.WriteLine(); // Den \r Effekt abschließen
+                        Console.WriteLine();
                         string finalStreamLog = $"[Stream Completed] Total received chunks: {_streamChunkCount}";
 
                         if (LlamaOllamaBridge.EnableFormattedLogging)
@@ -913,7 +949,6 @@ namespace FormsSystemStatsWidget.Core
                     }
                 }
 
-                // Standard-Logging
                 if (LlamaOllamaBridge.EnableFormattedLogging && !text.StartsWith(Environment.NewLine))
                 {
                     text = Environment.NewLine + DateTime.Now.ToString("HH:mm:ss.fff") + " :: " + text;

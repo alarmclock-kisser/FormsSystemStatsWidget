@@ -81,7 +81,7 @@ namespace FormsSystemStatsWidget.Core
                     if (lastMessage != null && TryGetStringContent(lastMessage, out string content) && content.Length > hardCharLimit)
                     {
                         int safeStart = Math.Max(0, content.Length - hardCharLimit + Math.Max(0, SmartPromptOptimizationSettings.TailKeepBonusChars));
-                        string truncatedContent = string.Concat($"// [Context automatically rolled by proxy to fit dynamic limit of {numCtx} ctx]\r\n", content.AsSpan(safeStart));
+                        string truncatedContent = string.Concat($"[Context automatically rolled by proxy to fit dynamic limit of {numCtx} ctx]\r\n", content.AsSpan(safeStart));
                         lastMessage["content"] = truncatedContent;
                     }
                 }
@@ -210,7 +210,7 @@ namespace FormsSystemStatsWidget.Core
                 return ShrinkWithHeadTail(code, Math.Max(256, SmartPromptOptimizationSettings.LargeMessageThresholdChars));
             }
 
-            return string.Join("\n", signatureLines) + "\n// [smart-context: code body omitted]";
+            return string.Join("\n", signatureLines) + "\n[smart-context: code body omitted]";
         }
 
         private static bool IsStructuralCodeLine(string line)
@@ -468,7 +468,7 @@ namespace FormsSystemStatsWidget.Core
             int tailLength = Math.Max(0, maxChars - headLength - 64);
             string head = content[..headLength];
             string tail = content[^tailLength..];
-            return $"{head}\n\n// [smart-context: middle omitted]\n\n{tail}";
+            return $"{head}\n\n[smart-context: middle omitted]\n\n{tail}";
         }
 
         private static void NormalizeToolHistoryMessage(JsonObject message, bool flattenToolHistory)
@@ -534,12 +534,6 @@ namespace FormsSystemStatsWidget.Core
                     var function = toolCall!["function"] as JsonObject;
                     string functionName = function?["name"]?.ToString() ?? "unknown_tool";
                     string arguments = function?["arguments"]?.ToString() ?? "{}";
-
-                    // =========================================================
-                    // DER ANTI-HALLUZINATIONS-FIX: 
-                    // Wir füttern Qwen exakt mit dem Format, das es nativ nutzt.
-                    // Keine Fake-Phrasen mehr, die das Modell verwirren!
-                    // =========================================================
                     return $"<tool_call>\n{{\"name\": \"{functionName}\", \"arguments\": {arguments}}}\n</tool_call>";
                 })
                 .ToArray();
@@ -757,12 +751,12 @@ namespace FormsSystemStatsWidget.Core
             using var streamReader = new StreamReader(upstreamStream);
             using var writer = new StreamWriter(downstreamStream, new UTF8Encoding(false)) { AutoFlush = true };
 
-            bool isReceivingReasoning = false; // State-Tracker für den Gedankengang
+            bool isReceivingReasoning = false;
             bool inToolCall = false;
             bool toolCallTriggered = false;
             string toolBuffer = "";
             string responseTextBuffer = "";
-            string detectBuffer = ""; // Puffer für Tool-Detection über Chunk-Grenzen hinweg
+            string detectBuffer = "";
             string? line;
 
             while ((line = await streamReader.ReadLineAsync()) != null)
@@ -820,10 +814,6 @@ namespace FormsSystemStatsWidget.Core
 
                     if (delta != null)
                     {
-                        // ====================================================================
-                        // REASONING INTERCEPTOR (Robuste Markdown Version für VS Copilot)
-                        // Wandelt reasoning_content in visuelle Zitate (Blockquotes) um.
-                        // ====================================================================
                         bool hasReasoning = delta.ContainsKey("reasoning_content") && delta["reasoning_content"] != null && !string.IsNullOrEmpty(delta["reasoning_content"]?.ToString());
                         bool hasContent = delta.ContainsKey("content") && delta["content"] != null && !string.IsNullOrEmpty(delta["content"]?.ToString());
 
@@ -832,7 +822,6 @@ namespace FormsSystemStatsWidget.Core
                             string rContent = delta["reasoning_content"]!.ToString();
                             _ = delta.Remove("reasoning_content");
 
-                            // Verwandelt Zeilenumbrüche im Gedankengang in Zitat-Umbrüche
                             rContent = rContent.Replace("\n", "\n> ");
 
                             if (!isReceivingReasoning)
@@ -847,21 +836,16 @@ namespace FormsSystemStatsWidget.Core
                         else if (isReceivingReasoning && hasContent)
                         {
                             string nContent = delta["content"]!.ToString();
-
-                            // Beendet das Zitat durch eine doppelte Leerzeile vor der echten Antwort
                             delta["content"] = "\n\n" + nContent;
                             isReceivingReasoning = false;
                         }
                         else if (isReceivingReasoning && choice != null && choice.ContainsKey("finish_reason") && choice["finish_reason"]?.ToString() != null)
                         {
-                            // Beendet das Zitat sauber, falls der Stream abrupt endet
                             delta["content"] = (delta["content"]?.ToString() ?? "") + "\n\n";
                             isReceivingReasoning = false;
 
                             if (inToolCall && !toolCallTriggered)
                             {
-                                // Fallback: Wenn wir in einem Tool-Call waren, aber keinen validen gefunden haben, 
-                                // senden wir zumindest ein leeres choices-Objekt, um den Fehler zu vermeiden.
                                 var fallbackChunk = new JsonObject
                                 {
                                     ["choices"] = new JsonArray {
@@ -878,7 +862,6 @@ namespace FormsSystemStatsWidget.Core
                                 inToolCall = false;
                             }
                         }
-                        // ====================================================================
 
                         if (hasContent)
                         {
@@ -939,24 +922,7 @@ namespace FormsSystemStatsWidget.Core
                                     continue;
                                 }
 
-                                // Prefix-Check für partiell eintreffende Tool-Calls (Chunk-übergreifend)
-                                bool isPartial = false;
-                                string[] triggers = ["<tool_call>", "<function=", "{\"command\""];
-                                foreach (var trigger in triggers)
-                                {
-                                    for (int i = 1; i <= trigger.Length; i++)
-                                    {
-                                        if (detectBuffer.EndsWith(trigger.Substring(0, i), StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            isPartial = true;
-                                            break;
-                                        }
-                                    }
-                                    if (isPartial)
-                                    {
-                                        break;
-                                    }
-                                }
+                                bool isPartial = IsPotentialPartialToolCall(detectBuffer);
 
                                 if (!isPartial)
                                 {
@@ -969,7 +935,6 @@ namespace FormsSystemStatsWidget.Core
                             }
                         }
 
-                        // Flush chunks that have no content but might have reasoning_content
                         if (!delta.ContainsKey("content") || string.IsNullOrEmpty(delta["content"]?.ToString()))
                         {
                             await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
@@ -979,13 +944,13 @@ namespace FormsSystemStatsWidget.Core
                 }
                 catch (IOException)
                 {
-                    Logger.Log("[Disconnect] Copilot hat die Anfrage abgebrochen (Timeout/Stop). Beende llama-server Generierung...");
-                    break; // Bricht die Schleife ab -> Stream wird disposed -> llama-server stoppt sofort!
+                    Logger.Log("[Disconnect] Copilot canceled the request (timeout/stop). Ending llama-server generation...");
+                    break;
                 }
                 catch (System.Net.HttpListenerException)
                 {
-                    Logger.Log("[Disconnect] HTTP Verbindung getrennt. Beende llama-server Generierung...");
-                    break; // Bricht die Schleife ab -> Stream wird disposed -> llama-server stoppt sofort!
+                    Logger.Log("[Disconnect] HTTP connection closed. Ending llama-server generation...");
+                    break;
                 }
                 catch (Exception ex)
                 {
@@ -997,41 +962,73 @@ namespace FormsSystemStatsWidget.Core
                     }
                     catch
                     {
-                        break; // Wenn der Fallback auch fehlschlägt: Raus hier und Ressourcen freigeben!
+                        break;
                     }
                 }
-            } // ENDE DER WHILE-SCHLEIFE
+            }
 
-            // Flush remaining partial tool detection buffer just in case the model stopped mid-word
-            if (!string.IsNullOrEmpty(detectBuffer) && !toolCallTriggered && !inToolCall)
+            await FlushRemainingDetectBufferAsync(writer, detectBuffer, toolCallTriggered, inToolCall);
+            LogResponseSummary(responseTextBuffer);
+        }
+
+        private static bool IsPotentialPartialToolCall(string detectBuffer)
+        {
+            string[] triggers = ["<tool_call>", "<function=", "{\"command\""];
+            foreach (string trigger in triggers)
             {
-                var finalChunk = new JsonObject
+                for (int i = 1; i <= trigger.Length; i++)
                 {
-                    ["choices"] = new JsonArray {
-                new JsonObject {
-                    ["delta"] = new JsonObject { ["content"] = detectBuffer },
-                    ["index"] = 0
+                    if (detectBuffer.EndsWith(trigger.Substring(0, i), StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
                 }
-            }
-                };
-                try
-                {
-                    await writer.WriteLineAsync("data: " + finalChunk.ToJsonString());
-                    await writer.FlushAsync();
-                }
-                catch { }
             }
 
-            if (!string.IsNullOrWhiteSpace(responseTextBuffer))
+            return false;
+        }
+
+        private static async Task FlushRemainingDetectBufferAsync(StreamWriter writer, string detectBuffer, bool toolCallTriggered, bool inToolCall)
+        {
+            if (string.IsNullOrEmpty(detectBuffer) || toolCallTriggered || inToolCall)
             {
-                string cleanLog = responseTextBuffer.Replace("\r", "").Replace("\n", " ").Trim();
-                if (cleanLog.Length > 200)
-                {
-                    cleanLog = string.Concat(cleanLog.AsSpan(0, 200), "...");
-                }
-
-                Logger.Log($"[LLM Output Summary] Generated text: {cleanLog}");
+                return;
             }
+
+            var finalChunk = new JsonObject
+            {
+                ["choices"] = new JsonArray {
+                    new JsonObject {
+                        ["delta"] = new JsonObject { ["content"] = detectBuffer },
+                        ["index"] = 0
+                    }
+                }
+            };
+
+            try
+            {
+                await writer.WriteLineAsync("data: " + finalChunk.ToJsonString());
+                await writer.FlushAsync();
+            }
+            catch
+            {
+            }
+        }
+
+        private static void LogResponseSummary(string responseTextBuffer)
+        {
+            if (string.IsNullOrWhiteSpace(responseTextBuffer))
+            {
+                return;
+            }
+
+            string cleanLog = responseTextBuffer.Replace("\r", "").Replace("\n", " ").Trim();
+            if (cleanLog.Length > 200)
+            {
+                cleanLog = string.Concat(cleanLog.AsSpan(0, 200), "...");
+            }
+
+            Logger.Log($"[LLM Output Summary] Generated text: {cleanLog}");
         }
     }
 }

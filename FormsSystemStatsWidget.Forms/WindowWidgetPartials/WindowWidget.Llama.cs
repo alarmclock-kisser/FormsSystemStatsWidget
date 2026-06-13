@@ -37,57 +37,64 @@ namespace FormsSystemStatsWidget.Forms
 
             if (menuItem.Checked)
             {
-                var cur = this.Cursor;
-                this.Cursor = Cursors.WaitCursor;
-
-                string apiUrl = this.toolStripTextBox_openAiApiUrl.Text.Trim();
-                int? apiUrlPort = apiUrl != "" && Uri.TryCreate(apiUrl, UriKind.Absolute, out Uri? parsedUri) && parsedUri.IsLoopback ? parsedUri.Port : null;
-                apiUrl = apiUrl.Replace("http://", "").Replace("https://", "").Split(':').FirstOrDefault() ?? apiUrl;
-                int llamaPort = apiUrlPort == null ? int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080 : apiUrlPort.Value;
-                this.toolStripTextBox_llamacppPort.Text = llamaPort.ToString();
-                int ollamaPort = int.TryParse(this.toolStripTextBox_ollamaPort.Text.Trim(), out int parsedOllamaPort) ? parsedOllamaPort : 11434;
-                this.toolStripTextBox_ollamaPort.Text = ollamaPort.ToString();
-
-                bool isStarted = await LlamaOllamaBridge.StartAsync(apiUrl, llamaPort, ollamaPort);
-                this.Cursor = cur;
-
-                // Close the context menu again
-                this.ContextMenuStrip?.Close();
-
-                if (isStarted)
-                {
-                    this.label_routingPortsInfo.Text = $"Port {llamaPort} to {ollamaPort}";
-                    this.label_routingPortsInfo.ForeColor = Color.DarkGreen;
-                    this.label_routingPortsInfo.Visible = true;
-                }
-                else
-                {
-                    menuItem.CheckedChanged -= this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
-                    menuItem.Checked = false;
-                    menuItem.CheckedChanged += this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
-
-                    this.label_routingPortsInfo.Text = $"Port {llamaPort} to {ollamaPort} failed";
-                    this.label_routingPortsInfo.ForeColor = Color.Red;
-                    this.label_routingPortsInfo.Visible = true;
-
-                    string bridgeError = LlamaOllamaBridge.LastStartError;
-                    string message = string.IsNullOrWhiteSpace(bridgeError)
-                        ? $"Connection to llama-server (Port {llamaPort}) failed or Port {ollamaPort} is blocked!"
-                        : $"Connection setup failed:{Environment.NewLine}{bridgeError}";
-
-                    _ = MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+                await this.EnableBridgeRouteAsync(menuItem);
             }
             else
             {
-                LlamaOllamaBridge.Stop(); // No asynchronous task is required when stopping
-
-                this.label_routingPortsInfo.Text = "Port ----- to -----";
-                this.label_routingPortsInfo.ForeColor = Color.Black;
-                this.label_routingPortsInfo.Visible = false;
+                this.DisableBridgeRoute();
             }
 
             menuItem.Enabled = true;
+        }
+
+        private async Task EnableBridgeRouteAsync(ToolStripMenuItem menuItem)
+        {
+            var cur = this.Cursor;
+            this.Cursor = Cursors.WaitCursor;
+
+            string apiUrl = this.toolStripTextBox_openAiApiUrl.Text.Trim();
+            int? apiUrlPort = apiUrl != "" && Uri.TryCreate(apiUrl, UriKind.Absolute, out Uri? parsedUri) && parsedUri.IsLoopback ? parsedUri.Port : null;
+            apiUrl = apiUrl.Replace("http://", "").Replace("https://", "").Split(':').FirstOrDefault() ?? apiUrl;
+            int llamaPort = apiUrlPort == null ? int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080 : apiUrlPort.Value;
+            this.toolStripTextBox_llamacppPort.Text = llamaPort.ToString();
+            int ollamaPort = int.TryParse(this.toolStripTextBox_ollamaPort.Text.Trim(), out int parsedOllamaPort) ? parsedOllamaPort : 11434;
+            this.toolStripTextBox_ollamaPort.Text = ollamaPort.ToString();
+
+            bool isStarted = await LlamaOllamaBridge.StartAsync(apiUrl, llamaPort, ollamaPort);
+            this.Cursor = cur;
+            this.ContextMenuStrip?.Close();
+
+            if (isStarted)
+            {
+                this.SetRoutingInfoLabel($"Port {llamaPort} to {ollamaPort}", Color.DarkGreen, true);
+                return;
+            }
+
+            menuItem.CheckedChanged -= this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
+            menuItem.Checked = false;
+            menuItem.CheckedChanged += this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
+
+            this.SetRoutingInfoLabel($"Port {llamaPort} to {ollamaPort} failed", Color.Red, true);
+
+            string bridgeError = LlamaOllamaBridge.LastStartError;
+            string message = string.IsNullOrWhiteSpace(bridgeError)
+                ? $"Connection to llama-server (Port {llamaPort}) failed or Port {ollamaPort} is blocked!"
+                : $"Connection setup failed:{Environment.NewLine}{bridgeError}";
+
+            _ = MessageBox.Show(message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private void DisableBridgeRoute()
+        {
+            LlamaOllamaBridge.Stop();
+            this.SetRoutingInfoLabel("Port ----- to -----", Color.Black, false);
+        }
+
+        private void SetRoutingInfoLabel(string text, Color color, bool visible)
+        {
+            this.label_routingPortsInfo.Text = text;
+            this.label_routingPortsInfo.ForeColor = color;
+            this.label_routingPortsInfo.Visible = visible;
         }
 
         private void openDebugConsoleToolStripMenuItem_Click(object sender, EventArgs e)
@@ -286,18 +293,9 @@ namespace FormsSystemStatsWidget.Forms
 
         private void toolStripMenuItem_execModelLoadBat_Click(object? sender, EventArgs e)
         {
-            string? selectedBatName = this.toolStripComboBox_modelLoadBats.SelectedItem as string;
             this.ContextMenuStrip?.Close();
-            if (string.IsNullOrEmpty(selectedBatName))
+            if (!this.TryGetSelectedBatFilePath(out string batFilePath))
             {
-                _ = MessageBox.Show(this, "No batch file selected. Please select a batch file from the dropdown list.", "No Batch File Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            string batFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs", selectedBatName + ".BAT");
-            if (!File.Exists(batFilePath))
-            {
-                _ = MessageBox.Show(this, $"The selected batch file does not exist:\n{batFilePath}", "Batch File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -316,6 +314,26 @@ namespace FormsSystemStatsWidget.Forms
             {
                 _ = MessageBox.Show(this, $"Failed to execute the selected batch file. Error: {ex.Message}", "Error Executing Batch File", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private bool TryGetSelectedBatFilePath(out string batFilePath)
+        {
+            string? selectedBatName = this.toolStripComboBox_modelLoadBats.SelectedItem as string;
+            if (string.IsNullOrEmpty(selectedBatName))
+            {
+                _ = MessageBox.Show(this, "No batch file selected. Please select a batch file from the dropdown list.", "No Batch File Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                batFilePath = string.Empty;
+                return false;
+            }
+
+            batFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs", selectedBatName + ".BAT");
+            if (!File.Exists(batFilePath))
+            {
+                _ = MessageBox.Show(this, $"The selected batch file does not exist:\n{batFilePath}", "Batch File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+
+            return true;
         }
 
         private void ToolStripMenuItem_killLlamaServer_Click(object? sender, EventArgs e)
@@ -359,19 +377,7 @@ namespace FormsSystemStatsWidget.Forms
             bool captureOutput = true;
             bool hideCmd = this.toolStripMenuItem_hideCmd.Checked;
 
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = executableName,
-                Arguments = arguments,
-                UseShellExecute = false,
-                RedirectStandardOutput = captureOutput,
-                RedirectStandardError = captureOutput,
-                // If hideCmd is off, the user intended to see a console window.
-                // Because the streams are redirected, that window would stay blank.
-                // Therefore the native console is always hidden.
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
-            };
+            var startInfo = this.CreateLlamaServerStartInfo(executableName, arguments, captureOutput);
 
             this._llamaServerProcess = new Process
             {
@@ -390,17 +396,7 @@ namespace FormsSystemStatsWidget.Forms
                 throw new InvalidOperationException("llama-server process could not be started.");
             }
 
-            // Open the internal debug console instead if the user wants to see logs.
-            if (!hideCmd)
-            {
-                this.Invoke((System.Windows.Forms.MethodInvoker) delegate
-                {
-                    if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
-                    {
-                        this.openDebugConsoleToolStripMenuItem_Click(this, EventArgs.Empty);
-                    }
-                });
-            }
+            this.OpenDebugConsoleIfRequested(hideCmd);
 
             if (captureOutput)
             {
@@ -409,6 +405,36 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             this.Cursor = cur;
+        }
+
+        private ProcessStartInfo CreateLlamaServerStartInfo(string executableName, string arguments, bool captureOutput)
+        {
+            return new ProcessStartInfo
+            {
+                FileName = executableName,
+                Arguments = arguments,
+                UseShellExecute = false,
+                RedirectStandardOutput = captureOutput,
+                RedirectStandardError = captureOutput,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+        }
+
+        private void OpenDebugConsoleIfRequested(bool hideCmd)
+        {
+            if (hideCmd)
+            {
+                return;
+            }
+
+            this.Invoke((System.Windows.Forms.MethodInvoker) delegate
+            {
+                if (this._debugConsoleForm == null || this._debugConsoleForm.IsDisposed)
+                {
+                    this.openDebugConsoleToolStripMenuItem_Click(this, EventArgs.Empty);
+                }
+            });
         }
 
         private void HandleLlamaServerOutputDataReceived(object sender, DataReceivedEventArgs e)
@@ -519,19 +545,17 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripMenuItem_tensorSplit.Enabled = true;
                 this.toolStripTextBox_tensorSplit.Enabled = true;
-
-                // Get GPUs VRAM capacities in int rounded GB, set default tensor split config to gpu1_vram, gpu2_vram, ...
-                long gpu1VramGb = this.Gpu != null ? (long) Math.Round(this.Gpu.GetTotalVramBytes() / 1_073_741_824.0) : 0;
-                long gpu2VramGb = this.Gpu2 != null ? (long) Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0) : 0;
-                if (gpu1VramGb > 0 && gpu2VramGb > 0)
-                {
-                    this.toolStripTextBox_tensorSplit.Text = $"{gpu1VramGb},{gpu2VramGb}";
-                }
-                else
-                {
-                    this.toolStripTextBox_tensorSplit.Text = "";
-                }
+                this.ApplyDefaultTensorSplitFromGpuVram();
             }
+        }
+
+        private void ApplyDefaultTensorSplitFromGpuVram()
+        {
+            long gpu1VramGb = this.Gpu != null ? (long) Math.Round(this.Gpu.GetTotalVramBytes() / 1_073_741_824.0) : 0;
+            long gpu2VramGb = this.Gpu2 != null ? (long) Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0) : 0;
+            this.toolStripTextBox_tensorSplit.Text = gpu1VramGb > 0 && gpu2VramGb > 0
+                ? $"{gpu1VramGb},{gpu2VramGb}"
+                : string.Empty;
         }
 
         private void toolStripComboBox_ggufModels_SelectedIndexChanged(object sender, EventArgs e)

@@ -7,7 +7,6 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Threading;
 using System.Threading.Tasks;
 using Timer = System.Windows.Forms.Timer;
 
@@ -86,7 +85,34 @@ namespace FormsSystemStatsWidget.Forms
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
             this.ConfigureContextMenuAutoCloseBehavior();
 
-            // Initialize new progress bars with positions
+            this.InitializeProgressBars();
+            this.InitializeUpdateTimer();
+            this.InitializeGpuSelection();
+            this.InitializeWidgetMouseHandlers();
+
+            try { TrafficStats.Init(); }
+            catch { }
+
+            this.InitializeLlamaUiSelections();
+            this.InitializeBridgeSamplingSettingsFromUi();
+
+            this.enableSmartPromptOptimizationsToolStripMenuItem.Checked = SmartPromptOptimizationSettings.IsEnabled;
+            this.toolStripTextBox_promptSafetyRatio.Text = SmartPromptOptimizationSettings.PromptSafetyRatio.ToString("0.00", CultureInfo.InvariantCulture);
+            this.toolStripTextBox_smartBudgetRatio.Text = SmartPromptOptimizationSettings.SmartBudgetRatio.ToString("0.00", CultureInfo.InvariantCulture);
+            this.toolStripTextBox_largeMessageThresholdChars.Text = SmartPromptOptimizationSettings.LargeMessageThresholdChars.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_skeletonMaxLines.Text = SmartPromptOptimizationSettings.SkeletonMaxLines.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_focusKeywordLimit.Text = SmartPromptOptimizationSettings.FocusKeywordLimit.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_tailKeepBonusChars.Text = SmartPromptOptimizationSettings.TailKeepBonusChars.ToString(CultureInfo.InvariantCulture);
+
+            this.EnsureModelLoadBatsDirectory();
+
+            this.ApplyPersistentSettings();
+
+            this.InitializeAudioHotkeys();
+        }
+
+        private void InitializeProgressBars()
+        {
             this._progRam = new DynamicGradientProgressBar { Name = "progRam" };
             this._progRam.Size = this.progressBar_ram.Size;
             this._progRam.Location = this.progressBar_ram.Location;
@@ -103,16 +129,21 @@ namespace FormsSystemStatsWidget.Forms
             this.Controls.Add(this._progVram);
             this.Controls.Add(this._progVram2);
 
-            // Hide old progress bars
             this.progressBar_ram.Visible = false;
             this.progressBar_vram.Visible = false;
             this.progressBar_vram2.Visible = false;
+        }
 
+        private void InitializeUpdateTimer()
+        {
             this.UpdateTimer = new Timer();
             this.UpdateTimer.Interval = this._updateIntervalMs;
             this.UpdateTimer.Tick += this.Timer_Tick;
             this.UpdateTimer.Start();
+        }
 
+        private void InitializeGpuSelection()
+        {
             this.toolStripComboBox_gpus.Items.Clear();
             this.toolStripComboBox_gpus.Items.AddRange(GpuStats.GpuNames.ToArray());
             if (this.toolStripComboBox_gpus.Items.Count > 0)
@@ -121,15 +152,16 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             this.Gpu = new GpuStats(this.toolStripComboBox_gpus.SelectedIndex);
-
-            // Get GPUs count, if 2nd available, create GpuStats for it
             if (GpuStats.GpuNames.Count > 1)
             {
                 this.Gpu2 = new GpuStats(1);
             }
 
             this.ApplyGpuLayout();
+        }
 
+        private void InitializeWidgetMouseHandlers()
+        {
             this.MouseDown += (s, e) =>
             {
                 if (e.Button == MouseButtons.Left)
@@ -137,69 +169,67 @@ namespace FormsSystemStatsWidget.Forms
                     this.Capture = false;
                     Message m = Message.Create(this.Handle, 0xA1, new IntPtr(2), IntPtr.Zero);
                     this.WndProc(ref m);
+                    return;
                 }
-                else if (e.Button == MouseButtons.Right)
+
+                if (e.Button == MouseButtons.Right)
                 {
                     this.contextMenuStrip_widget.Show(this, e.Location);
                 }
             };
+        }
 
-            try { TrafficStats.Init(); }
-            catch { }
-
+        private void InitializeLlamaUiSelections()
+        {
             this.PopulateDriveSelections();
             this.ApplyDriveSpeedTestSettingTexts();
+
             this.toolStripComboBox_ggufModels.Items.Clear();
-            this.toolStripComboBox_ggufModels.Items.AddRange(LlamaCppModelLoader.ModelFilePaths.Select(path => System.IO.Path.GetFileNameWithoutExtension(path)).ToArray());
+            this.toolStripComboBox_ggufModels.Items.AddRange(LlamaCppModelLoader.ModelFilePaths.Select(path => Path.GetFileNameWithoutExtension(path)).ToArray());
             if (this.toolStripComboBox_ggufModels.Items.Count > 0)
             {
                 this.toolStripComboBox_ggufModels.SelectedIndex = 0;
             }
-            this.toolStripComboBox_splitMode.SelectedIndex = 0;
-            // If > 1 GPUs available, default to row (index 2)
-            if (this.toolStripComboBox_gpus.Items.Count > 1)
-            {
-                this.toolStripComboBox_splitMode.SelectedIndex = 2;
-                this.toolStripMenuItem_tensorSplit.Enabled = true;
-                this.toolStripTextBox_tensorSplit.Enabled = true;
 
-                // Get GPUs VRAM capacities in int rounded GB, set default tensor split config to gpu1_vram, gpu2_vram, ...
-                long gpu1VramGb = this.Gpu != null ? (long) Math.Round(this.Gpu.GetTotalVramBytes() / 1_073_741_824.0) : 0;
-                long gpu2VramGb = this.Gpu2 != null ? (long) Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0) : 0;
-                if (gpu1VramGb > 0 && gpu2VramGb > 0)
-                {
-                    this.toolStripTextBox_tensorSplit.Text = $"{gpu1VramGb},{gpu2VramGb}";
-                }
-                else
-                {
-                    this.toolStripTextBox_tensorSplit.Text = "";
-                }
+            this.InitializeSplitModeDefaults();
+        }
+
+        private void InitializeSplitModeDefaults()
+        {
+            this.toolStripComboBox_splitMode.SelectedIndex = 0;
+            if (this.toolStripComboBox_gpus.Items.Count <= 1)
+            {
+                return;
             }
 
+            this.toolStripComboBox_splitMode.SelectedIndex = 2;
+            this.toolStripMenuItem_tensorSplit.Enabled = true;
+            this.toolStripTextBox_tensorSplit.Enabled = true;
+
+            long gpu1VramGb = this.Gpu != null ? (long) Math.Round(this.Gpu.GetTotalVramBytes() / 1_073_741_824.0) : 0;
+            long gpu2VramGb = this.Gpu2 != null ? (long) Math.Round(this.Gpu2.GetTotalVramBytes() / 1_073_741_824.0) : 0;
+            this.toolStripTextBox_tensorSplit.Text = gpu1VramGb > 0 && gpu2VramGb > 0
+                ? $"{gpu1VramGb},{gpu2VramGb}"
+                : string.Empty;
+        }
+
+        private void InitializeBridgeSamplingSettingsFromUi()
+        {
             LlamaOllamaBridge.UserDefinedTemperature = double.TryParse(this.toolStripTextBox_temperature.Text, out double temperature) ? temperature : 0.3;
             LlamaOllamaBridge.UserDefinedRepetitionPenalty = double.TryParse(this.toolStripTextBox_repetationPenalty.Text, out double repetitionPenalty) ? repetitionPenalty : 1.1;
             LlamaOllamaBridge.UserDefinedThinkingBudget = int.TryParse(this.toolStripTextBox_thinkingBudget.Text, out int thinkingBudget) ? thinkingBudget : 4096;
             LlamaOllamaBridge.UserDefinedTopP = double.TryParse(this.toolStripTextBox_topP.Text, out double topP) ? topP : 0.9;
             LlamaOllamaBridge.UserDefinedMinP = double.TryParse(this.toolStripTextBox_minP.Text, out double minP) ? minP : 0.1;
             LlamaOllamaBridge.UserDefinedTopK = int.TryParse(this.toolStripTextBox_topK.Text, out int topK) ? topK : 40;
+        }
 
-            this.enableSmartPromptOptimizationsToolStripMenuItem.Checked = SmartPromptOptimizationSettings.IsEnabled;
-            this.toolStripTextBox_promptSafetyRatio.Text = SmartPromptOptimizationSettings.PromptSafetyRatio.ToString("0.00", CultureInfo.InvariantCulture);
-            this.toolStripTextBox_smartBudgetRatio.Text = SmartPromptOptimizationSettings.SmartBudgetRatio.ToString("0.00", CultureInfo.InvariantCulture);
-            this.toolStripTextBox_largeMessageThresholdChars.Text = SmartPromptOptimizationSettings.LargeMessageThresholdChars.ToString(CultureInfo.InvariantCulture);
-            this.toolStripTextBox_skeletonMaxLines.Text = SmartPromptOptimizationSettings.SkeletonMaxLines.ToString(CultureInfo.InvariantCulture);
-            this.toolStripTextBox_focusKeywordLimit.Text = SmartPromptOptimizationSettings.FocusKeywordLimit.ToString(CultureInfo.InvariantCulture);
-            this.toolStripTextBox_tailKeepBonusChars.Text = SmartPromptOptimizationSettings.TailKeepBonusChars.ToString(CultureInfo.InvariantCulture);
-
+        private void EnsureModelLoadBatsDirectory()
+        {
             string batsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs");
             if (!Directory.Exists(batsDirectory))
             {
                 Directory.CreateDirectory(batsDirectory);
             }
-
-            this.ApplyPersistentSettings();
-
-            this.InitializeAudioHotkeys();
         }
 
         private void ApplyPersistentSettings()
@@ -264,13 +294,24 @@ namespace FormsSystemStatsWidget.Forms
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (e.CloseReason != CloseReason.WindowsShutDown && !this._explicitWidgetCloseRequested)
+            if (this.ShouldBlockClose(e))
             {
                 e.Cancel = true;
                 Logger.Log("[WindowWidget] Unexpected form closing was blocked.");
                 return;
             }
 
+            this.ReleaseFormClosingResources();
+            base.OnFormClosing(e);
+        }
+
+        private bool ShouldBlockClose(FormClosingEventArgs e)
+        {
+            return e.CloseReason != CloseReason.WindowsShutDown && !this._explicitWidgetCloseRequested;
+        }
+
+        private void ReleaseFormClosingResources()
+        {
             this._closing = true;
             this.UpdateTimer.Stop();
             Logger.MessageLogged -= this.HandleLoggerMessageLogged;
@@ -283,8 +324,6 @@ namespace FormsSystemStatsWidget.Forms
 
             try { this.Gpu?.Dispose(); } catch { }
             try { this.Gpu2?.Dispose(); } catch { }
-
-            base.OnFormClosing(e);
         }
 
         protected override void WndProc(ref Message m)
