@@ -68,7 +68,7 @@ namespace FormsSystemStatsWidget.Forms
         private Process? _llamaServerProcess;
         private CancellationTokenSource? _processCts;
         private readonly HashSet<Keys> _processingKeys = [];
-        private static readonly Regex TokensPerSecondRegex = new(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static readonly Regex TokensPerSecondRegex = MyRegex();
         private double _lastStdOutTokensPerSecond;
         private DateTime _lastStdOutTokensPerSecondUtc = DateTime.MinValue;
 
@@ -198,6 +198,8 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             this.ApplyPersistentSettings();
+
+            this.InitializeAudioHotkeys();
         }
 
         private void ApplyPersistentSettings()
@@ -911,10 +913,10 @@ namespace FormsSystemStatsWidget.Forms
         //Hotkey (recording)
         private void ResetHotkeyInputState()
         {
-            _isAwaitingHotkeyInput = false;
-            _currentModifierKeys.Clear();
-            _firstModifierKey = null;
-            _otherKey = null;
+            this._isAwaitingHotkeyInput = false;
+            this._currentModifierKeys.Clear();
+            this._firstModifierKey = null;
+            this._otherKey = null;
         }
 
         // Init / Update / Fill ctxmenu items etc.
@@ -1040,12 +1042,15 @@ namespace FormsSystemStatsWidget.Forms
 
         private void WindowWidget_KeyDown(object sender, KeyEventArgs e)
         {
-            if (!_isAwaitingHotkeyInput) return;
+            if (!this._isAwaitingHotkeyInput)
+            {
+                return;
+            }
 
             if (e.KeyCode == Keys.Escape)
             {
                 // Abbrechen, wenn ESC gedrückt wird
-                ResetHotkeyInputState();
+                this.ResetHotkeyInputState();
                 this.ContextMenuStrip?.Close();
                 return;
             }
@@ -1053,36 +1058,39 @@ namespace FormsSystemStatsWidget.Forms
             // 1. Modifikator-Key erfassen
             if (e.KeyCode == Keys.LControlKey || e.KeyCode == Keys.Alt || e.KeyCode == Keys.LWin || e.KeyCode == Keys.RControlKey || e.KeyCode == Keys.Alt || e.KeyCode == Keys.RWin)
             {
-                if (!_currentModifierKeys.ContainsKey(e.KeyCode))
+                if (!this._currentModifierKeys.ContainsKey(e.KeyCode))
                 {
-                    _currentModifierKeys[e.KeyCode] = false;
+                    this._currentModifierKeys[e.KeyCode] = false;
                 }
-                _currentModifierKeys[e.KeyCode] = true;
-                if (_firstModifierKey == null)
+                this._currentModifierKeys[e.KeyCode] = true;
+                if (this._firstModifierKey == null)
                 {
-                    _firstModifierKey = e.KeyCode;
+                    this._firstModifierKey = e.KeyCode;
                 }
             }
             // 2. Nicht-Modifikator-Key erfassen
             else if (e.KeyCode != Keys.Tab && e.KeyCode != Keys.Enter)
             {
-                if (_otherKey == null)
+                if (this._otherKey == null)
                 {
-                    _otherKey = e.KeyCode;
+                    this._otherKey = e.KeyCode;
                 }
             }
         }
 
         private void WindowWidget_KeyUp(object sender, KeyEventArgs e)
         {
-            if (!_isAwaitingHotkeyInput) return;
+            if (!this._isAwaitingHotkeyInput)
+            {
+                return;
+            }
 
             // KeyUp-Verarbeitung
             if (e.KeyCode == Keys.LControlKey || e.KeyCode == Keys.Alt || e.KeyCode == Keys.LWin || e.KeyCode == Keys.RControlKey || e.KeyCode == Keys.Alt || e.KeyCode == Keys.RWin)
             {
-                if (_currentModifierKeys.ContainsKey(e.KeyCode))
+                if (this._currentModifierKeys.ContainsKey(e.KeyCode))
                 {
-                    _currentModifierKeys[e.KeyCode] = false;
+                    this._currentModifierKeys[e.KeyCode] = false;
                 }
             }
             // Hier müsste die Logik zur Überprüfung, ob *alle* relevanten Keys Up sind, implementiert werden.
@@ -1091,7 +1099,8 @@ namespace FormsSystemStatsWidget.Forms
 
         [GeneratedRegex(@"\((.*?)\)")]
         private static partial Regex SetVoiceInputHotkeyRegex();
-
+        [GeneratedRegex(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled, "de-DE")]
+        private static partial Regex MyRegex();
     }
 }
 

@@ -104,7 +104,10 @@ namespace FormsSystemStatsWidget.Core
             };
 
             using var process = Process.Start(startInfo);
-            if (process == null) return "Error: Could not start process.";
+            if (process == null)
+            {
+                return "Error: Could not start process.";
+            }
 
             string output = await process.StandardOutput.ReadToEndAsync();
             string error = await process.StandardError.ReadToEndAsync();
@@ -118,7 +121,11 @@ namespace FormsSystemStatsWidget.Core
         /// </summary>
         public async Task<string> ReadFileAsync(string path)
         {
-            if (!File.Exists(path)) return $"Error: File not found at {path}";
+            if (!File.Exists(path))
+            {
+                return $"Error: File not found at {path}";
+            }
+
             return await File.ReadAllTextAsync(path);
         }
 

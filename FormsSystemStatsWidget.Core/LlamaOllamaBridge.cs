@@ -450,7 +450,7 @@ namespace FormsSystemStatsWidget.Core
 
                     var capabilities = _supportsVision
                         ? new[] { "completion", "tools", "vision" }
-                        : new[] { "completion", "tools" };
+                        : ["completion", "tools"];
 
                     var showData = new
                     {
@@ -567,43 +567,43 @@ namespace FormsSystemStatsWidget.Core
 
             string normalizedModelName = modelName.Trim().ToLowerInvariant();
 
-            string[] qwenMarkers = { "qwen", "qwq" };
+            string[] qwenMarkers = ["qwen", "qwq"];
             if (qwenMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
             {
                 return "qwen";
             }
 
-            string[] gemmaMarkers = { "gemma", "medgemma" };
+            string[] gemmaMarkers = ["gemma", "medgemma"];
             if (gemmaMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
             {
                 return "gemma";
             }
 
-            string[] mistralMarkers = { "mistral", "mixtral", "ministral", "codestral", "pixtral" };
+            string[] mistralMarkers = ["mistral", "mixtral", "ministral", "codestral", "pixtral"];
             if (mistralMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
             {
                 return "mistral";
             }
 
-            string[] llamaMarkers = { "llama", "llama3", "llama-", "meta-llama", "codellama" };
+            string[] llamaMarkers = ["llama", "llama3", "llama-", "meta-llama", "codellama"];
             if (llamaMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
             {
                 return "llama";
             }
 
-            string[] deepSeekMarkers = { "deepseek" };
+            string[] deepSeekMarkers = ["deepseek"];
             if (deepSeekMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
             {
                 return "deepseek";
             }
 
-            string[] phiMarkers = { "phi" };
+            string[] phiMarkers = ["phi"];
             if (phiMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)))
             {
                 return "phi";
             }
 
-            string[] commandRMarkers = { "command-r", "commandr", "aya", "cohere" };
+            string[] commandRMarkers = ["command-r", "commandr", "aya", "cohere"];
             return commandRMarkers.Any(marker => normalizedModelName.Contains(marker, StringComparison.Ordinal)) ? "command-r" : "llama";
         }
 
@@ -615,7 +615,7 @@ namespace FormsSystemStatsWidget.Core
             }
 
             string normalized = modelName.Trim().ToLowerInvariant();
-            string[] visionMarkers = { "vision", "vl", "mmproj", "multimodal", "gemma-3", "gemma-4", "llava", "pixtral", "minicpm-v", "qwen2.5-vl", "qwen-vl", "phi-3-vision" };
+            string[] visionMarkers = ["vision", "vl", "mmproj", "multimodal", "gemma-3", "gemma-4", "llava", "pixtral", "minicpm-v", "qwen2.5-vl", "qwen-vl", "phi-3-vision"];
             return visionMarkers.Any(marker => normalized.Contains(marker, StringComparison.Ordinal));
         }
 
@@ -636,7 +636,7 @@ namespace FormsSystemStatsWidget.Core
                 return knownBool.Value;
             }
 
-            string[] markers = { "mmproj", "vision", "multimodal", "image_encoder", "clip" };
+            string[] markers = ["mmproj", "vision", "multimodal", "image_encoder", "clip"];
             bool markerFound = markers.Any(marker => propsJson?.ToJsonString()?.Contains(marker, StringComparison.OrdinalIgnoreCase) ?? false);
             return markerFound ? true : null;
         }
@@ -698,19 +698,19 @@ namespace FormsSystemStatsWidget.Core
 
         public static event Action<string>? MessageLogged;
 
-        public static string[] FilteredLoggingPhrases = new[]
-        {
+        public static string[] FilteredLoggingPhrases =
+        [
             // Source API URL
             "Source API URL"
-        };
+        ];
 
         // Logging phrases that shall not be repeated / consecutively logged more than once (e.g. "model loaded successfully" or "model loading failed")
-        public static string[] NonRepeatingLoggingPhrases = new[]
-        {
+        public static string[] NonRepeatingLoggingPhrases =
+        [
             // Polling idle every 2 seconds
             "all slots are idle", "update_slots"
             // ...
-       };
+       ];
 
         private static int SuppressedRepeatedMessageCount = 0;
 

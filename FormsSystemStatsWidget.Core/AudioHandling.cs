@@ -277,6 +277,134 @@ namespace FormsSystemStatsWidget.Core
             return result;
         }
 
+        public async Task<AudioObj?> RecordAudioAutoAsync(double? autoStopSilenceSeconds = null, CancellationToken ct = default)
+        {
+            int deviceIndex = this.FindActiveMicrophoneIndex();
+            if (deviceIndex == -1)
+            {
+                Logger.Log("No recording devices found.");
+                return null;
+            }
+
+            if (this.recordingCts != null)
+            {
+                Logger.Log("Recording already in progress.");
+                return null;
+            }
+
+            // Für multimodale Modelle und Whisper-Transkriptionen ist 16kHz, 16-bit, Mono 
+            // der absolute Goldstandard. Das vermeidet nachträgliches Resampling vor der Inferenz.
+            var waveFormat = new WaveFormat(16000, 16, 1);
+
+            // Verbinde das externe CancellationToken (ct) mit dem internen,
+            // damit sowohl externe Abbrüche als auch this.StopRecording() sauber triggern.
+            this.recordingCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var linkedToken = this.recordingCts.Token;
+
+            var tcs = new TaskCompletionSource<AudioObj>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var sampleList = new List<float>();
+
+            int bytesPerSample = waveFormat.BitsPerSample / 8;
+            double currentSilenceSeconds = 0.0;
+
+            // Ein Schwellenwert von ~1.5% Amplitude reicht in der Regel, um Grundrauschen 
+            // von Sprache zu unterscheiden. Je nach Mikrofon anpassbar.
+            float silenceThreshold = 0.015f;
+
+            using var waveIn = new WaveInEvent
+            {
+                DeviceNumber = deviceIndex,
+                WaveFormat = waveFormat
+            };
+
+            waveIn.DataAvailable += (s, e) =>
+            {
+                float peak = 0f;
+                int step = bytesPerSample; // 2 Bytes bei 16-bit Mono
+
+                for (int i = 0; i + (step - 1) < e.BytesRecorded; i += step)
+                {
+                    try
+                    {
+                        float sample = 0f;
+                        if (bytesPerSample == 2)
+                        {
+                            short s16 = BitConverter.ToInt16(e.Buffer, i);
+                            sample = s16 / 32768f;
+                        }
+                        else if (bytesPerSample == 4)
+                        {
+                            int s32 = BitConverter.ToInt32(e.Buffer, i);
+                            sample = s32 / 2147483648f;
+                        }
+                        else if (bytesPerSample == 1)
+                        {
+                            byte b = e.Buffer[i];
+                            sample = (b - 128) / 128f;
+                        }
+
+                        sampleList.Add(sample);
+                        peak = Math.Max(peak, Math.Abs(sample));
+                    }
+                    catch { /* Fehlerhafte Frames ignorieren */ }
+                }
+
+                // Silence Detection Logik
+                if (autoStopSilenceSeconds.HasValue)
+                {
+                    if (peak > silenceThreshold)
+                    {
+                        // Reset, sobald jemand spricht
+                        currentSilenceSeconds = 0.0;
+                    }
+                    else
+                    {
+                        // Berechne die Dauer dieses exakten Chunks in Sekunden und addiere sie
+                        double chunkDuration = (double) e.BytesRecorded / waveFormat.AverageBytesPerSecond;
+                        currentSilenceSeconds += chunkDuration;
+
+                        // Sobald die Stille-Dauer überschritten ist, triggern wir das Cancellation Token
+                        if (currentSilenceSeconds >= autoStopSilenceSeconds.Value && !this.recordingCts.IsCancellationRequested)
+                        {
+                            Logger.Log($"Silence of {autoStopSilenceSeconds}s detected. Stopping recording.");
+                            this.recordingCts.Cancel();
+                        }
+                    }
+                }
+            };
+
+            waveIn.RecordingStopped += (s, e) =>
+            {
+                string name = $"AutoRec_{DateTime.Now:yyyyMMdd_HHmmss}";
+                var audioObj = new AudioObj(sampleList.ToArray(), waveIn.WaveFormat.SampleRate, waveIn.WaveFormat.Channels, waveIn.WaveFormat.BitsPerSample, name);
+                tcs.TrySetResult(audioObj);
+            };
+
+            waveIn.StartRecording();
+            Logger.Log($"Auto-Recording started on device {deviceIndex} with format {waveFormat.SampleRate}Hz, {waveFormat.BitsPerSample}bit, {waveFormat.Channels}ch");
+
+            try
+            {
+                // Task blockiert hier, bis das Token ausgelöst wird (durch Stille, externes CT oder StopRecording)
+                await Task.Delay(Timeout.Infinite, linkedToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                try { waveIn.StopRecording(); } catch { }
+            }
+
+            // Auf das Finalisieren in RecordingStopped warten
+            var result = await tcs.Task.ConfigureAwait(false);
+
+            // Aufräumen und State zurücksetzen
+            this.recordingCts?.Dispose();
+            this.recordingCts = null;
+
+            return result;
+        }
+
+
+
         public bool StopRecording()
         {
             if (this.recordingCts == null)

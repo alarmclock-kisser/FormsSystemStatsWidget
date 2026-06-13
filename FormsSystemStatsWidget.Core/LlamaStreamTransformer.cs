@@ -941,7 +941,7 @@ namespace FormsSystemStatsWidget.Core
 
                                 // Prefix-Check für partiell eintreffende Tool-Calls (Chunk-übergreifend)
                                 bool isPartial = false;
-                                string[] triggers = { "<tool_call>", "<function=", "{\"command\"" };
+                                string[] triggers = ["<tool_call>", "<function=", "{\"command\""];
                                 foreach (var trigger in triggers)
                                 {
                                     for (int i = 1; i <= trigger.Length; i++)

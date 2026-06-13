@@ -58,7 +58,10 @@ public class DynamicGradientProgressBar : Control
             g.FillRectangle(bgBrush, this.ClientRectangle);
         }
 
-        if (this._maximum <= this._minimum || this._value <= this._minimum) return;
+        if (this._maximum <= this._minimum || this._value <= this._minimum)
+        {
+            return;
+        }
 
         // 2. Berechnen, wie breit die Füllung sein muss
         float percent = (this._value - this._minimum) / (float) (this._maximum - this._minimum);
@@ -74,15 +77,15 @@ public class DynamicGradientProgressBar : Control
                 ColorBlend blend = new();
 
                 // Deine Farbstufen (0% bis 100%)
-                blend.Colors = new Color[] {
+                blend.Colors = [
                     Color.FromArgb(50, 205, 50),   // 0%:   Grasgrün (LimeGreen)
                     Color.FromArgb(50, 205, 50),   // 20%:  Bleibt grasgrün
                     Color.FromArgb(255, 140, 0),  // 65%:  Gelb-Orange (DarkOrange)
                     Color.FromArgb(220, 20, 60)    // 100%: Signalrot (Crimson)
-                };
+                ];
 
                 // Die exakten Positionen im Verlauf (Werte von 0.0 bis 1.0)
-                blend.Positions = new float[] { 0.0f, 0.2f, 0.65f, 1.0f };
+                blend.Positions = [0.0f, 0.2f, 0.65f, 1.0f];
                 brush.InterpolationColors = blend;
 
                 // Nur den aktuell gefüllten Bereich mit dem Verlauf ausstanzen

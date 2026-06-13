@@ -1,4 +1,6 @@
 ﻿using FormsSystemStatsWidget.Core;
+using FormsSystemStatsWidget.Forms.Services;
+using Microsoft.VisualBasic;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -14,6 +16,8 @@ namespace FormsSystemStatsWidget.Forms
         private static partial Regex ArgsSplitRegex();
 
 
+        
+
 
         private async void rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged(object? sender, EventArgs e)
         {
@@ -23,6 +27,13 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
             menuItem.Enabled = false;
+
+            // Invoke if required
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new Action(() => this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged(sender, e)));
+                return;
+            }
 
             if (menuItem.Checked)
             {

@@ -19,7 +19,7 @@ namespace FormsSystemStatsWidget.Forms
         private const int WM_SYSKEYUP = 0x0105;
 
         private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-        private LowLevelKeyboardProc _proc;
+        private LowLevelKeyboardProc? _proc;
         private IntPtr _hookID = IntPtr.Zero;
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
@@ -50,11 +50,11 @@ namespace FormsSystemStatsWidget.Forms
         // Call this in your Form_Load or Constructor
         private void InitializeKeymapper()
         {
-            _proc = HookCallback;
-            _hookID = SetHook(_proc);
+            this._proc = this.HookCallback;
+            this._hookID = this.SetHook(this._proc);
 
             // Ensure hook is removed when application closes
-            this.FormClosing += (s, e) => UnhookWindowsHookEx(_hookID);
+            this.FormClosing += (s, e) => UnhookWindowsHookEx(this._hookID);
         }
 
         private IntPtr SetHook(LowLevelKeyboardProc proc)
@@ -67,34 +67,34 @@ namespace FormsSystemStatsWidget.Forms
         // --- 3. The Interactive Recording Logic ---
         private void toolStripMenuItem_remapAnyKey_Click(object sender, EventArgs e)
         {
-            if (_currentState == KeymapperState.Idle)
+            if (this._currentState == KeymapperState.Idle)
             {
                 // Step 1: Init recording mode
-                _currentState = KeymapperState.WaitingForTarget;
-                toolStripMenuItem_remapAnyKey.Text = "Press any key (target) ...";
-                _tempEntry = new KeyMappingEntry();
+                this._currentState = KeymapperState.WaitingForTarget;
+                this.toolStripMenuItem_remapAnyKey.Text = "Press any key (target) ...";
+                this._tempEntry = new KeyMappingEntry();
             }
-            else if (_currentState == KeymapperState.RecordingMapping)
+            else if (this._currentState == KeymapperState.RecordingMapping)
             {
                 // Step 2.1: User clicked again -> Finish recording and save
-                _currentState = KeymapperState.Idle;
-                toolStripMenuItem_remapAnyKey.Text = "Remap another key";
+                this._currentState = KeymapperState.Idle;
+                this.toolStripMenuItem_remapAnyKey.Text = "Remap another key";
 
-                if (_tempEntry != null && _recordedKeys.Count > 0)
+                if (this._tempEntry != null && this._recordedKeys.Count > 0)
                 {
-                    _tempEntry.MappedKeyValues = [.. _recordedKeys];
-                    _tempEntry.MappedKeyDownValues = [.. _recordedKeyDown];
-                    _tempEntry.MappedKeyTimings = _recordedTimings.Select(t => (TimeSpan?) t).ToArray();
-                    _tempEntry.Enabled = true;
+                    this._tempEntry.MappedKeyValues = [.. this._recordedKeys];
+                    this._tempEntry.MappedKeyDownValues = [.. this._recordedKeyDown];
+                    this._tempEntry.MappedKeyTimings = this._recordedTimings.Select(t => (TimeSpan?) t).ToArray();
+                    this._tempEntry.Enabled = true;
 
-                    Keymapper.MappedKeys.Add(_tempEntry);
+                    Keymapper.MappedKeys.Add(this._tempEntry);
                 }
 
                 // Cleanup session
-                _recordedKeys.Clear();
-                _recordedKeyDown.Clear();
-                _recordedTimings.Clear();
-                _tempEntry = null;
+                this._recordedKeys.Clear();
+                this._recordedKeyDown.Clear();
+                this._recordedTimings.Clear();
+                this._tempEntry = null;
             }
         }
 
@@ -107,31 +107,31 @@ namespace FormsSystemStatsWidget.Forms
                 Keys key = (Keys) vkCode;
                 bool isKeyDown = (wParam == (IntPtr) WM_KEYDOWN || wParam == (IntPtr) WM_SYSKEYDOWN);
 
-                switch (_currentState)
+                switch (this._currentState)
                 {
                     case KeymapperState.WaitingForTarget:
                         if (isKeyDown)
                         {
                             // 1.1: Grab the target key
-                            _tempEntry!.TargetKey = key;
-                            _currentState = KeymapperState.RecordingMapping;
+                            this._tempEntry!.TargetKey = key;
+                            this._currentState = KeymapperState.RecordingMapping;
 
                             // Using Invoke to safely update UI from the hook thread
                             this.Invoke(() =>
                             {
-                                toolStripMenuItem_remapAnyKey.Text = $"[{key}] captured. Type combo, then click here to save.";
+                                this.toolStripMenuItem_remapAnyKey.Text = $"[{key}] captured. Type combo, then click here to save.";
                             });
 
-                            _recordingStartTime = DateTime.Now;
+                            this._recordingStartTime = DateTime.Now;
                             return 1; // Block the target key from passing to the OS
                         }
                         break;
 
                     case KeymapperState.RecordingMapping:
                         // 2.0: Record the sequence (both Down and Up events)
-                        _recordedKeys.Add(key);
-                        _recordedKeyDown.Add(isKeyDown);
-                        _recordedTimings.Add(DateTime.Now - _recordingStartTime);
+                        this._recordedKeys.Add(key);
+                        this._recordedKeyDown.Add(isKeyDown);
+                        this._recordedTimings.Add(DateTime.Now - this._recordingStartTime);
                         return 1; // Block keys from OS while recording
 
                     case KeymapperState.Idle:
@@ -142,7 +142,7 @@ namespace FormsSystemStatsWidget.Forms
                             if (activeMapping != null)
                             {
                                 // Fire and forget the playback
-                                _ = ExecuteMappingAsync(activeMapping);
+                                _ = this.ExecuteMappingAsync(activeMapping);
                                 return 1; // Block the original keypress!
                             }
                         }
@@ -151,7 +151,7 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             // Let the keypress pass through if we didn't block it
-            return CallNextHookEx(_hookID, nCode, wParam, lParam);
+            return CallNextHookEx(this._hookID, nCode, wParam, lParam);
         }
 
         // --- 5. Playback Execution ---

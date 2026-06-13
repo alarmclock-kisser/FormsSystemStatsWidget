@@ -34,7 +34,10 @@ namespace FormsSystemStatsWidget.Core
         /// </summary>
         public static void AttachToProcess(Process llamaServerProcess)
         {
-            if (llamaServerProcess == null) return;
+            if (llamaServerProcess == null)
+            {
+                return;
+            }
 
             // WICHTIG: llama.cpp sendet fast alle Logs (auch Info) an StandardError!
             llamaServerProcess.ErrorDataReceived += (sender, e) =>
@@ -51,7 +54,10 @@ namespace FormsSystemStatsWidget.Core
 
         public static void ParseStdOutLine(string? line)
         {
-            if (string.IsNullOrWhiteSpace(line)) return;
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return;
+            }
 
             var match = TimingRegex.Match(line);
             if (match.Success && float.TryParse(match.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float tokensPerSecond))
