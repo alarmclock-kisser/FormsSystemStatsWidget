@@ -60,7 +60,7 @@ namespace FormsSystemStatsWidget.Core
         public static int UserDefinedTopK { get; set; }
         public static int UserDefinedReasoningBudget { get; set; }
 
-        private static readonly HttpClient _httpClient = new();
+        private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(600) };
 
         /// <summary>
         /// Checks llama-server reachability, reads model configuration,
@@ -70,7 +70,6 @@ namespace FormsSystemStatsWidget.Core
         {
             _lastStartError = string.Empty;
             _bridgeBaseUrl = $"http://localhost:{ollamaPort}";
-            _httpClient.Timeout = TimeSpan.FromSeconds(600);
             Logger.Log($"[LlamaBridge] Starting Bridge: llama-server ({llamacppPort}) -> Ollama ({ollamaPort})");
             Logger.Log($"[LlamaBridge] Configured Source API URL: '{apiUrl ?? "<null>"}'");
 
