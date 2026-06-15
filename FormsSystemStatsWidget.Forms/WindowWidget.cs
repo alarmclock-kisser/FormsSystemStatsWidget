@@ -272,6 +272,9 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_additionalArgs.Text = this._persistentSettings.AdditionalLoadArgs;
             this.toolStripTextBox_additionalArgs_KeyDown(this.toolStripTextBox_additionalArgs, new KeyEventArgs(Keys.Enter));
 
+            this.toolStripTextBox_modelsDirectory.Text = this._persistentSettings.GgufModelDirectory;
+            this.toolStripTextBox_modelsDirectory_KeyDown(this.toolStripTextBox_modelsDirectory, new KeyEventArgs(Keys.Enter));
+
             LlamaOllamaBridge.EnableFormattedLogging = this.toolStripMenuItem_visuallyFormatLog.Checked;
 
             // Load persisted Llama sampling parameters into UI and bridge
