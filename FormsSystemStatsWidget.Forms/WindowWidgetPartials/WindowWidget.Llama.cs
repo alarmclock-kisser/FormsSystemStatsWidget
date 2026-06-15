@@ -149,15 +149,15 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     LlamaCppModelLoader.GgufModelsDirectory = Path.GetFullPath(path);
 
-                    string[] modelIds = LlamaCppModelLoader.GetModelFilePaths().Select(path => Path.GetFileName(path) ?? "").ToArray();
+                    string[] modelIds = LlamaCppModelLoader.GetModelFilePaths().Select(path => Path.GetFileNameWithoutExtension(path) ?? "").ToArray();
                     this.toolStripComboBox_ggufModels.Items.Clear();
                     this.toolStripComboBox_ggufModels.Items.AddRange(modelIds);
                 }
-            }
-            else
-            {
-                _ = MessageBox.Show(this, "The specified directory does not exist. Please enter a valid path.", "Invalid Directory", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_modelsDirectory.Text = LlamaCppModelLoader.GgufModelsDirectory;
+                else
+                {
+                    _ = MessageBox.Show(this, "The specified directory does not exist. Please enter a valid path.", "Invalid Directory", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    this.toolStripTextBox_modelsDirectory.Text = LlamaCppModelLoader.GgufModelsDirectory;
+                }
             }
 
             // Add to persistent settings
@@ -169,9 +169,9 @@ namespace FormsSystemStatsWidget.Forms
         // Load llama-server.exe GGUF model
         private void toolStripMenuItem_loadLlamaCppServer_Click(object? sender, EventArgs e)
         {
-            string? selectedModel = this.toolStripComboBox_ggufModels.SelectedItem as string;
+            string? selectedModel = this.toolStripComboBox_ggufModels.SelectedItem as string ?? this.toolStripComboBox_ggufModels.Text.Trim();
             this.ContextMenuStrip?.Close();
-            if (selectedModel == null)
+            if (string.IsNullOrEmpty(selectedModel))
             {
                 _ = MessageBox.Show(this, "No model selected. Please select a model from the dropdown list.", "No Model Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
@@ -274,6 +274,14 @@ namespace FormsSystemStatsWidget.Forms
                 _ = sb.Append(additionalArgs + " ");
             }
 
+            // Add non-load args for inference (tempetrature etc.) as comment in BAT file
+            string inferenceParams = $":: temperature={LlamaOllamaBridge.UserDefinedTemperature.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
+            inferenceParams += $":: repetition_penalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
+            inferenceParams += $":: top_p={topP.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
+            inferenceParams += $":: min_p={minP.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
+            inferenceParams += $":: top_k={topK.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
+            inferenceParams += $":: reasoning_budget={reasoningBudget ?? 0} " + Environment.NewLine;
+
             // Generate the correct multiline format with the Windows line-continuation character (^)
             string command = sb.ToString().Trim();
             command = ArgsSplitRegex().Replace(command, " ^" + Environment.NewLine + " ");
@@ -299,8 +307,8 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     try
                     {
-                        // Write the header, the wrapped command, and the final "pause"
-                        File.WriteAllText(dlg.FileName, $"@echo off{Environment.NewLine}title llama-server: {Path.GetFileNameWithoutExtension(selectedModel)}{Environment.NewLine}{command}{Environment.NewLine}{Environment.NewLine}pause");
+                        // Write the header, the wrapped command + inference params, and the final "pause"
+                        File.WriteAllText(dlg.FileName, $"@echo off{Environment.NewLine}title llama-server: {Path.GetFileNameWithoutExtension(selectedModel)}{Environment.NewLine}{command}{Environment.NewLine + Environment.NewLine}{inferenceParams}{Environment.NewLine}pause");
                         Logger.Log($" -- Saved batch file for loading model: {dlg.FileName} -- ");
                     }
                     catch (Exception ex)
@@ -314,7 +322,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 // Clear logs
                 this._debugConsoleForm?.ClearLogs();
-                Logger.Clear();
+                // Logger.Clear();
 
                 this.StartLlamaServerProcess(sb.ToString().Trim());
             }
@@ -334,6 +342,18 @@ namespace FormsSystemStatsWidget.Forms
 
             try
             {
+                // Read comment lines from the batch file to extract inference parameters and update the LlamaOllamaBridge properties accordingly (so they are applied when the user starts a new chat after loading the model with the BAT file)
+                string[] lines = File.ReadAllLines(batFilePath);
+                string[] inferenceParamsLines = lines.Where(line => line.TrimStart().StartsWith("::")).ToArray();
+                LlamaOllamaBridge.UserDefinedTemperature = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("temperature=")).Select(param => param.Substring("temperature=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float temp) ? temp : 0.75f).FirstOrDefault();
+                LlamaOllamaBridge.UserDefinedRepetitionPenalty = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("repetition_penalty=")).Select(param => param.Substring("repetition_penalty=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float penalty) ? penalty : 1.1f).FirstOrDefault();
+                LlamaOllamaBridge.UserDefinedTopP = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("top_p=")).Select(param => param.Substring("top_p=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float topP) ? topP : 0.9f).FirstOrDefault();
+                LlamaOllamaBridge.UserDefinedMinP = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("min_p=")).Select(param => param.Substring("min_p=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float minP) ? minP : 0.0f).FirstOrDefault();
+                LlamaOllamaBridge.UserDefinedTopK = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("top_k=")).Select(param => param.Substring("top_k=".Length)).Select(value => int.TryParse(value, out int topK) ? topK : 40).FirstOrDefault();
+                LlamaOllamaBridge.UserDefinedReasoningBudget = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("reasoning_budget=")).Select(param => param.Substring("reasoning_budget=".Length)).Select(value => int.TryParse(value, out int reasoningBudget) ? reasoningBudget : 2048).FirstOrDefault();
+
+                Logger.Log($"Loaded inference parameters from batch file: Temperature={LlamaOllamaBridge.UserDefinedTemperature}, RepetitionPenalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty}, TopP={LlamaOllamaBridge.UserDefinedTopP}, MinP={LlamaOllamaBridge.UserDefinedMinP}, TopK={LlamaOllamaBridge.UserDefinedTopK}, ReasoningBudget={LlamaOllamaBridge.UserDefinedReasoningBudget}");
+
                 _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
                     FileName = "cmd.exe",

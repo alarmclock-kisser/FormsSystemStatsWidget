@@ -68,6 +68,7 @@ namespace FormsSystemStatsWidget.Forms
         public int LlamaCppServerPort { get; set; } = 8080;
         public int OllamaPort { get; set; } = 11434;
         public string AdditionalLoadArgs { get; set; } = "--mlock -t 4 -tb 4";
+        public Point WidgetPosition { get; set; } = new(0, 0);
     }
 
     internal static class WidgetPersistentSettingsStore

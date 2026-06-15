@@ -89,6 +89,47 @@ namespace FormsSystemStatsWidget.Forms
             this.InitializeGpuSelection();
             this.InitializeWidgetMouseHandlers();
 
+            // Restore window position from persistent settings + sanity check to ensure it's not off-screen
+            if (this._persistentSettings.WidgetPosition != Point.Empty)
+            {
+                Rectangle screenBounds = Screen.FromPoint(this._persistentSettings.WidgetPosition).Bounds;
+                Size widgetSize = this.Size;
+                Point adjustedPosition = this._persistentSettings.WidgetPosition;
+                if (adjustedPosition.X < screenBounds.Left)
+                {
+                    adjustedPosition.X = screenBounds.Left;
+                }
+                else if (adjustedPosition.X + widgetSize.Width > screenBounds.Right)
+                {
+                    adjustedPosition.X = screenBounds.Right - widgetSize.Width;
+                }
+                if (adjustedPosition.Y < screenBounds.Top)
+                {
+                    adjustedPosition.Y = screenBounds.Top;
+                }
+                else if (adjustedPosition.Y + widgetSize.Height > screenBounds.Bottom)
+                {
+                    adjustedPosition.Y = screenBounds.Bottom - widgetSize.Height;
+                }
+                this.StartPosition = FormStartPosition.Manual;
+                this.Location = adjustedPosition;
+            }
+
+            // Hook event for when Form is moved, to update the position in persistent settings
+            this.Move += (sender, e) =>
+            {
+                if (!this._explicitWidgetCloseRequested)
+                {
+                    this._persistentSettings.WidgetPosition = this.Location;
+                }
+            };
+
+            // Save actually when HandleDestroyed
+            this.FormClosing += (sender, e) =>
+            {
+                this.SavePersistentSettings();
+            };
+
             try { TrafficStats.Init(); }
             catch { }
 
@@ -972,7 +1013,7 @@ namespace FormsSystemStatsWidget.Forms
         private void contextMenuStrip_widget_Opening(object sender, System.ComponentModel.CancelEventArgs e)
         {
             // Refresh Models
-            string[] modelIds = LlamaCppModelLoader.GetModelFilePaths().Select(path => Path.GetFileName(path) ?? "").ToArray();
+            string[] modelIds = LlamaCppModelLoader.GetModelFilePaths().Select(path => Path.GetFileNameWithoutExtension(path) ?? "").ToArray();
             this.toolStripComboBox_ggufModels.Items.Clear();
             this.toolStripComboBox_ggufModels.Items.AddRange(modelIds);
 
