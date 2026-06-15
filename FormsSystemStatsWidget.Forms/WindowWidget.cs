@@ -216,7 +216,6 @@ namespace FormsSystemStatsWidget.Forms
         {
             LlamaOllamaBridge.UserDefinedTemperature = double.TryParse(this.toolStripTextBox_temperature.Text, out double temperature) ? temperature : 0.3;
             LlamaOllamaBridge.UserDefinedRepetitionPenalty = double.TryParse(this.toolStripTextBox_repetationPenalty.Text, out double repetitionPenalty) ? repetitionPenalty : 1.1;
-            LlamaOllamaBridge.UserDefinedThinkingBudget = int.TryParse(this.toolStripTextBox_thinkingBudget.Text, out int thinkingBudget) ? thinkingBudget : 4096;
             LlamaOllamaBridge.UserDefinedTopP = double.TryParse(this.toolStripTextBox_topP.Text, out double topP) ? topP : 0.9;
             LlamaOllamaBridge.UserDefinedMinP = double.TryParse(this.toolStripTextBox_minP.Text, out double minP) ? minP : 0.1;
             LlamaOllamaBridge.UserDefinedTopK = int.TryParse(this.toolStripTextBox_topK.Text, out int topK) ? topK : 40;
@@ -268,7 +267,7 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_toolCalls.Checked = this._persistentSettings.LlamaServerToolCalling;
             this.toolStripTextBox_temperature.Text = this._persistentSettings.Temperature.ToString("0.0000", CultureInfo.InvariantCulture);
             this.toolStripTextBox_repetationPenalty.Text = this._persistentSettings.RepetitionPenalty.ToString("0.0000", CultureInfo.InvariantCulture);
-            this.toolStripTextBox_thinkingBudget.Text = this._persistentSettings.ThinkingBudget.ToString();
+            this.toolStripMenuItem_thinking.Checked= this._persistentSettings.Thinking;
             this.toolStripTextBox_reasoningBudget.Text = this._persistentSettings.ReasoningBudget.ToString();
             this.toolStripTextBox_additionalArgs.Text = this._persistentSettings.AdditionalLoadArgs;
             this.toolStripTextBox_additionalArgs_KeyDown(this.toolStripTextBox_additionalArgs, new KeyEventArgs(Keys.Enter));
@@ -285,7 +284,6 @@ namespace FormsSystemStatsWidget.Forms
                 // Apply to bridge defaults
                 LlamaOllamaBridge.UserDefinedTemperature = this._persistentSettings.Temperature;
                 LlamaOllamaBridge.UserDefinedRepetitionPenalty = this._persistentSettings.RepetitionPenalty;
-                LlamaOllamaBridge.UserDefinedThinkingBudget = this._persistentSettings.ThinkingBudget;
                 LlamaOllamaBridge.UserDefinedReasoningBudget = this._persistentSettings.ReasoningBudget;
                 LlamaOllamaBridge.UserDefinedTopP = this._persistentSettings.UserTopP;
                 LlamaOllamaBridge.UserDefinedMinP = this._persistentSettings.UserMinP;

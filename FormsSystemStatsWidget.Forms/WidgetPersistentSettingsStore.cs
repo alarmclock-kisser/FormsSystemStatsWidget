@@ -58,7 +58,7 @@ namespace FormsSystemStatsWidget.Forms
         public bool LlamaServerToolCalling { get; set; } = false;
         public float Temperature { get; set; } = 0.7f;
         public float RepetitionPenalty { get; set; } = 1.1f;
-        public int ThinkingBudget { get; set; } = 0;
+        public bool Thinking { get; set; } = true;
         public int ReasoningBudget { get; set; } = 0;
         public double UserTopP { get; set; } = 0.9;
         public double UserMinP { get; set; } = 0.0;

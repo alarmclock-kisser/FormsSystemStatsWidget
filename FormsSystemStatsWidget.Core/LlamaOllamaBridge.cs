@@ -54,7 +54,6 @@ namespace FormsSystemStatsWidget.Core
         // Options / Settings from UI set
         public static double UserDefinedTemperature { get; set; } = 0.7;
         public static double UserDefinedRepetitionPenalty { get; set; } = 1.1;
-        public static int UserDefinedThinkingBudget { get; set; } = 4096;
         public static double UserDefinedTopP { get; set; }
         public static double UserDefinedMinP { get; set; }
         public static int UserDefinedTopK { get; set; }
@@ -883,7 +882,10 @@ namespace FormsSystemStatsWidget.Core
         private static partial Regex ModelSizeClassicRegex();
         [GeneratedRegex(@"(?i)\b(?:E|A)(\d+)B\b", RegexOptions.None, "de-DE")]
         private static partial Regex ModelSizeModernRegex();
-        public static void RefreshModels() => Logger.Log("[LlamaBridge] RefreshModels called - currently no caching implemented, so this is a placeholder for potential future functionality.");
+        public static void RefreshModels()
+        {
+            LlamaCppModelLoader.GetModelFilePaths();
+        }
     }
 
 

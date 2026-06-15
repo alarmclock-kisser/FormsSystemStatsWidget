@@ -139,13 +139,16 @@ namespace FormsSystemStatsWidget.Forms
             this.SavePersistentSettings();
         }
 
-        private void toolStripTextBox_modelsDirectory_Leave(object sender, EventArgs e)
+        private void toolStripTextBox_modelsDirectory_KeyDown(object sender, KeyEventArgs e)
         {
-            // Validate the path and update the setting if it's a valid directory
-            string path = this.toolStripTextBox_modelsDirectory.Text.Trim();
-            if (Directory.Exists(path))
+            if (e.KeyCode == Keys.Enter)
             {
-                LlamaCppModelLoader.GgufModelsDirectory = Path.GetFullPath(path);
+                // Validate the path and update the setting if it's a valid directory
+                string path = this.toolStripTextBox_modelsDirectory.Text.Trim();
+                if (Directory.Exists(path))
+                {
+                    LlamaCppModelLoader.GgufModelsDirectory = Path.GetFullPath(path);
+                }
             }
             else
             {
@@ -194,7 +197,7 @@ namespace FormsSystemStatsWidget.Forms
             bool noWarmup = this.toolStripMenuItem_noWarmup.Checked;
             bool kvOffload = this.KVoffload_ToolStripMenuItem.Checked;
             bool fitMode = this.toolStripMenuItem_fitMode.Checked;
-            int? thinkingBudget = this.toolStripTextBox_thinkingBudget.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_thinkingBudget.Text.Trim(), out int parsedThinkingBudget) ? parsedThinkingBudget : null;
+            bool thinking = this.toolStripMenuItem_thinking.Checked;
             int? reasoningBudget = this.toolStripTextBox_reasoningBudget.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_reasoningBudget.Text.Trim(), out int parsedReasoningBudget) ? parsedReasoningBudget : null;
             float topP = this.toolStripTextBox_topP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_topP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedTopP) ? parsedTopP : 0.9f;
             float minP = this.toolStripTextBox_minP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_minP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedMinP) ? parsedMinP : 0.0f;
@@ -245,11 +248,11 @@ namespace FormsSystemStatsWidget.Forms
                 _ = sb.Append("--no-kv-offload ");
             }
             _ = sb.Append("-fit " + (fitMode ? "on " : "off "));
-            if (thinkingBudget.HasValue)
+            if (thinking == false)
             {
-                _ = sb.Append($"-tb {thinkingBudget.Value} ");
+                _ = sb.Append("--reasoning off ");
             }
-            if (reasoningBudget.HasValue)
+            if (reasoningBudget.HasValue && thinking)
             {
                 _ = sb.Append($"--reasoning-budget {reasoningBudget.Value} ");
             }
@@ -305,6 +308,10 @@ namespace FormsSystemStatsWidget.Forms
 
             try
             {
+                // Clear logs
+                this._debugConsoleForm?.ClearLogs();
+                Logger.Clear();
+
                 this.StartLlamaServerProcess(sb.ToString().Trim());
             }
             catch (Exception ex)
@@ -790,33 +797,6 @@ namespace FormsSystemStatsWidget.Forms
             e.Handled = true;
         }
 
-        private void toolStripTextBox_thinkingBudget_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.KeyCode != Keys.Enter)
-            {
-                return;
-            }
-
-            string entered = this.toolStripTextBox_thinkingBudget.Text.Trim();
-            if (int.TryParse(entered, out int thinkingBudget) && thinkingBudget >= 0)
-            {
-                this.toolStripTextBox_thinkingBudget.Text = thinkingBudget.ToString();
-                LlamaOllamaBridge.UserDefinedThinkingBudget = thinkingBudget;
-            }
-            else
-            {
-                _ = MessageBox.Show(this, "Please enter a valid non-negative integer for thinking budget (tokens).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_thinkingBudget.Text = "0";
-            }
-
-            // Save persistant settings
-            this._persistentSettings.ThinkingBudget = thinkingBudget;
-            this.SavePersistentSettings();
-
-            e.SuppressKeyPress = true;
-            e.Handled = true;
-        }
-
         private void toolStripTextBox_reasoningBudget_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.KeyCode != Keys.Enter)
@@ -1095,7 +1075,12 @@ namespace FormsSystemStatsWidget.Forms
             e.Handled = true;
         }
 
-       
+
+        private void toolStripMenuItem_thinking_CheckedChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.Thinking = this.toolStripMenuItem_thinking.Checked;
+            this.SavePersistentSettings();
+        }
 
         private void toolStripTextBox_percentageColor_TextChanged(object sender, EventArgs e)
         {
