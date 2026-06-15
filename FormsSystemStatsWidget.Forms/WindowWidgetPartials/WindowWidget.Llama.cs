@@ -148,6 +148,10 @@ namespace FormsSystemStatsWidget.Forms
                 if (Directory.Exists(path))
                 {
                     LlamaCppModelLoader.GgufModelsDirectory = Path.GetFullPath(path);
+
+                    string[] modelIds = LlamaCppModelLoader.GetModelFilePaths().Select(path => Path.GetFileName(path) ?? "").ToArray();
+                    this.toolStripComboBox_ggufModels.Items.Clear();
+                    this.toolStripComboBox_ggufModels.Items.AddRange(modelIds);
                 }
             }
             else

@@ -882,9 +882,9 @@ namespace FormsSystemStatsWidget.Core
         private static partial Regex ModelSizeClassicRegex();
         [GeneratedRegex(@"(?i)\b(?:E|A)(\d+)B\b", RegexOptions.None, "de-DE")]
         private static partial Regex ModelSizeModernRegex();
-        public static void RefreshModels()
+        public static string[] RefreshModels()
         {
-            LlamaCppModelLoader.GetModelFilePaths();
+            return LlamaCppModelLoader.GetModelFilePaths();
         }
     }
 

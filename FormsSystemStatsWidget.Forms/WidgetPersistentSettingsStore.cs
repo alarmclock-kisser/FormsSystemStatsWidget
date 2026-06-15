@@ -46,28 +46,28 @@ namespace FormsSystemStatsWidget.Forms
 
 
         // Persisted Llama sampling parameters (used for model load defaults / UI)
-        public string GgufModelDirectory { get; set; } = "";
-        public int ContextSize { get; set; } = 2048;
+        public string GgufModelDirectory { get; set; } = @"D:\Models\GGUF\Others";
+        public int ContextSize { get; set; } = 4096;
         public int BatchSize { get; set; } = 512;
         public int GpuLayersCount { get; set; } = 0;
-        public int NumberParallelSlots { get; set; }
+        public int NumberParallelSlots { get; set; } = 1;
         public bool NoWarmup { get; set; } = false;
-        public bool FitMode { get; set; } = false;
+        public bool FitMode { get; set; } = true;
         public bool KvOffload { get; set; } = false;
         public string KvCacheType { get; set; } = "f16";
         public bool LlamaServerToolCalling { get; set; } = false;
         public float Temperature { get; set; } = 0.7f;
         public float RepetitionPenalty { get; set; } = 1.1f;
         public bool Thinking { get; set; } = true;
-        public int ReasoningBudget { get; set; } = 0;
+        public int ReasoningBudget { get; set; } = 2048;
         public double UserTopP { get; set; } = 0.9;
         public double UserMinP { get; set; } = 0.0;
         public int UserTopK { get; set; } = 40;
-        public bool HideCmd { get; internal set; }
+        public bool HideCmd { get; set; } = true;
         public string OpenAIApiUrl { get; set; } = "";
-        public int LlamaCppServerPort { get; set; }
-        public int OllamaPort { get; set; }
-        public string AdditionalLoadArgs { get; set; } = "--mlock";
+        public int LlamaCppServerPort { get; set; } = 8080;
+        public int OllamaPort { get; set; } = 11434;
+        public string AdditionalLoadArgs { get; set; } = "--mlock -t 4 -tb 4";
     }
 
     internal static class WidgetPersistentSettingsStore

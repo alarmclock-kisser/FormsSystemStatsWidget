@@ -969,8 +969,9 @@ namespace FormsSystemStatsWidget.Forms
         private void contextMenuStrip_widget_Opening(object sender, System.ComponentModel.CancelEventArgs e)
         {
             // Refresh Models
-            LlamaOllamaBridge.RefreshModels();
-
+            string[] modelIds = LlamaCppModelLoader.GetModelFilePaths().Select(path => Path.GetFileName(path) ?? "").ToArray();
+            this.toolStripComboBox_ggufModels.Items.Clear();
+            this.toolStripComboBox_ggufModels.Items.AddRange(modelIds);
 
             // Get llama-server.exe Processes running
             var processes = WidgetStatics.GetLlamaServerProcesses();
