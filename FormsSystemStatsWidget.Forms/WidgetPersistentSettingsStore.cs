@@ -67,6 +67,7 @@ namespace FormsSystemStatsWidget.Forms
         public string OpenAIApiUrl { get; set; } = "";
         public int LlamaCppServerPort { get; set; }
         public int OllamaPort { get; set; }
+        public string AdditionalLoadArgs { get; set; } = "--mlock";
     }
 
     internal static class WidgetPersistentSettingsStore

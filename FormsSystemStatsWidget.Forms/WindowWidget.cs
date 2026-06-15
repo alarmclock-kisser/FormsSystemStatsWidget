@@ -270,6 +270,8 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_repetationPenalty.Text = this._persistentSettings.RepetitionPenalty.ToString("0.0000", CultureInfo.InvariantCulture);
             this.toolStripTextBox_thinkingBudget.Text = this._persistentSettings.ThinkingBudget.ToString();
             this.toolStripTextBox_reasoningBudget.Text = this._persistentSettings.ReasoningBudget.ToString();
+            this.toolStripTextBox_additionalArgs.Text = this._persistentSettings.AdditionalLoadArgs;
+            this.toolStripTextBox_additionalArgs_KeyDown(this.toolStripTextBox_additionalArgs, new KeyEventArgs(Keys.Enter));
 
             LlamaOllamaBridge.EnableFormattedLogging = this.toolStripMenuItem_visuallyFormatLog.Checked;
 
@@ -1161,6 +1163,7 @@ namespace FormsSystemStatsWidget.Forms
         [GeneratedRegex(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled, "de-DE")]
         private static partial Regex MyRegex();
 
+        
     }
 }
 

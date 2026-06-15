@@ -201,6 +201,7 @@ namespace FormsSystemStatsWidget.Forms
             int topK = this.toolStripTextBox_topK.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_topK.Text.Trim(), out int parsedTopK) ? parsedTopK : 40;
             string kvCacheQuant = (this.toolStripComboBox_cacheType.SelectedItem as string ?? "f16").ToLowerInvariant();
             bool toolCalling = this.toolStripMenuItem_toolCalls.Checked;
+            string additionalArgs = this.toolStripTextBox_additionalArgs.Text.Trim();
 
             // Persist the chosen values so subsequent model loads use them
             this._persistentSettings.UserTopP = topP;
@@ -260,6 +261,10 @@ namespace FormsSystemStatsWidget.Forms
             {
                 _ = sb.Append($"--cache-type-k {kvCacheQuant} ");
                 _ = sb.Append($"--cache-type-v {kvCacheQuant} ");
+            }
+            if (!string.IsNullOrEmpty(additionalArgs))
+            {
+                _ = sb.Append(additionalArgs + " ");
             }
 
             // Generate the correct multiline format with the Windows line-continuation character (^)
@@ -1208,8 +1213,24 @@ namespace FormsSystemStatsWidget.Forms
             e.Handled = true;
         }
 
+        private void toolStripTextBox_additionalArgs_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
 
+            // With regex count args
+            string entered = this.toolStripTextBox_additionalArgs.Text.Trim();
+            Regex argSplitRegex = LoadArgsRegex();
+            MatchCollection matches = argSplitRegex.Matches(entered);
+            this.toolStripMenuItem_additionalArgs.Text = $"Additional Load Args ({matches.Count})";
 
+            this._persistentSettings.AdditionalLoadArgs = this.toolStripTextBox_additionalArgs.Text;
+            this.SavePersistentSettings();
+        }
 
+        [GeneratedRegex(@"[\""].+?[\""]|[^ ]+")]
+        private static partial Regex LoadArgsRegex();
     }
 }
