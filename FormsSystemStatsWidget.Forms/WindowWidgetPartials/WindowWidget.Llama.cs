@@ -1230,7 +1230,7 @@ namespace FormsSystemStatsWidget.Forms
             this.SavePersistentSettings();
         }
 
-        [GeneratedRegex(@"[\""].+?[\""]|[^ ]+")]
+        [GeneratedRegex(@"--?[a-zA-Z][\w-]*(?:\s+(?:"".*?""|'.*?'|(?!--?[a-zA-Z])[^\s]+))*")]
         private static partial Regex LoadArgsRegex();
     }
 }
