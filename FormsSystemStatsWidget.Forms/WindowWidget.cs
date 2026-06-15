@@ -260,6 +260,7 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_modelsDirectory.Text = this._persistentSettings.GgufModelDirectory;
             this.toolStripTextBox_contextSize.Text = this._persistentSettings.ContextSize.ToString();
             this.toolStripTextBox_batchSize.Text = this._persistentSettings.BatchSize.ToString();
+            this.toolStripTextBox_gpuLayersCount.Text = this._persistentSettings.GpuLayersCount.ToString();
             this.toolStripMenuItem_noWarmup.Checked = this._persistentSettings.NoWarmup;
             this.toolStripMenuItem_fitMode.Checked = this._persistentSettings.FitMode;
             this.KVoffload_ToolStripMenuItem.Checked = this._persistentSettings.KvOffload;
