@@ -27,16 +27,16 @@ namespace FormsSystemStatsWidget.Forms
 
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern int SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+        internal static extern int SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern int GetWindowLong(IntPtr hwnd, int nIndex);
+        internal static extern int GetWindowLong(IntPtr hwnd, int nIndex);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern int SetWindowLong(IntPtr hwnd, int nIndex, int dwNewLong);
+        internal static extern int SetWindowLong(IntPtr hwnd, int nIndex, int dwNewLong);
 
-        private const int GWL_EXSTYLE = -20;
-        private const int WS_EX_LAYERED = 0x80000;
+        internal const int GWL_EXSTYLE = -20;
+        internal const int WS_EX_LAYERED = 0x80000;
 
         // Audio recording
         internal static readonly AudioHandling Audios = new();
@@ -74,8 +74,7 @@ namespace FormsSystemStatsWidget.Forms
         private const int WmSysCommand = 0x0112;
         private const int ScClose = 0xF060;
 
-
-
+        internal static float CustomOpacity { get; private set; }
 
         public WindowWidget()
         {
@@ -239,6 +238,7 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_interval.Text = this._updateIntervalMs.ToString(CultureInfo.InvariantCulture);
 
             this.toolStripTextBox_diagramColor.Text = this._persistentSettings.DiagramColorHex;
+            this.toolStripTextBox_percentageColor.Text = this._persistentSettings.PerCorePercentColor;
 
             this.showUsageToolStripMenuItem.Checked = this._persistentSettings.ShowPerCorePercent;
             this.toolStripTextBox_percentageColor.Enabled = this.showUsageToolStripMenuItem.Checked;
@@ -253,6 +253,22 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_visuallyFormatLog.Checked = this._persistentSettings.DebugConsoleFormattedLog;
             this.toolStripMenuItem_includeRawChunksLog.Checked = this._persistentSettings.DebugConsoleIncludeRawChunks;
             this.toolStripMenuItem_logGenerationSpeed.Checked = this._persistentSettings.DebugConsoleLogGenerationSpeed;
+            this.toolStripMenuItem_hideCmd.Checked = this._persistentSettings.HideCmd;
+
+            this.toolStripTextBox_opacity.Text = this._persistentSettings.WindowOpacity.ToString() + "%";
+            this.toolStripTextBox_opacity_KeyDown(this.toolStripTextBox_opacity, new KeyEventArgs(Keys.Enter));
+            this.toolStripTextBox_modelsDirectory.Text = this._persistentSettings.GgufModelDirectory;
+            this.toolStripTextBox_contextSize.Text = this._persistentSettings.ContextSize.ToString();
+            this.toolStripTextBox_batchSize.Text = this._persistentSettings.BatchSize.ToString();
+            this.toolStripMenuItem_noWarmup.Checked = this._persistentSettings.NoWarmup;
+            this.toolStripMenuItem_fitMode.Checked = this._persistentSettings.FitMode;
+            this.KVoffload_ToolStripMenuItem.Checked = this._persistentSettings.KvOffload;
+            this.toolStripComboBox_cacheType.Text = this._persistentSettings.KvCacheType;
+            this.toolStripMenuItem_toolCalls.Checked = this._persistentSettings.LlamaServerToolCalling;
+            this.toolStripTextBox_temperature.Text = this._persistentSettings.Temperature.ToString("0.0000", CultureInfo.InvariantCulture);
+            this.toolStripTextBox_repetationPenalty.Text = this._persistentSettings.RepetitionPenalty.ToString("0.0000", CultureInfo.InvariantCulture);
+            this.toolStripTextBox_thinkingBudget.Text = this._persistentSettings.ThinkingBudget.ToString();
+            this.toolStripTextBox_reasoningBudget.Text = this._persistentSettings.ReasoningBudget.ToString();
 
             LlamaOllamaBridge.EnableFormattedLogging = this.toolStripMenuItem_visuallyFormatLog.Checked;
 
@@ -264,6 +280,10 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripTextBox_topK.Text = this._persistentSettings.UserTopK.ToString(CultureInfo.InvariantCulture);
 
                 // Apply to bridge defaults
+                LlamaOllamaBridge.UserDefinedTemperature = this._persistentSettings.Temperature;
+                LlamaOllamaBridge.UserDefinedRepetitionPenalty = this._persistentSettings.RepetitionPenalty;
+                LlamaOllamaBridge.UserDefinedThinkingBudget = this._persistentSettings.ThinkingBudget;
+                LlamaOllamaBridge.UserDefinedReasoningBudget = this._persistentSettings.ReasoningBudget;
                 LlamaOllamaBridge.UserDefinedTopP = this._persistentSettings.UserTopP;
                 LlamaOllamaBridge.UserDefinedMinP = this._persistentSettings.UserMinP;
                 LlamaOllamaBridge.UserDefinedTopK = this._persistentSettings.UserTopK;
@@ -420,6 +440,7 @@ namespace FormsSystemStatsWidget.Forms
         private void ConfigureContextMenuAutoCloseBehavior()
         {
             this.toolStripMenuItem_loadLlamaCppServer.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_execModelLoadBat.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.openDebugConsoleToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
         }
 
@@ -808,21 +829,6 @@ namespace FormsSystemStatsWidget.Forms
             }
         }
 
-        private void toolStripTextBox_percentageColor_TextChanged(object sender, EventArgs e)
-        {
-            string hex = this.toolStripTextBox_percentageColor.Text.Replace("#", "");
-            if (hex.Length == 6 && int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out int rgb))
-            {
-                // rgb is RRGGBB; construct an opaque Color (add alpha byte)
-                this._percentageColor = Color.FromArgb(unchecked((int) 0xFF000000 | rgb));
-            }
-            else
-            {
-                this._percentageColor = null;
-            }
-
-        }
-
         private void toolStripTextBox_percentageColor_EnabledChanged(object sender, EventArgs e)
         {
             // Do not clear the stored color when disabling; keep the selected color so it can be re-enabled.
@@ -1060,6 +1066,15 @@ namespace FormsSystemStatsWidget.Forms
             int initialStyle = GetWindowLong(this.Handle, GWL_EXSTYLE);
             _ = SetWindowLong(this.Handle, GWL_EXSTYLE, initialStyle | WS_EX_LAYERED);
             _ = SetLayeredWindowAttributes(this.Handle, 0, (byte) (opacity * 255), 0x00000002);
+            if (this._debugConsoleForm != null)
+            {
+                this._debugConsoleForm.ApplyOpacity(opacity);
+            }
+            CustomOpacity = opacity;
+
+            // Save persistent settings
+            this._persistentSettings.WindowOpacity = (int) (opacity * 100);
+            this.SavePersistentSettings();
         }
 
         private void toolStripMenuItem_configureVoiceInputHotkey_Click(object sender, EventArgs e)
@@ -1136,10 +1151,15 @@ namespace FormsSystemStatsWidget.Forms
             // Für diesen Scope reicht es, wenn wir das State-Update durch das Event-Handling abdecken.
         }
 
+
+
+
+
         [GeneratedRegex(@"\((.*?)\)")]
         private static partial Regex SetVoiceInputHotkeyRegex();
         [GeneratedRegex(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled, "de-DE")]
         private static partial Regex MyRegex();
+
     }
 }
 

@@ -152,6 +152,10 @@ namespace FormsSystemStatsWidget.Forms
                 _ = MessageBox.Show(this, "The specified directory does not exist. Please enter a valid path.", "Invalid Directory", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_modelsDirectory.Text = LlamaCppModelLoader.GgufModelsDirectory;
             }
+
+            // Add to persistent settings
+            this._persistentSettings.GgufModelDirectory = LlamaCppModelLoader.GgufModelsDirectory;
+            this.SavePersistentSettings();
         }
 
 
@@ -195,6 +199,8 @@ namespace FormsSystemStatsWidget.Forms
             float topP = this.toolStripTextBox_topP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_topP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedTopP) ? parsedTopP : 0.9f;
             float minP = this.toolStripTextBox_minP.Text.Trim() != "" && float.TryParse(this.toolStripTextBox_minP.Text.Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float parsedMinP) ? parsedMinP : 0.0f;
             int topK = this.toolStripTextBox_topK.Text.Trim() != "" && int.TryParse(this.toolStripTextBox_topK.Text.Trim(), out int parsedTopK) ? parsedTopK : 40;
+            string kvCacheQuant = (this.toolStripComboBox_cacheType.SelectedItem as string ?? "f16").ToLowerInvariant();
+            bool toolCalling = this.toolStripMenuItem_toolCalls.Checked;
 
             // Persist the chosen values so subsequent model loads use them
             this._persistentSettings.UserTopP = topP;
@@ -212,6 +218,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             _ = sb.Append($"-c {contextSize} ");
             _ = sb.Append($"-b {batchSize} ");
+            _ = sb.Append($"-ub {(int)(batchSize / 2)} ");
             if (splitMode != "none")
             {
                 _ = sb.Append($"-sm {splitMode} ");
@@ -226,6 +233,7 @@ namespace FormsSystemStatsWidget.Forms
             if (noWarmup)
             {
                 _ = sb.Append("--no-warmup ");
+                _ = sb.Append("--no-mmap ");
             }
             if (kvOffload)
             {
@@ -243,6 +251,15 @@ namespace FormsSystemStatsWidget.Forms
             if (reasoningBudget.HasValue)
             {
                 _ = sb.Append($"--reasoning-budget {reasoningBudget.Value} ");
+            }
+            if (toolCalling)
+            {
+                _ = sb.Append("--tools all ");
+            }
+            if (kvCacheQuant != "f16")
+            {
+                _ = sb.Append($"--cache-type-k {kvCacheQuant} ");
+                _ = sb.Append($"--cache-type-v {kvCacheQuant} ");
             }
 
             // Generate the correct multiline format with the Windows line-continuation character (^)
@@ -600,6 +617,10 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripTextBox_temperature.Text = "0.75";
             }
 
+            // Save persistant settings
+            this._persistentSettings.Temperature = temperature;
+            this.SavePersistentSettings();
+
             e.SuppressKeyPress = true;
             e.Handled = true;
         }
@@ -623,6 +644,10 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripTextBox_repetationPenalty.Text = "1.1";
             }
 
+            // Save persistant settings
+            this._persistentSettings.RepetitionPenalty = penalty;
+            this.SavePersistentSettings();
+
             e.SuppressKeyPress = true;
             e.Handled = true;
         }
@@ -645,6 +670,10 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripTextBox_contextSize.Text = "16384";
             }
 
+            // Save persistant settings
+            this._persistentSettings.ContextSize = contextSize;
+            this.SavePersistentSettings();
+
             e.SuppressKeyPress = true;
             e.Handled = true;
         }
@@ -666,6 +695,10 @@ namespace FormsSystemStatsWidget.Forms
                 _ = MessageBox.Show(this, "Please enter a valid positive integer for batch size.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_batchSize.Text = "1024";
             }
+
+            // Save persistant settings
+            this._persistentSettings.BatchSize = batchSize;
+            this.SavePersistentSettings();
 
             e.SuppressKeyPress = true;
             e.Handled = true;
@@ -718,6 +751,10 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripTextBox_gpuLayersCount.Text = "0";
             }
 
+            // Save persistant settings
+            this._persistentSettings.GpuLayersCount = gpuLayerCount;
+            this.SavePersistentSettings();
+
             e.SuppressKeyPress = true;
             e.Handled = true;
         }
@@ -739,6 +776,10 @@ namespace FormsSystemStatsWidget.Forms
                 _ = MessageBox.Show(this, "Please enter a valid positive integer for number of parallel slots.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_numberParallelSlots.Text = "1";
             }
+
+            // Save persistant settings
+            this._persistentSettings.NumberParallelSlots = parallelSlots;
+            this.SavePersistentSettings();
 
             e.SuppressKeyPress = true;
             e.Handled = true;
@@ -763,6 +804,10 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripTextBox_thinkingBudget.Text = "0";
             }
 
+            // Save persistant settings
+            this._persistentSettings.ThinkingBudget = thinkingBudget;
+            this.SavePersistentSettings();
+
             e.SuppressKeyPress = true;
             e.Handled = true;
         }
@@ -785,6 +830,13 @@ namespace FormsSystemStatsWidget.Forms
                 _ = MessageBox.Show(this, "Please enter a valid non-negative integer for reasoning budget (tokens).", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 this.toolStripTextBox_reasoningBudget.Text = "0";
             }
+
+            // Save persistant settings
+            this._persistentSettings.ReasoningBudget = reasoningBudget;
+            this.SavePersistentSettings();
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
         }
 
         private void toolStripTextBox_topP_KeyDown(object sender, KeyEventArgs e)
@@ -1037,6 +1089,127 @@ namespace FormsSystemStatsWidget.Forms
             e.SuppressKeyPress = true;
             e.Handled = true;
         }
+
+       
+
+        private void toolStripTextBox_percentageColor_TextChanged(object sender, EventArgs e)
+        {
+            string hex = this.toolStripTextBox_percentageColor.Text.Replace("#", "");
+            if (hex.Length == 6 && int.TryParse(hex, System.Globalization.NumberStyles.HexNumber, null, out int rgb))
+            {
+                // rgb is RRGGBB; construct an opaque Color (add alpha byte)
+                this._percentageColor = Color.FromArgb(unchecked((int) 0xFF000000 | rgb));
+            }
+            else
+            {
+                this._percentageColor = null;
+            }
+
+            this._persistentSettings.PerCorePercentColor = ("#" + hex.Replace("#", "")).ToUpperInvariant();
+            this.SavePersistentSettings();
+        }
+
+        private void KVoffload_ToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.KvOffload = this.KVoffload_ToolStripMenuItem.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripComboBox_cacheType_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.KvCacheType = this.toolStripComboBox_cacheType.Text;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_toolCalls_CheckedChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.LlamaServerToolCalling = this.toolStripMenuItem_toolCalls.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_noWarmup_CheckedChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.NoWarmup = this.toolStripMenuItem_noWarmup.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_fitMode_CheckedChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.FitMode = this.toolStripMenuItem_fitMode.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_hideCmd_CheckedChanged(object sender, EventArgs e)
+        {
+            this._persistentSettings.HideCmd = this.toolStripMenuItem_hideCmd.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripTextBox_openAiApiUrl_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            string entered = this.toolStripTextBox_openAiApiUrl.Text.Trim();
+            if (Uri.TryCreate(entered, UriKind.Absolute, out Uri? apiUrl))
+            {
+                this._persistentSettings.OpenAIApiUrl = apiUrl.ToString();
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                _ = MessageBox.Show(this, "Please enter a valid URL for the OpenAI API.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_openAiApiUrl.Text = string.Empty;
+            }
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_ollamaPort_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            string entered = this.toolStripTextBox_ollamaPort.Text.Trim();
+            if (int.TryParse(entered, out int port) && port > 0 && port <= 65535)
+            {
+                this._persistentSettings.OllamaPort = port;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                _ = MessageBox.Show(this, "Please enter a valid integer between 1 and 65535 for the Ollama server port.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_ollamaPort.Text = "11434";
+            }
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripTextBox_llamacppPort_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            string entered = this.toolStripTextBox_llamacppPort.Text.Trim();
+            if (int.TryParse(entered, out int port) && port > 0 && port <= 65535)
+            {
+                this._persistentSettings.LlamaCppServerPort = port;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                _ = MessageBox.Show(this, "Please enter a valid integer between 1 and 65535 for the llama.cpp server port.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_llamacppPort.Text = "8080";
+            }
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+
+
 
     }
 }

@@ -50,6 +50,12 @@ namespace FormsSystemStatsWidget.Forms
             };
 
             this.Controls.Add(this._logTextBox);
+
+            float opacity = WindowWidget.CustomOpacity;
+            if (opacity < 1.0f)
+            {
+                this.ApplyOpacity(opacity);
+            }
         }
 
         private void ToggleWordWrap()
@@ -133,6 +139,13 @@ namespace FormsSystemStatsWidget.Forms
         }
 
 
+        internal void ApplyOpacity(float opacity)
+        {
+            // Wende die Opacity auf alle direkt enthaltenen Controls an
+            int initialStyle = WindowWidget.GetWindowLong(this.Handle, WindowWidget.GWL_EXSTYLE);
+            _ = WindowWidget.SetWindowLong(this.Handle, WindowWidget.GWL_EXSTYLE, initialStyle | WindowWidget.WS_EX_LAYERED);
+            _ = WindowWidget.SetLayeredWindowAttributes(this.Handle, 0, (byte) (opacity * 255), 0x00000002);
+        }
 
         public static void PruneRepositoryLogFiles(string logsDirectory, string preserveFilePath)
         {

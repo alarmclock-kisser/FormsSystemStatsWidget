@@ -10,6 +10,10 @@ namespace FormsSystemStatsWidget.Forms
         public int UpdateIntervalMs { get; set; } = 420;
 
         public string DiagramColorHex { get; set; } = "#FFFFFF";
+        
+        public int WindowOpacity { get; set; } = 100;
+        
+        public string PerCorePercentColor { get; set; } = "#FFFFFF";
 
         public bool ShowPerCorePercent { get; set; } = true;
 
@@ -42,9 +46,27 @@ namespace FormsSystemStatsWidget.Forms
 
 
         // Persisted Llama sampling parameters (used for model load defaults / UI)
+        public string GgufModelDirectory { get; set; } = "";
+        public int ContextSize { get; set; } = 2048;
+        public int BatchSize { get; set; } = 512;
+        public int GpuLayersCount { get; set; } = 0;
+        public int NumberParallelSlots { get; set; }
+        public bool NoWarmup { get; set; } = false;
+        public bool FitMode { get; set; } = false;
+        public bool KvOffload { get; set; } = false;
+        public string KvCacheType { get; set; } = "f16";
+        public bool LlamaServerToolCalling { get; set; } = false;
+        public float Temperature { get; set; } = 0.7f;
+        public float RepetitionPenalty { get; set; } = 1.1f;
+        public int ThinkingBudget { get; set; } = 0;
+        public int ReasoningBudget { get; set; } = 0;
         public double UserTopP { get; set; } = 0.9;
         public double UserMinP { get; set; } = 0.0;
         public int UserTopK { get; set; } = 40;
+        public bool HideCmd { get; internal set; }
+        public string OpenAIApiUrl { get; set; } = "";
+        public int LlamaCppServerPort { get; set; }
+        public int OllamaPort { get; set; }
     }
 
     internal static class WidgetPersistentSettingsStore
