@@ -39,6 +39,12 @@ namespace FormsSystemStatsWidget.Core
         private static string _bridgeBaseUrl = "http://localhost:11434";
         private static string _lastStartError = string.Empty;
 
+        public static string? DetectedModelName => _detectedModelName;
+        public static string? QuantizationLevel => _quantizationLevel;
+        public static string? ParameterSize => _parameterSize;
+        public static string? ModelFamily => _modelFamily;
+        public static bool SupportsVision => _supportsVision;
+
         // Logging settings
         public static bool EnableFormattedLogging = true;
         public static bool EnableRawChunkLogging = true;

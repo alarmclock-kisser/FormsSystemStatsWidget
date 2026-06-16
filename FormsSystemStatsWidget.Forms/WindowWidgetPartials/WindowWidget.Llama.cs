@@ -75,6 +75,14 @@ namespace FormsSystemStatsWidget.Forms
             menuItem.CheckedChanged += this.rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged;
 
             this.SetRoutingInfoLabel($"Port {llamaPort} to {ollamaPort} failed", Color.Red, true);
+            if (!this.toolStripMenuItem_execModelLoadBat.Enabled)
+            {
+                this.toolStripMenuItem_execModelLoadBat.Text = $"'{LlamaOllamaBridge.DetectedModelName}-{LlamaOllamaBridge.QuantizationLevel}'";
+            }
+            else
+            {
+                this.toolStripMenuItem_execModelLoadBat.Text = "Execute Model Load .BAT";
+            }
 
             string bridgeError = LlamaOllamaBridge.LastStartError;
             string message = string.IsNullOrWhiteSpace(bridgeError)

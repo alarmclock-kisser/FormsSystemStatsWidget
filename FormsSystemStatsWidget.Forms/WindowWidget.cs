@@ -1026,6 +1026,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (processes.Count > 0)
             {
+                this.toolStripMenuItem_execModelLoadBat.Text = $"'{LlamaOllamaBridge.DetectedModelName}-{LlamaOllamaBridge.QuantizationLevel}'";
                 this.toolStripMenuItem_execModelLoadBat.Enabled = false;
                 this.toolStripMenuItem_loadLlamaCppServer.Text = $"Kill llama-server ({processes.Count})";
 
@@ -1040,6 +1041,7 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 this.toolStripMenuItem_execModelLoadBat.Enabled = true;
+                this.toolStripMenuItem_execModelLoadBat.Text = "Execute Model Load .BAT";
                 this.toolStripMenuItem_loadLlamaCppServer.Text = "Load Model (llama-server.exe)";
 
                 foreach (ToolStripItem item in this.toolStripMenuItem_loadLlamaCppServer.DropDownItems)

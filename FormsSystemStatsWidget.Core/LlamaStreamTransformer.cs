@@ -16,7 +16,11 @@ namespace FormsSystemStatsWidget.Core
         private static readonly Regex ParameterRegex = new(@"<parameter=(?<name>[^\s>]+)>\s*(?<value>.*?)\s*</parameter>", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline);
         private static readonly Regex QwenToolCallRegex = new(@"<tool_call>\s*(?<json>\{.*?\})\s*</tool_call>", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline);
         private static readonly Regex KeywordSearchRegex = new(@"\b[\p{L}\p{Nd}_]{3,}\b", RegexOptions.Compiled);
-        private static readonly Regex CodeFenceBlockRegex = new(@"```(?<lang>[^\r\n`]*)\r?\n(?<code>[\s\S]*?)```", RegexOptions.Compiled);
+
+        // Anti-Truncation: Dreifache Backticks im Code sicher verpacken, damit UI-Parser nicht abbrechen
+        private static readonly Regex CodeFenceBlockRegex = new(@"(" + "``" + @"`)(?<lang>[^\r\n`]*)\r?\n(?<code>[\s\S]*?)\1", RegexOptions.Compiled);
+        private static readonly Regex MarkdownFenceRemoverRegex = new(@"^" + "``" + @"`(?:json|javascript|js)?\s*(.*?)\s*" + "``" + @"`$", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline);
+
         private static readonly HashSet<string> IgnoredKeywords = new(StringComparer.OrdinalIgnoreCase)
         {
             "using", "namespace", "class", "public", "private", "protected", "internal", "static", "void", "string", "int", "bool",
@@ -47,6 +51,9 @@ namespace FormsSystemStatsWidget.Core
                 {
                     return root.ToJsonString();
                 }
+
+                // NEU: Strenge Instruktionen für Tool-Calling in den System-Prompt injizieren!
+                InjectStrictToolCallingRules(messages);
 
                 foreach (JsonObject message in messages.OfType<JsonObject>())
                 {
@@ -92,6 +99,30 @@ namespace FormsSystemStatsWidget.Core
             {
                 Logger.Log($"[Sanitizer-Error] {ex.Message}");
                 return jsonInput;
+            }
+        }
+
+        // --- NEUE METHODE: Gehirnwäsche für lokale Modelle (Prompt Injection) ---
+        private static void InjectStrictToolCallingRules(JsonArray messages)
+        {
+            var firstMsg = messages.FirstOrDefault() as JsonObject;
+            if (firstMsg == null) return;
+
+            string role = firstMsg["role"]?.ToString() ?? "";
+            if (!string.Equals(role, "system", StringComparison.OrdinalIgnoreCase)) return;
+
+            string content = firstMsg["content"]?.ToString() ?? "";
+
+            // Diese Instruktionen verhindern das Markdown-Fence Problem und fixen die fehlerhaften VS Diffs!
+            string rules = "\n\n[CRITICAL SYSTEM INSTRUCTIONS FOR TOOLS & EDITS]\n" +
+                           "1. NEVER wrap tool calls in Markdown code blocks (e.g., " + "``" + "`json). Output the raw JSON tool format directly.\n" +
+                           "2. When using file edit/replace tools, your indentation and leading spaces MUST EXACTLY MATCH the original source file. Do not strip leading spaces.\n" +
+                           "3. Output ONLY the valid JSON tool call. No conversational filler text.";
+
+            if (!content.Contains("[CRITICAL SYSTEM INSTRUCTIONS FOR TOOLS & EDITS]"))
+            {
+                firstMsg["content"] = content + rules;
+                Logger.Log("[Sanitizer] Injected strict Tool-Calling and Diff rules into System Prompt.");
             }
         }
 
@@ -161,19 +192,21 @@ namespace FormsSystemStatsWidget.Core
 
         private static string ReduceCodeFenceBlocks(string content)
         {
-            return CodeFenceBlockRegex.Replace(content, static match =>
+            return CodeFenceBlockRegex.Replace(content, match =>
             {
                 int largeMessageThresholdChars = Math.Max(256, SmartPromptOptimizationSettings.LargeMessageThresholdChars);
                 int skeletonMaxLines = Math.Max(5, SmartPromptOptimizationSettings.SkeletonMaxLines);
                 string language = (match.Groups["lang"].Value ?? string.Empty).Trim();
                 string code = match.Groups["code"].Value;
+
                 if (code.Length < largeMessageThresholdChars / 2)
                 {
                     return match.Value;
                 }
 
                 string skeleton = BuildCodeSkeleton(code, skeletonMaxLines);
-                return $"```{language}\n{skeleton}\n```";
+                string fence = "``" + "`"; // Sicherer Backtick
+                return $"{fence}{language}\n{skeleton}\n{fence}";
             });
         }
 
@@ -547,7 +580,11 @@ namespace FormsSystemStatsWidget.Core
             int xmlIndex = content.IndexOf("<function=", StringComparison.OrdinalIgnoreCase);
             int qwenIndex = content.IndexOf("<tool_call>", StringComparison.OrdinalIgnoreCase);
 
-            var validIndices = new[] { jsonIndex, xmlIndex, qwenIndex }.Where(i => i >= 0).ToArray();
+            // NEU: Triggert auf sichere Weise auch auf Markdown JSON-Blöcke!
+            int mdJsonIndex = content.IndexOf("``" + "`json", StringComparison.OrdinalIgnoreCase);
+            int genericJsonIndex = content.IndexOf("{\"name\"", StringComparison.OrdinalIgnoreCase);
+
+            var validIndices = new[] { jsonIndex, xmlIndex, qwenIndex, mdJsonIndex, genericJsonIndex }.Where(i => i >= 0).ToArray();
             return validIndices.Length > 0 ? validIndices.Min() : -1;
         }
 
@@ -555,86 +592,113 @@ namespace FormsSystemStatsWidget.Core
         {
             toolCallsArray = null;
 
-            if (TryParseJsonCommandToolCall(toolBuffer, out JsonObject? jsonToolCall))
-            {
-                if (jsonToolCall != null)
-                {
-                    toolCallsArray = CreateToolCallsArray(jsonToolCall);
-                }
+            // NEU: Markdown-Fences abwaschen, bevor geparst wird!
+            string cleanedBuffer = MarkdownFenceRemoverRegex.Replace(toolBuffer.Trim(), "$1").Trim();
 
+            if (TryParseJsonCommandToolCall(cleanedBuffer, out JsonObject? jsonToolCall))
+            {
+                if (jsonToolCall != null) toolCallsArray = CreateToolCallsArray(jsonToolCall);
                 return true;
             }
 
-            if (TryParseTaggedToolCall(toolBuffer, out JsonObject? taggedToolCall))
+            // NEU: Generic Parser für das klassische Copilot Format {"name": "...", "arguments": ...}
+            if (TryParseGenericJsonToolCall(cleanedBuffer, out JsonObject? genericToolCall))
             {
-                if (taggedToolCall != null)
-                {
-                    toolCallsArray = CreateToolCallsArray(taggedToolCall);
-                }
-
+                if (genericToolCall != null) toolCallsArray = CreateToolCallsArray(genericToolCall);
                 return true;
             }
 
-            if (TryParseQwenToolCall(toolBuffer, out JsonObject? qwenToolCall))
+            if (TryParseTaggedToolCall(cleanedBuffer, out JsonObject? taggedToolCall))
             {
-                if (qwenToolCall != null)
-                {
-                    toolCallsArray = CreateToolCallsArray(qwenToolCall);
-                }
+                if (taggedToolCall != null) toolCallsArray = CreateToolCallsArray(taggedToolCall);
+                return true;
+            }
 
+            if (TryParseQwenToolCall(cleanedBuffer, out JsonObject? qwenToolCall))
+            {
+                if (qwenToolCall != null) toolCallsArray = CreateToolCallsArray(qwenToolCall);
                 return true;
             }
 
             return false;
         }
 
+        // --- NEUER PARSER FÜR DAS GENERIC COPILOT FORMAT ---
+        private static bool TryParseGenericJsonToolCall(string toolBuffer, out JsonObject? toolCall)
+        {
+            toolCall = null;
+            int firstBrace = toolBuffer.IndexOf('{');
+            if (firstBrace < 0) return false;
+
+            string jsonCandidate = toolBuffer[firstBrace..];
+            string balancedJson = ExtractBalancedJson(jsonCandidate);
+
+            if (string.IsNullOrEmpty(balancedJson)) return false;
+
+            try
+            {
+                var jsonObj = JsonNode.Parse(balancedJson)?.AsObject();
+                if (jsonObj != null && jsonObj.ContainsKey("name"))
+                {
+                    string name = jsonObj["name"]?.ToString() ?? "";
+                    string arguments = "{}";
+
+                    if (jsonObj.ContainsKey("arguments"))
+                    {
+                        arguments = jsonObj["arguments"] is JsonObject ? jsonObj["arguments"]!.ToJsonString() : jsonObj["arguments"]?.ToString() ?? "{}";
+                    }
+                    else if (jsonObj.ContainsKey("parameters"))
+                    {
+                        arguments = jsonObj["parameters"] is JsonObject ? jsonObj["parameters"]!.ToJsonString() : jsonObj["parameters"]?.ToString() ?? "{}";
+                    }
+
+                    toolCall = new JsonObject { ["name"] = name, ["arguments"] = arguments };
+                    return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // --- HILFSMETHODE UM ABGESCHNITTENES JSON ZU IGNORIEREN ---
+        private static string ExtractBalancedJson(string input)
+        {
+            int open = 0;
+            for (int i = 0; i < input.Length; i++)
+            {
+                if (input[i] == '{') open++;
+                if (input[i] == '}')
+                {
+                    open--;
+                    if (open == 0) return input.Substring(0, i + 1);
+                }
+            }
+            return string.Empty;
+        }
+
         private static bool TryParseJsonCommandToolCall(string toolBuffer, out JsonObject? toolCall)
         {
             toolCall = null;
             int firstBrace = toolBuffer.IndexOf('{');
-            if (firstBrace < 0)
-            {
-                return false;
-            }
+            if (firstBrace < 0) return false;
 
             string jsonCandidate = toolBuffer[firstBrace..];
-            int openBraces = 0, closeBraces = 0;
+            string balancedJson = ExtractBalancedJson(jsonCandidate);
+            if (string.IsNullOrEmpty(balancedJson)) return false;
 
-            foreach (char character in jsonCandidate)
+            try
             {
-                if (character == '{')
-                {
-                    openBraces++;
-                }
+                JsonObject? toolObject = JsonNode.Parse(balancedJson)?.AsObject();
+                string functionName = toolObject?["command"]?.ToString() ?? string.Empty;
+                functionName = Regex.Match(functionName, @"[a-zA-Z0-9_]+").Value;
 
-                if (character == '}')
-                {
-                    closeBraces++;
-                }
+                if (string.IsNullOrWhiteSpace(functionName)) return false;
+
+                _ = toolObject?.Remove("command");
+                toolCall = new JsonObject { ["name"] = functionName, ["arguments"] = toolObject?.ToJsonString() ?? "{}" };
+                return true;
             }
-
-            if (openBraces == 0 || openBraces != closeBraces)
-            {
-                return false;
-            }
-
-            JsonObject? toolObject = JsonNode.Parse(jsonCandidate)?.AsObject();
-            string functionName = toolObject?["command"]?.ToString() ?? string.Empty;
-            functionName = Regex.Match(functionName, @"[a-zA-Z0-9_]+").Value;
-
-            if (string.IsNullOrWhiteSpace(functionName))
-            {
-                return false;
-            }
-
-            _ = (toolObject?.Remove("command"));
-            toolCall = new JsonObject
-            {
-                ["name"] = functionName,
-                ["arguments"] = toolObject?.ToJsonString() ?? "{}"
-            };
-
-            return true;
+            catch { return false; }
         }
 
         private static bool TryParseTaggedToolCall(string toolBuffer, out JsonObject? toolCall)
@@ -730,8 +794,8 @@ namespace FormsSystemStatsWidget.Core
 
         private static JsonArray CreateToolCallsArray(JsonObject parsedToolCall)
         {
-            return
-            [
+            return new JsonArray
+            {
                 new JsonObject
                 {
                     ["index"] = 0,
@@ -743,7 +807,7 @@ namespace FormsSystemStatsWidget.Core
                         ["arguments"] = parsedToolCall["arguments"]?.ToString() ?? "{}"
                     }
                 }
-            ];
+            };
         }
 
         public static async Task TransformOpenAiStreamAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName)
@@ -761,7 +825,8 @@ namespace FormsSystemStatsWidget.Core
 
             while ((line = await streamReader.ReadLineAsync()) != null)
             {
-                Logger.Log($"[RAW CHUNK] {line}");
+                // Für Debugzwecke
+                // Logger.Log($"[RAW CHUNK] {line}");
 
                 if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
                 {
@@ -874,6 +939,8 @@ namespace FormsSystemStatsWidget.Core
                                 if (inToolCall)
                                 {
                                     toolBuffer += content;
+
+                                    // NEU: Die clevere Tool-Call Prüfung
                                     if (TryCreateToolCallsArray(toolBuffer, out JsonArray? toolCallsArray))
                                     {
                                         inToolCall = false;
@@ -889,14 +956,23 @@ namespace FormsSystemStatsWidget.Core
                                         var finishChunk = new JsonObject
                                         {
                                             ["choices"] = new JsonArray {
-                                        new JsonObject {
-                                            ["delta"] = new JsonObject(),
-                                            ["finish_reason"] = "tool_calls",
-                                            ["index"] = 0
-                                        }
-                                    }
+                                                new JsonObject {
+                                                    ["delta"] = new JsonObject(),
+                                                    ["finish_reason"] = "tool_calls",
+                                                    ["index"] = 0
+                                                }
+                                            }
                                         };
                                         await writer.WriteLineAsync("data: " + finishChunk.ToJsonString());
+                                        await writer.FlushAsync();
+                                        toolBuffer = "";
+                                    }
+                                    // NEU: Wenn es gültiges JSON ist, aber kein Tool, brich ab (z.B. Chat-Code)
+                                    else if (!string.IsNullOrEmpty(ExtractBalancedJson(MarkdownFenceRemoverRegex.Replace(toolBuffer, "$1"))))
+                                    {
+                                        inToolCall = false;
+                                        delta["content"] = toolBuffer;
+                                        await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
                                         await writer.FlushAsync();
                                         toolBuffer = "";
                                     }
@@ -973,7 +1049,8 @@ namespace FormsSystemStatsWidget.Core
 
         private static bool IsPotentialPartialToolCall(string detectBuffer)
         {
-            string[] triggers = ["<tool_call>", "<function=", "{\"command\""];
+            // Sichere Trigger ohne rohe Backticks im Quellcode
+            string[] triggers = ["<tool_call>", "<function=", "{\"command\"", "``" + "`json", "{\"name\""];
             foreach (string trigger in triggers)
             {
                 for (int i = 1; i <= trigger.Length; i++)
