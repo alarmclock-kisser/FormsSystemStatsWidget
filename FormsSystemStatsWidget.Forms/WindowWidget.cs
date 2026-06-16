@@ -308,7 +308,7 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_toolCalls.Checked = this._persistentSettings.LlamaServerToolCalling;
             this.toolStripTextBox_temperature.Text = this._persistentSettings.Temperature.ToString("0.0000", CultureInfo.InvariantCulture);
             this.toolStripTextBox_repetationPenalty.Text = this._persistentSettings.RepetitionPenalty.ToString("0.0000", CultureInfo.InvariantCulture);
-            this.toolStripMenuItem_thinking.Checked= this._persistentSettings.Thinking;
+            this.toolStripMenuItem_thinking.Checked = this._persistentSettings.Thinking;
             this.toolStripTextBox_reasoningBudget.Text = this._persistentSettings.ReasoningBudget.ToString();
             this.toolStripTextBox_additionalArgs.Text = this._persistentSettings.AdditionalLoadArgs;
             this.toolStripTextBox_additionalArgs_KeyDown(this.toolStripTextBox_additionalArgs, new KeyEventArgs(Keys.Enter));
@@ -1200,6 +1200,13 @@ namespace FormsSystemStatsWidget.Forms
         }
 
 
+        private void toolStripMenuItem_blackOutMode_CheckedChanged(Object sender, EventArgs e)
+        {
+            bool useBlackOutMode = this.toolStripMenuItem_blackOutMode.Checked;
+
+            // Apply to Handle (+ Text), BackGround and Text of all directly contained Controls (togggle light greywhite / black #000000)
+        }
+
 
 
 
@@ -1208,7 +1215,6 @@ namespace FormsSystemStatsWidget.Forms
         [GeneratedRegex(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled, "de-DE")]
         private static partial Regex MyRegex();
 
-        
     }
 }
 
