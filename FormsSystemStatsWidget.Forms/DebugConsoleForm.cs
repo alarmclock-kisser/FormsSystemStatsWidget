@@ -56,6 +56,9 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.ApplyOpacity(opacity);
             }
+
+            bool blackOutMode = WindowWidget.BlackOutModeEnabled;
+            this.ApplyBlackOutMode(blackOutMode);
         }
 
         private void ToggleWordWrap()
@@ -146,6 +149,30 @@ namespace FormsSystemStatsWidget.Forms
             _ = WindowWidget.SetWindowLong(this.Handle, WindowWidget.GWL_EXSTYLE, initialStyle | WindowWidget.WS_EX_LAYERED);
             _ = WindowWidget.SetLayeredWindowAttributes(this.Handle, 0, (byte) (opacity * 255), 0x00000002);
         }
+
+        internal void ApplyBlackOutMode(bool enabled)
+        {
+            this.BackColor = enabled ? System.Drawing.Color.Black : System.Drawing.SystemColors.Control;
+            this._logTextBox.BackColor = enabled ? System.Drawing.Color.Black : System.Drawing.SystemColors.Window;
+            this._logTextBox.ForeColor = enabled ? System.Drawing.Color.White : System.Drawing.SystemColors.WindowText;
+
+            // Window Handle + Text
+            int initialStyle = WindowWidget.GetWindowLong(this.Handle, WindowWidget.GWL_EXSTYLE);
+            if (enabled)
+            {
+                _ = WindowWidget.SetWindowLong(this.Handle, WindowWidget.GWL_EXSTYLE, initialStyle | WindowWidget.WS_EX_LAYERED);
+
+                // Get custom opacity as byte value (0-255) and apply with LWA_ALPHA
+                byte opacity = (byte) (WindowWidget.CustomOpacity >= 0.1f && WindowWidget.CustomOpacity <= 1.0f ? WindowWidget.CustomOpacity * 255 : 255);
+                _ = WindowWidget.SetLayeredWindowAttributes(this.Handle, 0, opacity, 0x00000002);
+            }
+            else
+            {
+                _ = WindowWidget.SetWindowLong(this.Handle, WindowWidget.GWL_EXSTYLE, initialStyle & ~WindowWidget.WS_EX_LAYERED);
+            }
+        }
+
+
 
         public static void PruneRepositoryLogFiles(string logsDirectory, string preserveFilePath)
         {

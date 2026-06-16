@@ -13,6 +13,7 @@ namespace FormsSystemStatsWidget.Forms
         private int _driveTestWorkerThreads = Math.Clamp(Environment.ProcessorCount / 4, 2, Environment.ProcessorCount);
         private bool _driveTestInProgress = false;
 
+        public static bool BlackOutModeEnabled { get; private set; } = false;
 
         private void PopulateDriveSelections()
         {

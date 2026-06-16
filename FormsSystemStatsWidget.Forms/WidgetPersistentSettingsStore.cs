@@ -69,6 +69,7 @@ namespace FormsSystemStatsWidget.Forms
         public int OllamaPort { get; set; } = 11434;
         public string AdditionalLoadArgs { get; set; } = "--mlock -t 4 -tb 4";
         public Point WidgetPosition { get; set; } = new(0, 0);
+        public bool BlackOutMode { get; set; } = false;
     }
 
     internal static class WidgetPersistentSettingsStore

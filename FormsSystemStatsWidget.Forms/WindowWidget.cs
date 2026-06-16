@@ -354,6 +354,8 @@ namespace FormsSystemStatsWidget.Forms
             SmartPromptOptimizationSettings.SkeletonMaxLines = this._persistentSettings.SmartPromptSkeletonMaxLines;
             SmartPromptOptimizationSettings.FocusKeywordLimit = this._persistentSettings.SmartPromptFocusKeywordLimit;
             SmartPromptOptimizationSettings.TailKeepBonusChars = this._persistentSettings.SmartPromptTailKeepBonusChars;
+
+            this.toolStripMenuItem_blackOutMode.Checked = this._persistentSettings.BlackOutMode;
         }
 
 
@@ -1204,7 +1206,102 @@ namespace FormsSystemStatsWidget.Forms
         {
             bool useBlackOutMode = this.toolStripMenuItem_blackOutMode.Checked;
 
-            // Apply to Handle (+ Text), BackGround and Text of all directly contained Controls (togggle light greywhite / black #000000)
+            // Call the helper that actually does the visual transformation
+            this.ApplyBlackOutMode(useBlackOutMode);
+
+            // Remember the choice so the widget can be opened in the same state next time
+            this._persistentSettings.BlackOutMode = useBlackOutMode;
+            this.SavePersistentSettings();
+        }
+
+        private void ApplyBlackOutMode(bool enabled)
+        {
+            // 1️⃣ Window handle – colour the layered window background black and set foreground to white
+            if (this.IsHandleCreated)
+            {
+                // Make sure the window can receive layered‑window attributes
+                int style = GetWindowLong(this.Handle, GWL_EXSTYLE);
+                _ = SetWindowLong(this.Handle, GWL_EXSTYLE, style | WS_EX_LAYERED);
+
+                // Apply the colour transformation – black background, white text
+                // LWA_COLORKEY = 0x0001, LWA_ALPHA = 0x0002 – we use colour‑key with alpha 255 (opaque)
+
+                // Scale current opacity float to byte 0..255
+                byte alpha = (byte) (CustomOpacity >= 0.1f && CustomOpacity <= 1.0f ? CustomOpacity * 255 : 255);
+
+                SetLayeredWindowAttributes(this.Handle, 0x0, alpha, 0x0002);
+            }
+
+            // 2️⃣ Form background / foreground
+            if (enabled)
+            {
+                this.BackColor = Color.Black;
+                this.ForeColor = Color.White;
+            }
+            else
+            {
+                // Restore default colours (Control skin)
+                this.BackColor = SystemColors.Control;
+                this.ForeColor = SystemColors.ControlText;
+            }
+
+            // 3️⃣ Recursively adjust all Label controls
+            foreach (Control ctrl in this.Controls)
+            {
+                AdjustLabelColours(ctrl, enabled);
+            }
+
+            // 4️⃣ Invert the Statistics‑Recorder button colours
+            var controls = this.Controls;
+            foreach (Control ctrl in controls)
+            {
+                InvertStatisticsRecorderButton(ctrl);
+            }
+
+            BlackOutModeEnabled = enabled;
+            this._debugConsoleForm?.ApplyBlackOutMode(enabled);
+        }
+
+        private static void AdjustLabelColours(Control ctrl, bool enable)
+        {
+            if (ctrl is Label lbl)
+            {
+                // Target colour: grey‑white when black‑out is on, black when it is off
+                Color target = enable ? Color.FromArgb(0xCCCCCC) : Color.Black;
+
+                // If the label currently uses the default Control text colour or plain black, switch it
+                if (lbl.ForeColor == SystemColors.ControlText || lbl.ForeColor == Color.Black)
+                {
+                    lbl.ForeColor = target;
+                }
+
+                // Ensure the label background stays black when the mode is active
+                if (enable && lbl.BackColor != Color.Black)
+                {
+                    lbl.BackColor = Color.Black;
+                }
+            }
+
+            // Recurse into child controls
+            foreach (Control child in ctrl.Controls)
+            {
+                AdjustLabelColours(child, enable);
+            }
+        }
+
+        private static void InvertStatisticsRecorderButton(Control ctrl)
+        {
+            if (ctrl is Button btn && btn.Name.Equals("statisticsRecorderButton", StringComparison.OrdinalIgnoreCase))
+            {
+                btn.BackColor = Color.Black;
+                btn.ForeColor = Color.White;
+                return;
+            }
+
+            foreach (Control child in ctrl.Controls)
+            {
+                InvertStatisticsRecorderButton(child);
+            }
         }
 
 
