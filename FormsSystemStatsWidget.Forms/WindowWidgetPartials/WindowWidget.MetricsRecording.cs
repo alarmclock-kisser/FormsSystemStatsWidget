@@ -445,7 +445,7 @@ namespace FormsSystemStatsWidget.Forms
             this._recordingCancellationTokenSource?.Dispose();
             this._recordingCancellationTokenSource = null;
             this._recordingTask = null;
-            this.button_recordUsages.ForeColor = SystemColors.ControlText;
+            this.button_recordUsages.ForeColor = BlackOutModeEnabled ? Color.White : SystemColors.ControlText;
 
             if (failure != null)
             {

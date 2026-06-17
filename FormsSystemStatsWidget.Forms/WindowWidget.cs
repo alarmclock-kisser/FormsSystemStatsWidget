@@ -42,7 +42,7 @@ namespace FormsSystemStatsWidget.Forms
         internal static readonly AudioHandling Audios = new();
 
         private bool _isAwaitingHotkeyInput = false;
-        private Dictionary<Keys, bool> _currentModifierKeys = new Dictionary<Keys, bool>();
+        private Dictionary<Keys, bool> _currentModifierKeys = [];
         private Keys? _firstModifierKey = null;
         private Keys? _otherKey = null;
 
@@ -782,13 +782,13 @@ namespace FormsSystemStatsWidget.Forms
 
             this.label_gpuUsage.Text = $"GPU: {usagePercent:0.00}%";
             this.label_wattage.Text = $"Watts: {wattage:0.00} W";
-            this.label_gpuUsage.ForeColor = usagePercent >= 80 ? Color.Red : Color.Black;
+            this.label_gpuUsage.ForeColor = usagePercent >= 80 ? Color.Red : BlackOutModeEnabled ? Color.White : Color.Black;
 
             if (this.Gpu2 != null)
             {
                 this.label_gpuLoad2.Text = $"GPU2: {this.Gpu2.CurrentLoad01 * 100:0.00}%";
                 this.label_gpuWatts2.Text = $"Watts: {this.Gpu2.CurrentPowerWatts ?? 0:0.00} W";
-                this.label_gpuLoad2.ForeColor = (this.Gpu2.CurrentLoad01 * 100) >= 80 ? Color.Red : Color.Black;
+                this.label_gpuLoad2.ForeColor = (this.Gpu2.CurrentLoad01 * 100) >= 80 ? Color.Red : BlackOutModeEnabled ? Color.White : Color.Black;
             }
 
             return Task.CompletedTask;
@@ -1291,10 +1291,11 @@ namespace FormsSystemStatsWidget.Forms
 
         private static void InvertStatisticsRecorderButton(Control ctrl)
         {
-            if (ctrl is Button btn && btn.Name.Equals("statisticsRecorderButton", StringComparison.OrdinalIgnoreCase))
+            if (ctrl is Button btn && btn.Name.Equals("button_recordUsages", StringComparison.OrdinalIgnoreCase))
             {
-                btn.BackColor = Color.Black;
-                btn.ForeColor = Color.White;
+                Color swap = btn.BackColor;
+                btn.BackColor = btn.ForeColor;
+                btn.ForeColor = swap;
                 return;
             }
 

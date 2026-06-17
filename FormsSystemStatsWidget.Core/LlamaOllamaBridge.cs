@@ -898,7 +898,7 @@ namespace FormsSystemStatsWidget.Core
     public static class Logger
     {
         private const int MaxBufferedLogEntries = 2048;
-        private static readonly object SyncRoot = new();
+        private static readonly Lock SyncRoot = new();
         private static readonly Queue<string> BufferedEntries = new();
 
         private static bool _isStreaming = false;

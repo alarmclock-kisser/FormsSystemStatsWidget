@@ -237,7 +237,7 @@ namespace FormsSystemStatsWidget.Forms
         // Public static Method to get all 'llama-server.exe' processes and return them
         public static List<Process> GetLlamaServerProcesses(int? port = null)
         {
-            List<Process> llamaProcesses = new();
+            List<Process> llamaProcesses = [];
             try
             {
                 Process[] allProcesses = Process.GetProcesses();
