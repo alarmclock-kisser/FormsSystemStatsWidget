@@ -234,7 +234,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             _ = sb.Append($"-c {contextSize} ");
             _ = sb.Append($"-b {batchSize} ");
-            _ = sb.Append($"-ub {(int)(batchSize / 2)} ");
+            _ = sb.Append($"-ub {(Math.Max((int) (batchSize / 4), 512))} ");
             if (splitMode != "none")
             {
                 _ = sb.Append($"-sm {splitMode} ");

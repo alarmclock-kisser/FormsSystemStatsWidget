@@ -1,0 +1,132 @@
+
+02:28:07.041 :: 0.00.101.966 I log_info: verbosity = 3 (adjust with the `-lv N` CLI arg)
+
+02:28:07.041 :: 0.00.101.970 I device_info:
+
+02:28:07.143 :: 0.00.204.201 I   - CUDA0   : NVIDIA GeForce RTX 4060 Ti (16379 MiB, 15233 MiB free)
+
+02:28:07.218 :: 0.00.279.386 I   - CUDA1   : NVIDIA GeForce RTX 3060 (12287 MiB, 11253 MiB free)
+
+02:28:07.218 :: 0.00.279.395 I   - CPU     : 13th Gen Intel(R) Core(TM) i7-13700 (32607 MiB, 23655 MiB free)
+
+02:28:07.218 :: 0.00.279.452 I system_info: n_threads = 4 (n_threads_batch = 6) / 24 | CUDA : ARCHS = 500,610,700,750,800,860,890,900 | USE_GRAPHS = 1 | PEER_MAX_BATCH_SIZE = 128 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX_VNNI = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 | 
+
+02:28:07.218 :: 0.00.279.487 I srv          init: running without SSL
+
+02:28:07.218 :: 0.00.279.520 I srv          init: using 23 threads for HTTP server
+
+02:28:07.219 :: 0.00.279.676 I srv         start: binding port with default address family
+
+02:28:07.235 :: 0.00.296.141 I srv  llama_server: loading model
+
+02:28:07.235 :: 0.00.296.150 I srv    load_model: loading model 'D:\Models\GGUF\Others\gemma-4-12b-it-qat-q4_0\gemma-4-12b-it-qat-q4_0.gguf'
+
+02:28:07.967 :: 0.01.028.497 W load: control-looking token:     50 '<|tool_response>' was not control-type; this is probably a bug in the model. its type will be overridden
+
+02:28:07.968 :: 0.01.028.837 W load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+
+02:28:08.000 :: 0.01.061.391 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+
+02:28:09.760 :: 0.02.821.314 W llama_context: n_ctx_seq (131072) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+
+02:28:10.337 :: 0.03.398.220 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 5902.69 MiB on device 1: cudaMalloc failed: out of memory
+
+02:28:10.337 :: 0.03.398.227 E ggml_gallocr_reserve_n_impl: failed to allocate CUDA1 buffer of size 6189416960
+
+02:28:10.337 :: 0.03.398.229 E graph_reserve: failed to allocate compute buffers
+
+02:28:10.337 :: 0.03.398.242 W sched_reserve: compute buffer allocation failed, retrying without pipeline parallelism
+
+02:28:10.487 :: 0.03.548.130 I srv    load_model: loading draft model 'D:\Models\GGUF\Others\gemma-4-12b-it-qat-q4_0\mtp\gemma-4-12B-it-qat-assistant-MTP-Q8_0.gguf'
+
+02:28:10.903 :: 0.03.963.977 W load: control-looking token:     50 '<|tool_response>' was not control-type; this is probably a bug in the model. its type will be overridden
+
+02:28:10.903 :: 0.03.964.237 W load: control-looking token:    106 '<turn|>' was not control-type; this is probably a bug in the model. its type will be overridden
+
+02:28:10.903 :: 0.03.964.372 W load: control-looking token:    212 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+
+02:28:10.936 :: 0.03.997.048 W load: special_eog_ids contains '<|tool_response>', removing '</s>' token from EOG list
+
+02:28:11.194 :: 0.04.254.626 W llama_context: n_ctx_seq (131072) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+
+02:28:11.198 :: 0.04.259.275 W llama_kv_cache: layer   3: sharing with layer 47. k = 0000000D98E00000, v = 0000000DA9E00000
+
+02:28:11.199 :: 0.04.259.754 W llama_kv_cache: layer   0: sharing with layer 46. k = 0000000E8A100000, v = 0000000E8CB80000
+
+02:28:11.199 :: 0.04.259.759 W llama_kv_cache: layer   1: sharing with layer 46. k = 0000000E8A100000, v = 0000000E8CB80000
+
+02:28:11.199 :: 0.04.259.762 W llama_kv_cache: layer   2: sharing with layer 46. k = 0000000E8A100000, v = 0000000E8CB80000
+
+02:28:11.423 :: 0.04.483.724 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 5444.13 MiB on device 1: cudaMalloc failed: out of memory
+
+02:28:11.423 :: 0.04.483.733 E ggml_gallocr_reserve_n_impl: failed to allocate CUDA1 buffer of size 5708579328
+
+02:28:11.423 :: 0.04.483.735 E graph_reserve: failed to allocate compute buffers
+
+02:28:11.423 :: 0.04.483.746 W sched_reserve: compute buffer allocation failed, retrying without pipeline parallelism
+
+02:28:11.551 :: 0.04.611.838 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 2321.03 MiB on device 1: cudaMalloc failed: out of memory
+
+02:28:11.551 :: 0.04.611.844 E ggml_gallocr_reserve_n_impl: failed to allocate CUDA1 buffer of size 2433777792
+
+02:28:11.551 :: 0.04.611.847 E graph_reserve: failed to allocate compute buffers
+
+02:28:11.562 :: 0.04.622.708 E llama_init_from_model: failed to initialize the context: failed to allocate compute pp buffers
+
+02:28:11.753 :: 0.04.813.660 W init_audio: audio input is in experimental stage and may have reduced quality:
+
+02:28:11.753 ::     https://github.com/ggml-org/llama.cpp/discussions/13759
+
+02:28:11.753 :: 0.04.813.670 I srv    load_model: loaded multimodal model, 'D:\Models\GGUF\Others\gemma-4-12b-it-qat-q4_0\mmproj-gemma-4-12b-it-qat-q4_0.gguf'
+
+02:28:11.753 :: 0.04.813.675 I srv    load_model: initializing slots, n_slots = 4
+
+02:28:11.893 :: 0.04.954.404 W common_speculative_init: no implementations specified for speculative decoding
+
+02:28:11.893 :: 0.04.954.410 I slot   load_model: id  0 | task -1 | new slot, n_ctx = 131072
+
+02:28:11.893 :: 0.04.954.422 I slot   load_model: id  1 | task -1 | new slot, n_ctx = 131072
+
+02:28:11.893 :: 0.04.954.422 I slot   load_model: id  2 | task -1 | new slot, n_ctx = 131072
+
+02:28:11.893 :: 0.04.954.423 I slot   load_model: id  3 | task -1 | new slot, n_ctx = 131072
+
+02:28:11.893 :: 0.04.954.614 I srv    load_model: prompt cache is enabled, size limit: 8192 MiB
+
+02:28:11.893 :: 0.04.954.618 I srv    load_model: use `--cache-ram 0` to disable the prompt cache
+
+02:28:11.893 :: 0.04.954.619 I srv    load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391
+
+02:28:11.893 :: 0.04.954.619 I srv    load_model: context checkpoints enabled, max = 32, min spacing = 256
+
+02:28:11.894 :: 0.04.954.683 I srv          init: idle slots will be saved to prompt cache upon starting a new task
+
+02:28:11.902 :: 0.04.962.769 I init: chat template, example_format: '<|turn>system
+
+02:28:11.902 :: You are a helpful assistant<turn|>
+
+02:28:11.902 :: <|turn>user
+
+02:28:11.902 :: Hello<turn|>
+
+02:28:11.902 :: <|turn>model
+
+02:28:11.902 :: Hi there<turn|>
+
+02:28:11.902 :: <|turn>user
+
+02:28:11.902 :: How are you?<turn|>
+
+02:28:11.902 :: <|turn>model
+
+02:28:11.902 :: <|channel>thought
+
+02:28:11.902 :: <channel|>'
+
+02:28:11.902 :: 0.04.963.418 I srv          init: init: chat template, thinking = 0
+
+02:28:11.902 :: 0.04.963.448 I srv  llama_server: model loaded
+
+02:28:11.902 :: 0.04.963.463 I srv  llama_server: server is listening on http://127.0.0.1:8080
+
+02:28:11.902 :: 0.04.963.470 I srv  update_slots: all slots are idle
