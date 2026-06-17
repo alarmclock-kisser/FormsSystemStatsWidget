@@ -134,97 +134,30 @@ public sealed class GpuStats : IDisposable
     private double _currentLoad01;
     private long _currentPowerMilliwatts = -1; // -1 => unknown/unavailable
 
+    private sealed class DetectionState
+    {
+        public TimeSpan AboveAccum;
+        public TimeSpan BelowAccum;
+        public Sample? Prev;
+    }
+
     private async Task WorkerLoop(CancellationToken ct)
     {
-        TimeSpan aboveAccum = TimeSpan.Zero;
-        TimeSpan belowAccum = TimeSpan.Zero;
-
-        Sample? prev = null;
+        var state = new DetectionState();
 
         while (!ct.IsCancellationRequested)
         {
             var now = DateTimeOffset.UtcNow;
-
-            // Sample GPU
-            double util01 = NvmlGpu.TryGetGpuUtilization(this.DeviceIndex) ?? 0.0;
-            uint? mw = NvmlGpu.TryGetGpuPowerMilliwatts(this.DeviceIndex);
-
-            Volatile.Write(ref this._currentLoad01, util01);
-            Volatile.Write(ref this._currentPowerMilliwatts, mw.HasValue ? mw.Value : -1);
-
-            var s = new Sample(now, util01, mw.HasValue ? mw.Value / 1000.0 : null);
+            var s = SampleGpu(now);
 
             lock (this._stateLock)
             {
-                if (this._currentSession == null)
-                {
-                    // START detection (sustained above threshold)
-                    if (util01 >= this.StartThresholdUtil01)
-                    {
-                        aboveAccum += this.SampleInterval;
-                        if (aboveAccum >= this.StartHold)
-                        {
-                            this._currentSession = new ProcessingSession
-                            {
-                                DeviceIndex = this.DeviceIndex,
-                                StartedAt = now
-                            };
-                            this._currentSession.Add(s, this.MaxSamplesPerSession);
-
-                            aboveAccum = TimeSpan.Zero;
-                            belowAccum = TimeSpan.Zero;
-                            prev = null; // reset integration baseline
-                        }
-                    }
-                    else
-                    {
-                        aboveAccum = TimeSpan.Zero;
-                    }
-                }
-                else
-                {
-                    // Session ACTIVE: append
-                    this._currentSession.Add(s, this.MaxSamplesPerSession);
-
-                    // Energy integrate if power exists
-                    if (s.PowerWatts is double pw && prev?.PowerWatts is double pprev)
-                    {
-                        double dt = (s.Timestamp - prev.Timestamp).TotalSeconds;
-                        if (dt > 0 && dt < 5.0) // guard huge gaps
-                        {
-                            double joules = 0.5 * (pprev + pw) * dt;
-                            this._currentSession.EnergyJoules = (this._currentSession.EnergyJoules ?? 0.0) + joules;
-                        }
-                    }
-
-                    // END detection with hysteresis + micro dips tolerance
-                    if (util01 < this.EndThresholdUtil01)
-                    {
-                        belowAccum += this.SampleInterval;
-                        if (belowAccum >= this.EndHold)
-                        {
-                            this._currentSession.EndedAt = now;
-                            FinalizeSession(this._currentSession);
-
-                            lock (this._sessionsLock)
-                            {
-                                this.ProcessingSessions.Add(this._currentSession);
-                            }
-
-                            this._currentSession = null;
-                            aboveAccum = TimeSpan.Zero;
-                            belowAccum = TimeSpan.Zero;
-                            prev = null;
-                        }
-                    }
-                    else
-                    {
-                        belowAccum = TimeSpan.Zero;
-                    }
-                }
+                ProcessSample(s, now, state);
             }
 
-            prev = s;
+            // prev is always advanced after processing (matches original ordering,
+            // overriding any baseline reset performed inside the lock)
+            state.Prev = s;
 
             try
             {
@@ -236,21 +169,127 @@ public sealed class GpuStats : IDisposable
             }
         }
 
-        // Close running session on shutdown
+        CloseRunningSessionOnShutdown();
+    }
+
+    private Sample SampleGpu(DateTimeOffset now)
+    {
+        double util01 = NvmlGpu.TryGetGpuUtilization(this.DeviceIndex) ?? 0.0;
+        uint? mw = NvmlGpu.TryGetGpuPowerMilliwatts(this.DeviceIndex);
+
+        Volatile.Write(ref this._currentLoad01, util01);
+        Volatile.Write(ref this._currentPowerMilliwatts, mw.HasValue ? mw.Value : -1);
+
+        return new Sample(now, util01, mw.HasValue ? mw.Value / 1000.0 : null);
+    }
+
+    private void ProcessSample(Sample s, DateTimeOffset now, DetectionState state)
+    {
+        if (this._currentSession == null)
+        {
+            TryStartSession(s, now, state);
+            return;
+        }
+
+        // Session ACTIVE: append + energy integrate, then evaluate end condition
+        this._currentSession.Add(s, this.MaxSamplesPerSession);
+        IntegrateEnergy(s, state);
+        TryEndSession(s, now, state);
+    }
+
+    // START detection (sustained above threshold)
+    private void TryStartSession(Sample s, DateTimeOffset now, DetectionState state)
+    {
+        if (s.GpuUtil01 < this.StartThresholdUtil01)
+        {
+            state.AboveAccum = TimeSpan.Zero;
+            return;
+        }
+
+        state.AboveAccum += this.SampleInterval;
+        if (state.AboveAccum < this.StartHold)
+        {
+            return;
+        }
+
+        var session = new ProcessingSession
+        {
+            DeviceIndex = this.DeviceIndex,
+            StartedAt = now
+        };
+        session.Add(s, this.MaxSamplesPerSession);
+        this._currentSession = session;
+
+        state.AboveAccum = TimeSpan.Zero;
+        state.BelowAccum = TimeSpan.Zero;
+        state.Prev = null; // reset integration baseline
+    }
+
+    private void IntegrateEnergy(Sample s, DetectionState state)
+    {
+        if (s.PowerWatts is not double pw || state.Prev?.PowerWatts is not double pprev)
+        {
+            return;
+        }
+
+        double dt = (s.Timestamp - state.Prev.Timestamp).TotalSeconds;
+        if (dt > 0 && dt < 5.0) // guard huge gaps
+        {
+            double joules = 0.5 * (pprev + pw) * dt;
+            this._currentSession!.EnergyJoules = (this._currentSession.EnergyJoules ?? 0.0) + joules;
+        }
+    }
+
+    // END detection with hysteresis + micro dips tolerance
+    private void TryEndSession(Sample s, DateTimeOffset now, DetectionState state)
+    {
+        if (s.GpuUtil01 >= this.EndThresholdUtil01)
+        {
+            state.BelowAccum = TimeSpan.Zero;
+            return;
+        }
+
+        state.BelowAccum += this.SampleInterval;
+        if (state.BelowAccum < this.EndHold)
+        {
+            return;
+        }
+
+        var session = this._currentSession!;
+        session.EndedAt = now;
+        FinalizeSession(session);
+
+        lock (this._sessionsLock)
+        {
+            this.ProcessingSessions.Add(session);
+        }
+
+        this._currentSession = null;
+        state.AboveAccum = TimeSpan.Zero;
+        state.BelowAccum = TimeSpan.Zero;
+        state.Prev = null;
+    }
+
+    // Close running session on shutdown
+    private void CloseRunningSessionOnShutdown()
+    {
         lock (this._stateLock)
         {
-            if (this._currentSession != null)
+            var session = this._currentSession;
+            if (session == null)
             {
-                this._currentSession.EndedAt = DateTimeOffset.UtcNow;
-                FinalizeSession(this._currentSession);
-
-                lock (this._sessionsLock)
-                {
-                    this.ProcessingSessions.Add(this._currentSession);
-                }
-
-                this._currentSession = null;
+                return;
             }
+
+            session.EndedAt = DateTimeOffset.UtcNow;
+            FinalizeSession(session);
+
+            lock (this._sessionsLock)
+            {
+                this.ProcessingSessions.Add(session);
+            }
+
+            this._currentSession = null;
         }
     }
 

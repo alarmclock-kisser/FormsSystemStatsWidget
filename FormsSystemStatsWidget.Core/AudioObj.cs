@@ -134,28 +134,8 @@ namespace FormsSystemStatsWidget.Core
                     var sampleProvider = new RawSourceWaveStream(ms, sourceFormat).ToSampleProvider();
                     var resampler = new WdlResamplingSampleProvider(sampleProvider, targetSampleRate);
 
-                    // Read resampled data
-                    var resampledList = new List<float>();
-                    float[] buffer = new float[8192];
-                    int samplesRead;
-                    while ((samplesRead = resampler.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        // AddRange for performance and to avoid multiple resizes
-                        if (samplesRead == buffer.Length)
-                        {
-                            resampledList.AddRange(buffer);
-                        }
-                        else
-                        {
-                            for (int i = 0; i < samplesRead; i++)
-                            {
-                                resampledList.Add(buffer[i]);
-                            }
-                        }
-                    }
-
                     // Update the AudioObj with resampled data
-                    this.Data = resampledList.ToArray();
+                    this.Data = ReadAllSamples(resampler);
                     this.SampleRate = targetSampleRate;
                     // Update bit depth if requested, otherwise keep existing
                     if (targetBitDepth.HasValue)
@@ -183,7 +163,7 @@ namespace FormsSystemStatsWidget.Core
 
             try
             {
-                return await Task.Run(async () =>
+                return await Task.Run(() =>
                 {
                     var sourceFormat = WaveFormat.CreateIeeeFloatWaveFormat(this.SampleRate, this.Channels);
                     byte[] byteData = new byte[this.Data.Length * sizeof(float)];
@@ -221,25 +201,7 @@ namespace FormsSystemStatsWidget.Core
                         return false;
                     }
 
-                    var rechanneledList = new List<float>();
-                    float[] buffer = new float[8192];
-                    int samplesRead;
-                    while ((samplesRead = rechanneledProvider.Read(buffer, 0, buffer.Length)) > 0)
-                    {
-                        if (samplesRead == buffer.Length)
-                        {
-                            rechanneledList.AddRange(buffer);
-                        }
-                        else
-                        {
-                            for (int i = 0; i < samplesRead; i++)
-                            {
-                                rechanneledList.Add(buffer[i]);
-                            }
-                        }
-                    }
-
-                    this.Data = rechanneledList.ToArray();
+                    this.Data = ReadAllSamples(rechanneledProvider);
                     this.Channels = targetChannels;
 
                     return true;
@@ -253,32 +215,96 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
+        /// <summary>
+        /// Drains an <see cref="ISampleProvider"/> completely into a float array using a fixed read buffer.
+        /// </summary>
+        private static float[] ReadAllSamples(ISampleProvider provider)
+        {
+            var samples = new List<float>();
+            float[] buffer = new float[8192];
+            int samplesRead;
+            while ((samplesRead = provider.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                if (samplesRead == buffer.Length)
+                {
+                    samples.AddRange(buffer);
+                }
+                else
+                {
+                    for (int i = 0; i < samplesRead; i++)
+                    {
+                        samples.Add(buffer[i]);
+                    }
+                }
+            }
+
+            return samples.ToArray();
+        }
+
 
 
         public string? ExportWav(string? outputDirectory = null, string? fileName = null, int bits = 16)
         {
             outputDirectory ??= AudioHandling.ExportDirectory;
-            if (string.IsNullOrEmpty(outputDirectory))
+            if (!EnsureExportDirectory(outputDirectory))
             {
-                Logger.Log("Export directory is not set.");
                 return null;
             }
 
-            if (!Directory.Exists(outputDirectory))
+            string outputPath = ResolveUniqueWavPath(outputDirectory!, fileName);
+
+            try
             {
-                try
+                int outputBits = ResolveOutputBitDepth(bits);
+                WaveFormat format = CreateWaveFormat(outputBits);
+
+                using (var writer = new WaveFileWriter(outputPath, format))
                 {
-                    Directory.CreateDirectory(outputDirectory);
-                    Logger.Log($"Audio output directory '{outputDirectory}' created.");
+                    // Die float-Daten in den Writer schreiben.
+                    // WriteSamples bei NAudio konvertiert automatisch basierend auf dem 'format'.
+                    writer.WriteSamples(this.Data, 0, this.Data.Length);
                 }
-                catch (Exception ex)
-                {
-                    Logger.Log($"Failed to create export directory: {outputDirectory}");
-                    Logger.Log(ex.ToString());
-                    return null;
-                }
+
+                Logger.Log($"Audio exported successfully: {outputPath}");
+                return outputPath;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"Failed to export audio to WAV: {outputPath}");
+                Logger.Log(ex.ToString());
+                return null;
+            }
+        }
+
+        private static bool EnsureExportDirectory(string? outputDirectory)
+        {
+            if (string.IsNullOrEmpty(outputDirectory))
+            {
+                Logger.Log("Export directory is not set.");
+                return false;
             }
 
+            if (Directory.Exists(outputDirectory))
+            {
+                return true;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(outputDirectory);
+                Logger.Log($"Audio output directory '{outputDirectory}' created.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"Failed to create export directory: {outputDirectory}");
+                Logger.Log(ex.ToString());
+                return false;
+            }
+        }
+
+        private string ResolveUniqueWavPath(string outputDirectory, string? fileName)
+        {
             // Dateinamen bestimmen (Name, Id oder Fallback)
             string baseName = fileName ?? (!string.IsNullOrEmpty(this.Name) ? this.Name : this.Id.ToString());
             string outputPath = Path.Combine(outputDirectory, $"{baseName}.wav");
@@ -290,46 +316,22 @@ namespace FormsSystemStatsWidget.Core
                 outputPath = Path.Combine(outputDirectory, $"{baseName} ({copyIndex++}).wav");
             }
 
-            string? outFile;
-            try
-            {
-                // Bestimme die Ausgabebit-Tiefe: falls der Caller den Standard (16) übergeben hat,
-                // aber dieses AudioObj eine eigene BitDepth gesetzt hat, benutze diese.
-                int outputBits = bits;
-                if (this.BitDepth > 0 && bits == 16)
-                {
-                    outputBits = this.BitDepth;
-                }
+            return outputPath;
+        }
 
-                // NAudio WaveFormat definieren. Für 32 Bit nutzen wir das IEEE-Float-Format.
-                WaveFormat format;
-                if (outputBits == 32)
-                {
-                    format = WaveFormat.CreateIeeeFloatWaveFormat(this.SampleRate, this.Channels);
-                }
-                else
-                {
-                    format = new WaveFormat(this.SampleRate, outputBits, this.Channels);
-                }
+        private int ResolveOutputBitDepth(int requestedBits)
+        {
+            // Falls der Caller den Standard (16) übergeben hat, aber dieses AudioObj eine eigene
+            // BitDepth gesetzt hat, benutze diese.
+            return this.BitDepth > 0 && requestedBits == 16 ? this.BitDepth : requestedBits;
+        }
 
-                using (var writer = new WaveFileWriter(outputPath, format))
-                {
-                    // Die float-Daten in den Writer schreiben
-                    // WriteSamples bei NAudio konvertiert automatisch basierend auf dem 'format'
-                    writer.WriteSamples(this.Data, 0, this.Data.Length);
-                }
-
-                Logger.Log($"Audio exported successfully: {outputPath}");
-                outFile = outputPath;
-            }
-            catch (Exception ex)
-            {
-                Logger.Log($"Failed to export audio to WAV: {outputPath}");
-                Logger.Log(ex.ToString());
-                outFile = null;
-            }
-
-            return outFile;
+        private WaveFormat CreateWaveFormat(int outputBits)
+        {
+            // NAudio WaveFormat definieren. Für 32 Bit nutzen wir das IEEE-Float-Format.
+            return outputBits == 32
+                ? WaveFormat.CreateIeeeFloatWaveFormat(this.SampleRate, this.Channels)
+                : new WaveFormat(this.SampleRate, outputBits, this.Channels);
         }
 
         public async Task<string?> ExportWavAsync(string? outputDirectory = null, string? fileName = null, int bits = 16)

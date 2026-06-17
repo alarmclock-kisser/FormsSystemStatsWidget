@@ -173,20 +173,7 @@ namespace FormsSystemStatsWidget.Core
 
             waveIn.DataAvailable += (s, e) =>
             {
-                int step = bytesPerSample;
-                float peak = 0f;
-
-                for (int i = 0; i + (step - 1) < e.BytesRecorded; i += step)
-                {
-                    if (!TryReadSample(e.Buffer, i, bytesPerSample, out float sample))
-                    {
-                        continue;
-                    }
-
-                    sampleList.Add(sample);
-                    peak = Math.Max(peak, Math.Abs(sample));
-                }
-
+                float peak = AppendSamples(e.Buffer, e.BytesRecorded, bytesPerSample, sampleList);
                 try { onLevel?.Invoke(Math.Clamp(peak, 0f, 1f)); } catch { }
             };
 
@@ -200,20 +187,7 @@ namespace FormsSystemStatsWidget.Core
             waveIn.StartRecording();
             Logger.Log($"Recording started on device {deviceIndex.Value} with format {waveFormat.SampleRate}Hz, {waveFormat.BitsPerSample}bit, {waveFormat.Channels}ch");
 
-            try
-            {
-                await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                StopWaveInSafely(waveIn);
-            }
-
-            Logger.Log("Recording stopped. Processing audio...");
-            var result = await tcs.Task.ConfigureAwait(false);
-            this.EndRecordingSession();
-
-            return result;
+            return await this.AwaitRecordingCompletionAsync(waveIn, tcs, ct, "Recording stopped. Processing audio...").ConfigureAwait(false);
         }
 
         public async Task<AudioObj?> RecordAudioAutoAsync(double? autoStopSilenceSeconds = null, CancellationToken ct = default)
@@ -236,8 +210,7 @@ namespace FormsSystemStatsWidget.Core
             var sampleList = new List<float>();
 
             int bytesPerSample = waveFormat.BitsPerSample / 8;
-            double currentSilenceSeconds = 0.0;
-            float silenceThreshold = 0.015f;
+            var silenceTracker = new SilenceTracker();
 
             using var waveIn = new WaveInEvent
             {
@@ -247,38 +220,8 @@ namespace FormsSystemStatsWidget.Core
 
             waveIn.DataAvailable += (s, e) =>
             {
-                float peak = 0f;
-                int step = bytesPerSample;
-
-                for (int i = 0; i + (step - 1) < e.BytesRecorded; i += step)
-                {
-                    if (!TryReadSample(e.Buffer, i, bytesPerSample, out float sample))
-                    {
-                        continue;
-                    }
-
-                    sampleList.Add(sample);
-                    peak = Math.Max(peak, Math.Abs(sample));
-                }
-
-                if (autoStopSilenceSeconds.HasValue)
-                {
-                    if (peak > silenceThreshold)
-                    {
-                        currentSilenceSeconds = 0.0;
-                    }
-                    else
-                    {
-                        double chunkDuration = (double) e.BytesRecorded / waveFormat.AverageBytesPerSecond;
-                        currentSilenceSeconds += chunkDuration;
-
-                        if (currentSilenceSeconds >= autoStopSilenceSeconds.Value && !this.recordingCts.IsCancellationRequested)
-                        {
-                            Logger.Log($"Silence of {autoStopSilenceSeconds}s detected. Stopping recording.");
-                            this.recordingCts.Cancel();
-                        }
-                    }
-                }
+                float peak = AppendSamples(e.Buffer, e.BytesRecorded, bytesPerSample, sampleList);
+                this.UpdateSilenceTracking(silenceTracker, peak, e.BytesRecorded, waveFormat, autoStopSilenceSeconds);
             };
 
             waveIn.RecordingStopped += (s, e) =>
@@ -291,13 +234,80 @@ namespace FormsSystemStatsWidget.Core
             waveIn.StartRecording();
             Logger.Log($"Auto-Recording started on device {deviceIndex} with format {waveFormat.SampleRate}Hz, {waveFormat.BitsPerSample}bit, {waveFormat.Channels}ch");
 
+            return await this.AwaitRecordingCompletionAsync(waveIn, tcs, linkedToken, null).ConfigureAwait(false);
+        }
+
+        private sealed class SilenceTracker
+        {
+            public double CurrentSilenceSeconds;
+            public const float SilenceThreshold = 0.015f;
+        }
+
+        private static float AppendSamples(byte[] buffer, int bytesRecorded, int bytesPerSample, List<float> sampleList)
+        {
+            int step = bytesPerSample;
+            float peak = 0f;
+
+            for (int i = 0; i + (step - 1) < bytesRecorded; i += step)
+            {
+                if (!TryReadSample(buffer, i, bytesPerSample, out float sample))
+                {
+                    continue;
+                }
+
+                sampleList.Add(sample);
+                peak = Math.Max(peak, Math.Abs(sample));
+            }
+
+            return peak;
+        }
+
+        private void UpdateSilenceTracking(
+            SilenceTracker tracker,
+            float peak,
+            int bytesRecorded,
+            WaveFormat waveFormat,
+            double? autoStopSilenceSeconds)
+        {
+            if (!autoStopSilenceSeconds.HasValue)
+            {
+                return;
+            }
+
+            if (peak > SilenceTracker.SilenceThreshold)
+            {
+                tracker.CurrentSilenceSeconds = 0.0;
+                return;
+            }
+
+            double chunkDuration = (double) bytesRecorded / waveFormat.AverageBytesPerSecond;
+            tracker.CurrentSilenceSeconds += chunkDuration;
+
+            if (tracker.CurrentSilenceSeconds >= autoStopSilenceSeconds.Value && !this.recordingCts.IsCancellationRequested)
+            {
+                Logger.Log($"Silence of {autoStopSilenceSeconds}s detected. Stopping recording.");
+                this.recordingCts.Cancel();
+            }
+        }
+
+        private async Task<AudioObj?> AwaitRecordingCompletionAsync(
+            WaveInEvent waveIn,
+            TaskCompletionSource<AudioObj> tcs,
+            CancellationToken cancellationToken,
+            string? stoppedLogMessage)
+        {
             try
             {
-                await Task.Delay(Timeout.Infinite, linkedToken).ConfigureAwait(false);
+                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 StopWaveInSafely(waveIn);
+            }
+
+            if (stoppedLogMessage != null)
+            {
+                Logger.Log(stoppedLogMessage);
             }
 
             var result = await tcs.Task.ConfigureAwait(false);

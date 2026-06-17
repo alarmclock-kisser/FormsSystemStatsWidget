@@ -146,6 +146,25 @@ namespace FormsSystemStatsWidget.Core
         {
             hardware.Update();
 
+            CollectCpuPowerSensors(hardware, preferredPowerValues, fallbackPowerValues);
+            CollectCpuTemperatureSensors(hardware, preferredTemperatureValues, fallbackTemperatureValues);
+
+            foreach (OhmHardware.IHardware subHardware in hardware.SubHardware)
+            {
+                CollectOpenHardwareMonitorSensorsRecursive(
+                    subHardware,
+                    preferredTemperatureValues,
+                    fallbackTemperatureValues,
+                    preferredPowerValues,
+                    fallbackPowerValues);
+            }
+        }
+
+        private static void CollectCpuPowerSensors(
+            OhmHardware.IHardware hardware,
+            List<double> preferredPowerValues,
+            List<double> fallbackPowerValues)
+        {
             foreach (OhmHardware.ISensor sensor in hardware.Sensors)
             {
                 if (sensor.SensorType != OhmHardware.SensorType.Power || !sensor.Value.HasValue)
@@ -160,25 +179,12 @@ namespace FormsSystemStatsWidget.Core
                 }
 
                 string sensorName = sensor.Name ?? string.Empty;
-                string hardwareName = sensor.Hardware.Name ?? string.Empty;
-
-                bool isCpuScoped = sensor.Hardware.HardwareType == OhmHardware.HardwareType.Cpu
-                                   || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-                                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                                   || sensorName.Contains("IA", StringComparison.OrdinalIgnoreCase)
-                                   || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-                                   || hardwareName.Contains("Intel", StringComparison.OrdinalIgnoreCase);
-
-                if (!isCpuScoped)
+                if (!IsCpuScopedPowerSensor(sensor, sensorName))
                 {
                     continue;
                 }
 
-                if (sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                    || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
-                    || sensorName.Contains("CPU Total", StringComparison.OrdinalIgnoreCase)
-                    || sensorName.Contains("CPU Cores", StringComparison.OrdinalIgnoreCase)
-                    || sensorName.Contains("IA Cores", StringComparison.OrdinalIgnoreCase))
+                if (IsPreferredPowerSensor(sensorName))
                 {
                     preferredPowerValues.Add(value);
                 }
@@ -187,7 +193,13 @@ namespace FormsSystemStatsWidget.Core
                     fallbackPowerValues.Add(value);
                 }
             }
+        }
 
+        private static void CollectCpuTemperatureSensors(
+            OhmHardware.IHardware hardware,
+            List<double> preferredTemperatureValues,
+            List<double> fallbackTemperatureValues)
+        {
             foreach (OhmHardware.ISensor sensor in hardware.Sensors)
             {
                 if (sensor.SensorType != OhmHardware.SensorType.Temperature || !sensor.Value.HasValue)
@@ -202,27 +214,12 @@ namespace FormsSystemStatsWidget.Core
                 }
 
                 string sensorName = sensor.Name ?? string.Empty;
-                string hardwareName = sensor.Hardware.Name ?? string.Empty;
-
-                bool isCpuScoped = sensor.Hardware.HardwareType == OhmHardware.HardwareType.Cpu
-                                   || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-                                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                                   || sensorName.Contains("Core", StringComparison.OrdinalIgnoreCase)
-                                   || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
-                                   || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
-                                   || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
-                                   || hardwareName.Contains("Intel", StringComparison.OrdinalIgnoreCase);
-
-                if (!isCpuScoped)
+                if (!IsCpuScopedTemperatureSensor(sensor, sensorName))
                 {
                     continue;
                 }
 
-                if (sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
-                    || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
-                    || sensorName.Contains("Core Max", StringComparison.OrdinalIgnoreCase)
-                    || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
-                    || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase))
+                if (IsPreferredTemperatureSensor(sensorName))
                 {
                     preferredTemperatureValues.Add(value);
                 }
@@ -231,16 +228,48 @@ namespace FormsSystemStatsWidget.Core
                     fallbackTemperatureValues.Add(value);
                 }
             }
+        }
 
-            foreach (OhmHardware.IHardware subHardware in hardware.SubHardware)
-            {
-                CollectOpenHardwareMonitorSensorsRecursive(
-                    subHardware,
-                    preferredTemperatureValues,
-                    fallbackTemperatureValues,
-                    preferredPowerValues,
-                    fallbackPowerValues);
-            }
+        private static bool IsCpuScopedPowerSensor(OhmHardware.ISensor sensor, string sensorName)
+        {
+            string hardwareName = sensor.Hardware.Name ?? string.Empty;
+            return sensor.Hardware.HardwareType == OhmHardware.HardwareType.Cpu
+                   || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("IA", StringComparison.OrdinalIgnoreCase)
+                   || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                   || hardwareName.Contains("Intel", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPreferredPowerSensor(string sensorName)
+        {
+            return sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("CPU Total", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("CPU Cores", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("IA Cores", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsCpuScopedTemperatureSensor(OhmHardware.ISensor sensor, string sensorName)
+        {
+            string hardwareName = sensor.Hardware.Name ?? string.Empty;
+            return sensor.Hardware.HardwareType == OhmHardware.HardwareType.Cpu
+                   || sensorName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Core", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+                   || hardwareName.Contains("CPU", StringComparison.OrdinalIgnoreCase)
+                   || hardwareName.Contains("Intel", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsPreferredTemperatureSensor(string sensorName)
+        {
+            return sensorName.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("CPU Package", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Core Max", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Tdie", StringComparison.OrdinalIgnoreCase)
+                   || sensorName.Contains("Tctl", StringComparison.OrdinalIgnoreCase);
         }
 
         private static PerformanceCounter[] CreateCpuCounters()
@@ -640,56 +669,9 @@ namespace FormsSystemStatsWidget.Core
 
                 try
                 {
-                    Dictionary<int, TimeSpan> currentProcessCpuTimes = new(processes.Length);
-                    List<(string processName, double cpuPercent)> processUsages = [];
-
-                    foreach (Process process in processes)
-                    {
-                        try
-                        {
-                            currentProcessCpuTimes[process.Id] = process.TotalProcessorTime;
-                        }
-                        catch
-                        {
-                        }
-                    }
-
-                    if (_lastProcessSampleUtc != DateTime.MinValue)
-                    {
-                        double elapsedSeconds = (nowUtc - _lastProcessSampleUtc).TotalSeconds;
-                        if (elapsedSeconds > 0.05d)
-                        {
-                            foreach (Process process in processes)
-                            {
-                                try
-                                {
-                                    if (!currentProcessCpuTimes.TryGetValue(process.Id, out TimeSpan currentCpuTime)
-                                        || !_lastProcessCpuTimes.TryGetValue(process.Id, out TimeSpan previousCpuTime))
-                                    {
-                                        continue;
-                                    }
-
-                                    double cpuTimeDeltaSeconds = (currentCpuTime - previousCpuTime).TotalSeconds;
-                                    if (cpuTimeDeltaSeconds <= 0)
-                                    {
-                                        continue;
-                                    }
-
-                                    double cpuPercent = (cpuTimeDeltaSeconds / (elapsedSeconds * Environment.ProcessorCount)) * 100d;
-                                    if (cpuPercent < 0.05d)
-                                    {
-                                        continue;
-                                    }
-
-                                    string processName = string.IsNullOrWhiteSpace(process.ProcessName) ? "n/a" : process.ProcessName;
-                                    processUsages.Add((processName, Math.Min(cpuPercent, 100d)));
-                                }
-                                catch
-                                {
-                                }
-                            }
-                        }
-                    }
+                    Dictionary<int, TimeSpan> currentProcessCpuTimes = SnapshotProcessCpuTimes(processes);
+                    List<(string processName, double cpuPercent)> processUsages =
+                        CalculateProcessUsages(processes, currentProcessCpuTimes, nowUtc);
 
                     _lastProcessCpuTimes = currentProcessCpuTimes;
                     _lastProcessSampleUtc = nowUtc;
@@ -707,6 +689,84 @@ namespace FormsSystemStatsWidget.Core
                         process.Dispose();
                     }
                 }
+            }
+        }
+
+        private static Dictionary<int, TimeSpan> SnapshotProcessCpuTimes(Process[] processes)
+        {
+            Dictionary<int, TimeSpan> currentProcessCpuTimes = new(processes.Length);
+
+            foreach (Process process in processes)
+            {
+                try
+                {
+                    currentProcessCpuTimes[process.Id] = process.TotalProcessorTime;
+                }
+                catch
+                {
+                }
+            }
+
+            return currentProcessCpuTimes;
+        }
+
+        private static List<(string processName, double cpuPercent)> CalculateProcessUsages(
+            Process[] processes,
+            Dictionary<int, TimeSpan> currentProcessCpuTimes,
+            DateTime nowUtc)
+        {
+            List<(string processName, double cpuPercent)> processUsages = [];
+
+            if (_lastProcessSampleUtc == DateTime.MinValue)
+            {
+                return processUsages;
+            }
+
+            double elapsedSeconds = (nowUtc - _lastProcessSampleUtc).TotalSeconds;
+            if (elapsedSeconds <= 0.05d)
+            {
+                return processUsages;
+            }
+
+            foreach (Process process in processes)
+            {
+                TryAddProcessUsage(process, currentProcessCpuTimes, elapsedSeconds, processUsages);
+            }
+
+            return processUsages;
+        }
+
+        private static void TryAddProcessUsage(
+            Process process,
+            Dictionary<int, TimeSpan> currentProcessCpuTimes,
+            double elapsedSeconds,
+            List<(string processName, double cpuPercent)> processUsages)
+        {
+            try
+            {
+                if (!currentProcessCpuTimes.TryGetValue(process.Id, out TimeSpan currentCpuTime)
+                    || !_lastProcessCpuTimes.TryGetValue(process.Id, out TimeSpan previousCpuTime))
+                {
+                    return;
+                }
+
+                double cpuTimeDeltaSeconds = (currentCpuTime - previousCpuTime).TotalSeconds;
+                if (cpuTimeDeltaSeconds <= 0)
+                {
+                    return;
+                }
+
+                double cpuPercent = (cpuTimeDeltaSeconds / (elapsedSeconds * Environment.ProcessorCount)) * 100d;
+                if (cpuPercent < 0.05d)
+                {
+                    return;
+                }
+
+                string processName = string.IsNullOrWhiteSpace(process.ProcessName) ? "n/a" : process.ProcessName;
+                processUsages.Add((processName, Math.Min(cpuPercent, 100d)));
+            }
+            catch
+            {
             }
         }
 
@@ -783,159 +843,17 @@ namespace FormsSystemStatsWidget.Core
 
                 _lastTemperatureSampleUtc = nowUtc;
 
-                List<double> preferredTemperatureValues = [];
-                List<double> fallbackTemperatureValues = [];
-                List<double> preferredPowerValues = [];
-                List<double> fallbackPowerValues = [];
-                List<double> preferredVoltageValues = [];
-                List<double> fallbackVoltageValues = [];
-                List<double> preferredCurrentValues = [];
-                List<double> fallbackCurrentValues = [];
-                List<double> preferredEnergyValues = [];
-                List<double> fallbackEnergyValues = [];
-
-                try
-                {
-                    EnsureHardwareComputerOpened();
-
-                    foreach (IHardware hardware in _hardwareComputer.Hardware)
-                    {
-                        try
-                        {
-                            UpdateHardwareRecursive(hardware);
-
-                            List<ISensor> sensors = [];
-                            CollectCpuRelevantSensorsRecursive(hardware, sensors);
-
-                            foreach (ISensor sensor in sensors)
-                            {
-                                double value = sensor.Value!.Value;
-                                if (sensor.SensorType == SensorType.Temperature)
-                                {
-                                    if (value is <= 0d or >= 150d)
-                                    {
-                                        continue;
-                                    }
-
-                                    if (IsLikelyCpuTemperatureSensor(sensor))
-                                    {
-                                        fallbackTemperatureValues.Add(value);
-                                        if (IsPreferredCpuTemperatureSensor(sensor))
-                                        {
-                                            preferredTemperatureValues.Add(value);
-                                        }
-                                    }
-                                }
-                                else if (sensor.SensorType == SensorType.Power)
-                                {
-                                    if (value is <= 0d or >= 500d)
-                                    {
-                                        continue;
-                                    }
-
-                                    if (IsLikelyCpuPowerSensor(sensor))
-                                    {
-                                        fallbackPowerValues.Add(value);
-                                        if (IsPreferredCpuPowerSensor(sensor))
-                                        {
-                                            preferredPowerValues.Add(value);
-                                        }
-                                    }
-                                }
-                                else if (sensor.SensorType == SensorType.Voltage)
-                                {
-                                    if (value is <= 0d or >= 3d)
-                                    {
-                                        continue;
-                                    }
-
-                                    if (IsLikelyCpuVoltageSensor(sensor))
-                                    {
-                                        fallbackVoltageValues.Add(value);
-                                        if (sensor.Hardware.HardwareType == HardwareType.Cpu || (sensor.Name ?? string.Empty).Contains("Package", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            preferredVoltageValues.Add(value);
-                                        }
-                                    }
-                                }
-                                else if (sensor.SensorType == SensorType.Current)
-                                {
-                                    if (value is <= 0d or >= 250d)
-                                    {
-                                        continue;
-                                    }
-
-                                    if (IsLikelyCpuCurrentSensor(sensor))
-                                    {
-                                        fallbackCurrentValues.Add(value);
-                                        if (sensor.Hardware.HardwareType == HardwareType.Cpu || (sensor.Name ?? string.Empty).Contains("Package", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            preferredCurrentValues.Add(value);
-                                        }
-                                    }
-                                }
-                                else if (sensor.SensorType == SensorType.Energy)
-                                {
-                                    if (value <= 0d)
-                                    {
-                                        continue;
-                                    }
-
-                                    if (IsLikelyCpuEnergySensor(sensor))
-                                    {
-                                        fallbackEnergyValues.Add(value);
-                                        if (sensor.Hardware.HardwareType == HardwareType.Cpu || (sensor.Name ?? string.Empty).Contains("Package", StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            preferredEnergyValues.Add(value);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
-                catch
+                var buckets = new CpuSensorBuckets();
+                if (!TryCollectCpuSensorBuckets(buckets))
                 {
                     _lastCpuTelemetrySnapshot = new CpuTelemetrySnapshot(null, null);
                     return _lastCpuTelemetrySnapshot;
                 }
 
-                double? averageTemperatureCelsius = preferredTemperatureValues.Count > 0
-                    ? preferredTemperatureValues.Average()
-                    : fallbackTemperatureValues.Count > 0
-                        ? fallbackTemperatureValues.Average()
-                        : null;
-
+                double? averageTemperatureCelsius = AveragePreferredOrFallback(buckets.PreferredTemperature, buckets.FallbackTemperature);
                 averageTemperatureCelsius ??= TryGetCpuTemperatureFromWmi();
 
-                double? packagePowerWatts = preferredPowerValues.Count > 0
-                    ? preferredPowerValues.Average()
-                    : fallbackPowerValues.Count > 0
-                        ? fallbackPowerValues.Average()
-                        : null;
-
-                packagePowerWatts ??= TryCalculatePowerFromVoltageAndCurrent(
-                    preferredVoltageValues,
-                    fallbackVoltageValues,
-                    preferredCurrentValues,
-                    fallbackCurrentValues);
-
-                if (!packagePowerWatts.HasValue)
-                {
-                    double? energyValue = preferredEnergyValues.Count > 0
-                        ? preferredEnergyValues.Average()
-                        : fallbackEnergyValues.Count > 0
-                            ? fallbackEnergyValues.Average()
-                            : null;
-
-                    if (energyValue.HasValue)
-                    {
-                        packagePowerWatts = TryCalculatePowerFromEnergySensor(energyValue.Value, nowUtc);
-                    }
-                }
+                double? packagePowerWatts = ResolvePackagePower(buckets, nowUtc);
 
                 if (!averageTemperatureCelsius.HasValue || !packagePowerWatts.HasValue)
                 {
@@ -949,116 +867,249 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
+        private static bool TryCollectCpuSensorBuckets(CpuSensorBuckets buckets)
+        {
+            try
+            {
+                EnsureHardwareComputerOpened();
+
+                foreach (IHardware hardware in _hardwareComputer.Hardware)
+                {
+                    try
+                    {
+                        UpdateHardwareRecursive(hardware);
+
+                        List<ISensor> sensors = [];
+                        CollectCpuRelevantSensorsRecursive(hardware, sensors);
+
+                        foreach (ISensor sensor in sensors)
+                        {
+                            ClassifyCpuSensor(sensor, buckets);
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void ClassifyCpuSensor(ISensor sensor, CpuSensorBuckets buckets)
+        {
+            double value = sensor.Value!.Value;
+            switch (sensor.SensorType)
+            {
+                case SensorType.Temperature:
+                    if (value is <= 0d or >= 150d)
+                    {
+                        return;
+                    }
+
+                    AddSensorValue(buckets.FallbackTemperature, buckets.PreferredTemperature, value, IsLikelyCpuTemperatureSensor(sensor), IsPreferredCpuTemperatureSensor(sensor));
+                    break;
+                case SensorType.Power:
+                    if (value is <= 0d or >= 500d)
+                    {
+                        return;
+                    }
+
+                    AddSensorValue(buckets.FallbackPower, buckets.PreferredPower, value, IsLikelyCpuPowerSensor(sensor), IsPreferredCpuPowerSensor(sensor));
+                    break;
+                case SensorType.Voltage:
+                    if (value is <= 0d or >= 3d)
+                    {
+                        return;
+                    }
+
+                    AddSensorValue(buckets.FallbackVoltage, buckets.PreferredVoltage, value, IsLikelyCpuVoltageSensor(sensor), IsCpuPackageSensor(sensor));
+                    break;
+                case SensorType.Current:
+                    if (value is <= 0d or >= 250d)
+                    {
+                        return;
+                    }
+
+                    AddSensorValue(buckets.FallbackCurrent, buckets.PreferredCurrent, value, IsLikelyCpuCurrentSensor(sensor), IsCpuPackageSensor(sensor));
+                    break;
+                case SensorType.Energy:
+                    if (value <= 0d)
+                    {
+                        return;
+                    }
+
+                    AddSensorValue(buckets.FallbackEnergy, buckets.PreferredEnergy, value, IsLikelyCpuEnergySensor(sensor), IsCpuPackageSensor(sensor));
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        private static void AddSensorValue(List<double> fallbackValues, List<double> preferredValues, double value, bool isLikely, bool isPreferred)
+        {
+            if (!isLikely)
+            {
+                return;
+            }
+
+            fallbackValues.Add(value);
+            if (isPreferred)
+            {
+                preferredValues.Add(value);
+            }
+        }
+
+        private static bool IsCpuPackageSensor(ISensor sensor)
+        {
+            return sensor.Hardware.HardwareType == HardwareType.Cpu
+                || (sensor.Name ?? string.Empty).Contains("Package", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static double? AveragePreferredOrFallback(List<double> preferredValues, List<double> fallbackValues)
+        {
+            if (preferredValues.Count > 0)
+            {
+                return preferredValues.Average();
+            }
+
+            return fallbackValues.Count > 0 ? fallbackValues.Average() : null;
+        }
+
+        private static double? ResolvePackagePower(CpuSensorBuckets buckets, DateTime nowUtc)
+        {
+            double? packagePowerWatts = AveragePreferredOrFallback(buckets.PreferredPower, buckets.FallbackPower);
+
+            packagePowerWatts ??= TryCalculatePowerFromVoltageAndCurrent(
+                buckets.PreferredVoltage,
+                buckets.FallbackVoltage,
+                buckets.PreferredCurrent,
+                buckets.FallbackCurrent);
+
+            if (!packagePowerWatts.HasValue)
+            {
+                double? energyValue = AveragePreferredOrFallback(buckets.PreferredEnergy, buckets.FallbackEnergy);
+                if (energyValue.HasValue)
+                {
+                    packagePowerWatts = TryCalculatePowerFromEnergySensor(energyValue.Value, nowUtc);
+                }
+            }
+
+            return packagePowerWatts;
+        }
+
+        private sealed class CpuSensorBuckets
+        {
+            public List<double> PreferredTemperature { get; } = [];
+            public List<double> FallbackTemperature { get; } = [];
+            public List<double> PreferredPower { get; } = [];
+            public List<double> FallbackPower { get; } = [];
+            public List<double> PreferredVoltage { get; } = [];
+            public List<double> FallbackVoltage { get; } = [];
+            public List<double> PreferredCurrent { get; } = [];
+            public List<double> FallbackCurrent { get; } = [];
+            public List<double> PreferredEnergy { get; } = [];
+            public List<double> FallbackEnergy { get; } = [];
+        }
+
         /// <summary>
         /// Malt die CPU-Auslastung pro Kern als Bitmap. Async, da das Rendern bei vielen Kernen etwas dauern kann.
         /// </summary>
         public static Task<Bitmap> RenderCoresBitmapAsync(float[] usages, int width, int height, Color? backColor = null, Color? renderPercentagesColor = null, CancellationToken ct = default)
         {
             backColor ??= Color.White;
-            return Task.Run(() =>
+            return Task.Run(() => RenderCoresBitmap(usages, width, height, backColor.Value, renderPercentagesColor, ct), ct);
+        }
+
+        private static Bitmap RenderCoresBitmap(float[] usages, int width, int height, Color backColor, Color? renderPercentagesColor, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            int count = Math.Max(1, usages?.Length ?? 1);
+            var (cols, rows) = CalculateCoreGridDimensions(count, width, height);
+
+            var bmp = new Bitmap(Math.Max(1, width), Math.Max(1, height));
+            using var g = Graphics.FromImage(bmp);
+            g.Clear(backColor);
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+
+            const int pad = 2;
+            int gridW = Math.Max(cols, width - pad * (cols + 1));
+            int gridH = Math.Max(rows, height - pad * (rows + 1));
+            int cellW = gridW / cols;
+            int cellH = gridH / rows;
+
+            using var borderPen = new Pen(Color.Black, 1f);
+            using var fillBrush = new SolidBrush(Color.FromArgb(64, 160, 255));
+            using var highBrush = new SolidBrush(Color.FromArgb(255, 96, 96));
+
+            for (int i = 0; i < count; i++)
             {
                 ct.ThrowIfCancellationRequested();
+                int x = pad + (i % cols) * (cellW + pad);
+                int y = pad + (i / cols) * (cellH + pad);
+                float usage = Math.Clamp(usages?[i] ?? 0f, 0f, 1f);
 
-                int count = Math.Max(1, usages?.Length ?? 1);
-                var (cols, rows) = CalculateCoreGridDimensions(count, width, height);
+                DrawCoreCell(g, new Rectangle(x, y, cellW, cellH), usage, borderPen, fillBrush, highBrush, renderPercentagesColor);
+            }
 
-                var bmp = new Bitmap(Math.Max(1, width), Math.Max(1, height));
-                using (var g = Graphics.FromImage(bmp))
+            return bmp;
+        }
+
+        private static void DrawCoreCell(Graphics g, Rectangle rect, float usage, Pen borderPen, SolidBrush fillBrush, SolidBrush highBrush, Color? renderPercentagesColor)
+        {
+            g.DrawRectangle(borderPen, rect);
+
+            int filledH = (int) Math.Round(usage * rect.Height);
+            if (filledH > 0)
+            {
+                var fillRect = new Rectangle(rect.X + 1, rect.Y + rect.Height - filledH + 1, Math.Max(1, rect.Width - 2), Math.Max(1, filledH - 2));
+                SolidBrush brush = usage >= 0.8f ? highBrush : fillBrush;
+                g.FillRectangle(brush, fillRect);
+            }
+
+            if (renderPercentagesColor.HasValue)
+            {
+                DrawCorePercentageText(g, rect, usage, renderPercentagesColor.Value);
+            }
+        }
+
+        private static void DrawCorePercentageText(Graphics g, Rectangle rect, float usage, Color textColor)
+        {
+            using var textBrush = new SolidBrush(textColor);
+            string percentText = $"{Math.Round(usage * 100f)}%";
+
+            using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            float fontSize = ComputeFittingFontSize(g, percentText, rect.Width, rect.Height);
+
+            using var textFont = new Font(SystemFonts.DefaultFont.FontFamily, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+            g.DrawString(percentText, textFont, textBrush, rect, sf);
+        }
+
+        private static float ComputeFittingFontSize(Graphics g, string text, int cellW, int cellH)
+        {
+            // Start with a size relative to the cell and shrink until the text fits or hits the minimum.
+            float maxFont = Math.Min(cellW, cellH) * 0.45f;
+            float fontSize = Math.Max(6f, maxFont);
+
+            while (fontSize > 6f)
+            {
+                using var testFont = new Font(SystemFonts.DefaultFont.FontFamily, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
+                SizeF size = g.MeasureString(text, testFont);
+                if (size.Width <= cellW - 4 && size.Height <= cellH - 4)
                 {
-                    g.Clear(backColor.Value);
-                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-
-                    // Padding and cell sizes
-                    int pad = 2;
-                    int gridW = width - pad * (cols + 1);
-                    int gridH = height - pad * (rows + 1);
-                    if (gridW < cols)
-                    {
-                        gridW = cols;
-                    }
-
-                    if (gridH < rows)
-                    {
-                        gridH = rows;
-                    }
-
-                    int cellW = gridW / cols;
-                    int cellH = gridH / rows;
-
-                    using var borderPen = new Pen(Color.Black, 1f);
-                    using var fillBrush = new SolidBrush(Color.FromArgb(64, 160, 255));
-                    using var highBrush = new SolidBrush(Color.FromArgb(255, 96, 96));
-
-                    for (int i = 0; i < count; i++)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        int r = i / cols;
-                        int c = i % cols;
-                        int x = pad + c * (cellW + pad);
-                        int y = pad + r * (cellH + pad);
-
-                        // Outer rect
-                        var rect = new Rectangle(x, y, cellW, cellH);
-                        g.DrawRectangle(borderPen, rect);
-
-                        // Fill proportionally from bottom based on usage
-                        float u = usages?[i] ?? 0;
-                        if (u < 0f)
-                        {
-                            u = 0f;
-                        }
-
-                        if (u > 1f)
-                        {
-                            u = 1f;
-                        }
-
-                        int filledH = (int) Math.Round(u * cellH);
-                        if (filledH > 0)
-                        {
-                            var fillRect = new Rectangle(x + 1, y + cellH - filledH + 1, Math.Max(1, cellW - 2), Math.Max(1, filledH - 2));
-                            // use red above 80%
-                            var brush = u >= 0.8f ? highBrush : fillBrush;
-                            g.FillRectangle(brush, fillRect);
-                        }
-
-                        // Optionally render the percentage text centered in the cell.
-                        if (renderPercentagesColor.HasValue)
-                        {
-                            using var textBrush = new SolidBrush(renderPercentagesColor.Value);
-                            // Percentage text (rounded integer percent)
-                            string percentText = $"{Math.Round(u * 100f)}%";
-
-                            // Determine dynamic font size so the text fits inside the cell.
-                            // Start with a reasonable maximum relative to cell size and decrease until it fits or reaches a minimum size.
-                            float maxFont = Math.Min(cellW, cellH) * 0.45f;
-                            float fontSize = Math.Max(6f, maxFont);
-
-                            using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-
-                            // Measure and adjust font size. Use GraphicsUnit.Pixel for consistent measurements in pixels.
-                            for (; ; )
-                            {
-                                using var testFont = new Font(SystemFonts.DefaultFont.FontFamily, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
-                                var size = g.MeasureString(percentText, testFont);
-                                // Add a small padding
-                                if ((size.Width > cellW - 4 || size.Height > cellH - 4) && fontSize > 6f)
-                                {
-                                    fontSize -= 1f;
-                                    continue;
-                                }
-                                break;
-                            }
-
-                            using var textFont = new Font(SystemFonts.DefaultFont.FontFamily, fontSize, FontStyle.Bold, GraphicsUnit.Pixel);
-                            g.DrawString(percentText, textFont, textBrush, rect, sf);
-                        }
-                    }
+                    break;
                 }
 
-                return bmp;
-            }, ct);
+                fontSize -= 1f;
+            }
+
+            return fontSize;
         }
 
         // -------- Speicher (physisch) --------

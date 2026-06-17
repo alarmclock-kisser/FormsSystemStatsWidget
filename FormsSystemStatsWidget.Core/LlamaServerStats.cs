@@ -85,128 +85,160 @@ namespace FormsSystemStatsWidget.Core
             {
                 _lastPollTime = now;
 
-                var response = await _statsClient.GetAsync($"http://localhost:{llamacppPort}/slots");
-                if (!response.IsSuccessStatusCode)
+                JsonArray? slotsArray = await FetchSlotsAsync(llamacppPort);
+                if (slotsArray == null)
                 {
                     return null;
                 }
 
-                var content = await response.Content.ReadAsStringAsync();
-                var slotsArray = JsonNode.Parse(content)?.AsArray();
-                if (slotsArray == null || slotsArray.Count == 0)
+                if (slotsArray.Count == 0)
                 {
                     return 0f;
                 }
 
-                bool anySlotActive = false;
-                int activeTaskId = -1;
-                int currentNDecoded = 0;
-                float directTokensPerSecond = 0f;
-
-                foreach (var slotNode in slotsArray)
-                {
-                    if (slotNode == null)
-                    {
-                        continue;
-                    }
-
-                    bool isProcessing = false;
-
-                    var stateNode = slotNode["state"];
-                    if (stateNode != null)
-                    {
-                        string stateStr = stateNode.ToString().ToLower();
-                        if (stateStr == "1" || stateStr == "processing")
-                        {
-                            isProcessing = true;
-                        }
-                    }
-
-                    var isProcNode = slotNode["is_processing"];
-                    if (isProcNode != null)
-                    {
-                        string procStr = isProcNode.ToString().ToLower();
-                        if (procStr == "true" || procStr == "1")
-                        {
-                            isProcessing = true;
-                        }
-                    }
-
-                    if (isProcessing)
-                    {
-                        anySlotActive = true;
-                        if (slotNode["id_task"] != null && int.TryParse(slotNode["id_task"]?.ToString(), out int idt))
-                        {
-                            activeTaskId = idt;
-                        }
-                        else
-                        {
-                            activeTaskId = 1;
-                        }
-
-                        if (TryReadInt(slotNode, out int nDecoded, "n_decoded_tokens", "n_decoded", "n_decode", "n_tokens_predicted", "n_predict", "tokens_predicted"))
-                        {
-                            currentNDecoded += nDecoded;
-                        }
-
-                        if (TryReadFloat(slotNode, out float slotTokensPerSecond, "tokens_per_second", "tokens/s", "predicted_per_second", "generation_tokens_per_second"))
-                        {
-                            directTokensPerSecond += slotTokensPerSecond;
-                        }
-
-                        JsonNode? timingsNode = slotNode["timings"];
-                        if (timingsNode != null && TryReadFloat(timingsNode, out slotTokensPerSecond, "predicted_per_second", "generation_tokens_per_second"))
-                        {
-                            directTokensPerSecond += slotTokensPerSecond;
-                        }
-                    }
-                }
-
+                SlotAggregation aggregation = AggregateActiveSlots(slotsArray);
                 _errorCount = 0;
 
-                if (!anySlotActive)
-                {
-                    _lastTaskId = -1;
-                    _lastNDecoded = 0;
-                    _currentTps = 0f;
-                    return 0f;
-                }
-
-                if (activeTaskId != _lastTaskId)
-                {
-                    _lastTaskId = activeTaskId;
-                    _lastNDecoded = currentNDecoded;
-                    _lastCheckTime = now;
-                    if (directTokensPerSecond > 0f)
-                    {
-                        _currentTps = directTokensPerSecond;
-                    }
-
-                    return _currentTps > 0 ? _currentTps : 0f;
-                }
-
-                return _currentTps;
+                return ApplySlotAggregation(aggregation, now);
             }
             catch
             {
-                _errorCount++;
+                return HandlePollingFailure();
+            }
+        }
 
-                if (TryGetFreshStdOutTps(DateTime.UtcNow, out float stdOutTpsFallback))
+        private static async Task<JsonArray?> FetchSlotsAsync(int llamacppPort)
+        {
+            var response = await _statsClient.GetAsync($"http://localhost:{llamacppPort}/slots");
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+
+            // A successful request whose body does not parse to an array is treated as "no active slots"
+            // (empty array → 0 t/s), matching the original behavior; only HTTP failures return null.
+            return JsonNode.Parse(content)?.AsArray() ?? [];
+        }
+
+        private static SlotAggregation AggregateActiveSlots(JsonArray slotsArray)
+        {
+            var aggregation = new SlotAggregation();
+
+            foreach (var slotNode in slotsArray)
+            {
+                if (slotNode == null || !IsSlotProcessing(slotNode))
                 {
-                    _currentTps = stdOutTpsFallback;
-                    return stdOutTpsFallback;
+                    continue;
                 }
 
-                if (_errorCount > 15)
+                aggregation.AnySlotActive = true;
+                aggregation.ActiveTaskId = ReadSlotTaskId(slotNode);
+
+                if (TryReadInt(slotNode, out int nDecoded, "n_decoded_tokens", "n_decoded", "n_decode", "n_tokens_predicted", "n_predict", "tokens_predicted"))
                 {
-                    _lastTaskId = -1;
-                    _lastNDecoded = 0;
-                    _currentTps = 0f;
-                    return null;
+                    aggregation.NDecoded += nDecoded;
+                }
+
+                if (TryReadFloat(slotNode, out float slotTokensPerSecond, "tokens_per_second", "tokens/s", "predicted_per_second", "generation_tokens_per_second"))
+                {
+                    aggregation.TokensPerSecond += slotTokensPerSecond;
+                }
+
+                JsonNode? timingsNode = slotNode["timings"];
+                if (timingsNode != null && TryReadFloat(timingsNode, out slotTokensPerSecond, "predicted_per_second", "generation_tokens_per_second"))
+                {
+                    aggregation.TokensPerSecond += slotTokensPerSecond;
+                }
+            }
+
+            return aggregation;
+        }
+
+        private static bool IsSlotProcessing(JsonNode slotNode)
+        {
+            var stateNode = slotNode["state"];
+            if (stateNode != null)
+            {
+                string stateStr = stateNode.ToString().ToLower();
+                if (stateStr == "1" || stateStr == "processing")
+                {
+                    return true;
+                }
+            }
+
+            var isProcNode = slotNode["is_processing"];
+            if (isProcNode != null)
+            {
+                string procStr = isProcNode.ToString().ToLower();
+                if (procStr == "true" || procStr == "1")
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int ReadSlotTaskId(JsonNode slotNode)
+        {
+            return slotNode["id_task"] != null && int.TryParse(slotNode["id_task"]?.ToString(), out int idt) ? idt : 1;
+        }
+
+        private static float ApplySlotAggregation(SlotAggregation aggregation, DateTime now)
+        {
+            if (!aggregation.AnySlotActive)
+            {
+                _lastTaskId = -1;
+                _lastNDecoded = 0;
+                _currentTps = 0f;
+                return 0f;
+            }
+
+            if (aggregation.ActiveTaskId != _lastTaskId)
+            {
+                _lastTaskId = aggregation.ActiveTaskId;
+                _lastNDecoded = aggregation.NDecoded;
+                _lastCheckTime = now;
+                if (aggregation.TokensPerSecond > 0f)
+                {
+                    _currentTps = aggregation.TokensPerSecond;
                 }
 
                 return _currentTps > 0 ? _currentTps : 0f;
             }
+
+            return _currentTps;
+        }
+
+        private static float? HandlePollingFailure()
+        {
+            _errorCount++;
+
+            if (TryGetFreshStdOutTps(DateTime.UtcNow, out float stdOutTpsFallback))
+            {
+                _currentTps = stdOutTpsFallback;
+                return stdOutTpsFallback;
+            }
+
+            if (_errorCount > 15)
+            {
+                _lastTaskId = -1;
+                _lastNDecoded = 0;
+                _currentTps = 0f;
+                return null;
+            }
+
+            return _currentTps > 0 ? _currentTps : 0f;
+        }
+
+        private sealed class SlotAggregation
+        {
+            public bool AnySlotActive;
+            public int ActiveTaskId = -1;
+            public int NDecoded;
+            public float TokensPerSecond;
         }
 
         public static void UpdateGenerationSpeed(float tokensPerSecond)

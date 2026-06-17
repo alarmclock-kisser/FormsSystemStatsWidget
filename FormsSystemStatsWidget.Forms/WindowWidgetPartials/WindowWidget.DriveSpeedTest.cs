@@ -1,4 +1,5 @@
-﻿using System;
+﻿using FormsSystemStatsWidget.Core;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
@@ -241,12 +242,12 @@ namespace FormsSystemStatsWidget.Forms
             try
             {
                 var writeStopwatch = Stopwatch.StartNew();
-                await Task.WhenAll(filePaths.Select(path => WriteWorkerFileAsync(path, alignedBytesPerWorker, workerBuffer, blockSizeBytes, options, cancellationToken, progressBytesCallback)));
+                await Task.WhenAll(filePaths.Select(path => DriveBenchmarkIo.WriteWorkerFileAsync(path, alignedBytesPerWorker, workerBuffer, blockSizeBytes, options, cancellationToken, progressBytesCallback)));
                 writeStopwatch.Stop();
 
                 byte[] readBuffer = new byte[blockSizeBytes];
                 var readStopwatch = Stopwatch.StartNew();
-                await Task.WhenAll(filePaths.Select(path => ReadWorkerFileAsync(path, readBuffer, blockSizeBytes, cancellationToken, progressBytesCallback)));
+                await Task.WhenAll(filePaths.Select(path => DriveBenchmarkIo.ReadWorkerFileAsync(path, readBuffer, blockSizeBytes, cancellationToken, progressBytesCallback)));
                 readStopwatch.Stop();
 
                 long transferredBytes = alignedBytesPerWorker * safeWorkerCount;
@@ -273,55 +274,15 @@ namespace FormsSystemStatsWidget.Forms
             }
         }
 
-        internal static async Task WriteWorkerFileAsync(string path, long fileSizeBytes, byte[] buffer, int blockSizeBytes, FileOptions options, CancellationToken cancellationToken, Action<long>? progressBytesCallback = null)
-        {
-            await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None, blockSizeBytes, options);
-            long remainingBytes = fileSizeBytes;
-            while (remainingBytes > 0)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                int chunk = (int) Math.Min(buffer.Length, remainingBytes);
-                await stream.WriteAsync(buffer.AsMemory(0, chunk), cancellationToken);
-                remainingBytes -= chunk;
-                progressBytesCallback?.Invoke(chunk);
-            }
-
-            await stream.FlushAsync(cancellationToken);
-        }
-
-        internal static async Task ReadWorkerFileAsync(string path, byte[] buffer, int blockSizeBytes, CancellationToken cancellationToken, Action<long>? progressBytesCallback = null)
-        {
-            await using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.Read, blockSizeBytes, FileOptions.SequentialScan);
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                int bytesRead = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
-                if (bytesRead == 0)
-                {
-                    break;
-                }
-
-                progressBytesCallback?.Invoke(bytesRead);
-            }
-        }
-
         private async Task<string> RunDriveSpeedTestAndBuildReportAsync(string rootPath, CancellationToken cancellationToken)
         {
             long fileSizeBytes = checked((long) this._driveTestFileSizeMb * 1024L * 1024L);
             int blockSizeBytes = checked(this._driveTestBlockSizeKb * 1024);
             int passes = this._driveTestPasses;
 
-            string tempDirectoryPath = await ResolveWritableDriveTempDirectoryAsync(rootPath, cancellationToken);
+            string tempDirectoryPath = await DriveBenchmarkIo.ResolveWritableTempDirectoryAsync(rootPath, cancellationToken);
             string sequentialTempFilePath = Path.Combine(tempDirectoryPath, $".fssw-drive-seq-{Guid.NewGuid():N}.bin");
             string randomTempFilePath = Path.Combine(tempDirectoryPath, $".fssw-drive-rnd-{Guid.NewGuid():N}.bin");
-
-            var sequentialWriteResults = new List<double>(passes);
-            var sequentialReadResults = new List<double>(passes);
-            var randomWriteResults = new List<double>(passes);
-            var randomReadResults = new List<double>(passes);
-            var parallelWriteResults = new List<double>(passes);
-            var parallelReadResults = new List<double>(passes);
-            var passLines = new List<string>(passes);
 
             FileOptions writeOptions = FileOptions.SequentialScan;
             if (this.writeThroughToolStripMenuItem.Checked)
@@ -329,116 +290,184 @@ namespace FormsSystemStatsWidget.Forms
                 writeOptions |= FileOptions.WriteThrough;
             }
 
+            var context = new DriveBenchmarkContext(
+                rootPath, tempDirectoryPath, sequentialTempFilePath, randomTempFilePath,
+                fileSizeBytes, blockSizeBytes, passes, writeOptions);
+            var passParameters = this.CalculatePassParameters(fileSizeBytes, blockSizeBytes);
+            var results = new DriveSpeedResults(passes);
+
             Stopwatch totalStopwatch = Stopwatch.StartNew();
             try
             {
-                long randomFileSizeBytes = Math.Max(512L * 1024L * 1024L, Math.Min(fileSizeBytes, 2L * 1024L * 1024L * 1024L));
-                int randomBlockSizeBytes = Math.Max(4 * 1024, Math.Min(64 * 1024, blockSizeBytes / 16));
-                int parallelWorkerCount = Math.Clamp(this._driveTestWorkerThreads, 1, Environment.ProcessorCount);
-                long parallelTransferredBytes = WidgetStatics.CalculateParallelTransferredBytes(fileSizeBytes, randomBlockSizeBytes, parallelWorkerCount);
-
-                long bytesPerPass = (2L * fileSizeBytes) + (2L * randomFileSizeBytes) + (2L * parallelTransferredBytes);
-                long totalExpectedBytes = Math.Max(1L, checked(bytesPerPass * passes));
-                long completedBytes = 0;
-
-                void ReportProgress(long processedBytes)
-                {
-                    long totalProcessed = Interlocked.Add(ref completedBytes, Math.Max(0, processedBytes));
-                    double progressPercent = Math.Min(100.0, (totalProcessed / (double) totalExpectedBytes) * 100.0);
-                    TimeSpan elapsed = totalStopwatch.Elapsed;
-                    string title = WidgetStatics.BuildDriveTestWindowTitle(rootPath, elapsed, progressPercent);
-                    this.TrySetWindowTitleSafe(title);
-                }
-
-                for (int pass = 1; pass <= passes; pass++)
-                {
-                    Stopwatch sequentialDurationStopwatch = Stopwatch.StartNew();
-                    var (sequentialWriteMBps, sequentialReadMBps) = await this.RunDriveSpeedPassAsync(sequentialTempFilePath, fileSizeBytes, blockSizeBytes, writeOptions, cancellationToken, ReportProgress);
-                    sequentialDurationStopwatch.Stop();
-                    sequentialWriteResults.Add(sequentialWriteMBps);
-                    sequentialReadResults.Add(sequentialReadMBps);
-
-                    Stopwatch randomDurationStopwatch = Stopwatch.StartNew();
-                    var (randomWriteMBps, randomReadMBps) = await this.RunDriveSmallRandomPassAsync(randomTempFilePath, randomFileSizeBytes, randomBlockSizeBytes, writeOptions, cancellationToken, ReportProgress);
-                    randomDurationStopwatch.Stop();
-                    randomWriteResults.Add(randomWriteMBps);
-                    randomReadResults.Add(randomReadMBps);
-
-                    Stopwatch parallelDurationStopwatch = Stopwatch.StartNew();
-                    var (parallelWriteMBps, parallelReadMBps) = await this.RunDriveParallelPassAsync(tempDirectoryPath, fileSizeBytes, randomBlockSizeBytes, parallelWorkerCount, writeOptions, cancellationToken, ReportProgress);
-                    parallelDurationStopwatch.Stop();
-                    parallelWriteResults.Add(parallelWriteMBps);
-                    parallelReadResults.Add(parallelReadMBps);
-
-                    passLines.Add($"Pass {pass} - Seq ({WidgetStatics.FormatDuration(sequentialDurationStopwatch.Elapsed)}): Write {sequentialWriteMBps:0.00} | Read {sequentialReadMBps:0.00} MiB/s");
-                    passLines.Add($"Pass {pass} - Rnd {randomBlockSizeBytes / 1024} KiB ({WidgetStatics.FormatDuration(randomDurationStopwatch.Elapsed)}): Write {randomWriteMBps:0.00} | Read {randomReadMBps:0.00} MiB/s");
-                    passLines.Add($"Pass {pass} - Parallel x{parallelWorkerCount} ({WidgetStatics.FormatDuration(parallelDurationStopwatch.Elapsed)}): Write {parallelWriteMBps:0.00} | Read {parallelReadMBps:0.00} MiB/s");
-                }
+                await this.ExecuteDriveBenchmarkPassesAsync(context, passParameters, totalStopwatch, results, cancellationToken);
             }
             finally
             {
                 totalStopwatch.Stop();
-                try
-                {
-                    if (File.Exists(sequentialTempFilePath))
-                    {
-                        File.Delete(sequentialTempFilePath);
-                    }
-                }
-                catch
-                {
-                }
-
-                try
-                {
-                    if (File.Exists(randomTempFilePath))
-                    {
-                        File.Delete(randomTempFilePath);
-                    }
-                }
-                catch
-                {
-                }
+                TryDeleteTempFile(sequentialTempFilePath);
+                TryDeleteTempFile(randomTempFilePath);
             }
 
-            static (double average, double min, double max) CalculateMetrics(List<double> values)
+            return this.BuildDriveSpeedReport(context, totalStopwatch, results, passParameters);
+        }
+
+        private sealed record DriveBenchmarkContext(
+            string RootPath,
+            string TempDirectoryPath,
+            string SequentialTempFilePath,
+            string RandomTempFilePath,
+            long FileSizeBytes,
+            int BlockSizeBytes,
+            int Passes,
+            FileOptions WriteOptions);
+
+        private sealed record DrivePassParameters(
+            long RandomFileSizeBytes,
+            int RandomBlockSizeBytes,
+            int ParallelWorkerCount,
+            long ParallelTransferredBytes);
+
+        private sealed class DriveSpeedResults(int passes)
+        {
+            public List<double> SequentialWrite { get; } = new(passes);
+            public List<double> SequentialRead { get; } = new(passes);
+            public List<double> RandomWrite { get; } = new(passes);
+            public List<double> RandomRead { get; } = new(passes);
+            public List<double> ParallelWrite { get; } = new(passes);
+            public List<double> ParallelRead { get; } = new(passes);
+            public List<string> PassLines { get; } = new(passes);
+        }
+
+        private DrivePassParameters CalculatePassParameters(long fileSizeBytes, int blockSizeBytes)
+        {
+            long randomFileSizeBytes = Math.Max(512L * 1024L * 1024L, Math.Min(fileSizeBytes, 2L * 1024L * 1024L * 1024L));
+            int randomBlockSizeBytes = Math.Max(4 * 1024, Math.Min(64 * 1024, blockSizeBytes / 16));
+            int parallelWorkerCount = Math.Clamp(this._driveTestWorkerThreads, 1, Environment.ProcessorCount);
+            long parallelTransferredBytes = WidgetStatics.CalculateParallelTransferredBytes(fileSizeBytes, randomBlockSizeBytes, parallelWorkerCount);
+            return new DrivePassParameters(randomFileSizeBytes, randomBlockSizeBytes, parallelWorkerCount, parallelTransferredBytes);
+        }
+
+        private async Task ExecuteDriveBenchmarkPassesAsync(
+            DriveBenchmarkContext ctx,
+            DrivePassParameters passParams,
+            Stopwatch totalStopwatch,
+            DriveSpeedResults results,
+            CancellationToken cancellationToken)
+        {
+            long bytesPerPass = (2L * ctx.FileSizeBytes) + (2L * passParams.RandomFileSizeBytes) + (2L * passParams.ParallelTransferredBytes);
+            long totalExpectedBytes = Math.Max(1L, checked(bytesPerPass * ctx.Passes));
+            long completedBytes = 0;
+
+            void ReportProgress(long processedBytes)
             {
-                if (values.Count == 0)
-                {
-                    return (0, 0, 0);
-                }
-
-                return (values.Average(), values.Min(), values.Max());
+                long totalProcessed = Interlocked.Add(ref completedBytes, Math.Max(0, processedBytes));
+                double progressPercent = Math.Min(100.0, (totalProcessed / (double) totalExpectedBytes) * 100.0);
+                TimeSpan elapsed = totalStopwatch.Elapsed;
+                string title = WidgetStatics.BuildDriveTestWindowTitle(ctx.RootPath, elapsed, progressPercent);
+                this.TrySetWindowTitleSafe(title);
             }
 
-            var (seqWriteAvg, seqWriteMin, seqWriteMax) = CalculateMetrics(sequentialWriteResults);
-            var (seqReadAvg, seqReadMin, seqReadMax) = CalculateMetrics(sequentialReadResults);
-            var (rndWriteAvg, rndWriteMin, rndWriteMax) = CalculateMetrics(randomWriteResults);
-            var (rndReadAvg, rndReadMin, rndReadMax) = CalculateMetrics(randomReadResults);
-            var (parWriteAvg, parWriteMin, parWriteMax) = CalculateMetrics(parallelWriteResults);
-            var (parReadAvg, parReadMin, parReadMax) = CalculateMetrics(parallelReadResults);
+            for (int pass = 1; pass <= ctx.Passes; pass++)
+            {
+                await this.RunSingleBenchmarkPassAsync(ctx, passParams, pass, results, ReportProgress, cancellationToken);
+            }
+        }
 
+        private async Task RunSingleBenchmarkPassAsync(
+            DriveBenchmarkContext ctx,
+            DrivePassParameters passParams,
+            int pass,
+            DriveSpeedResults results,
+            Action<long> reportProgress,
+            CancellationToken cancellationToken)
+        {
+            Stopwatch sequentialDurationStopwatch = Stopwatch.StartNew();
+            var (sequentialWriteMBps, sequentialReadMBps) = await this.RunDriveSpeedPassAsync(ctx.SequentialTempFilePath, ctx.FileSizeBytes, ctx.BlockSizeBytes, ctx.WriteOptions, cancellationToken, reportProgress);
+            sequentialDurationStopwatch.Stop();
+            results.SequentialWrite.Add(sequentialWriteMBps);
+            results.SequentialRead.Add(sequentialReadMBps);
+
+            Stopwatch randomDurationStopwatch = Stopwatch.StartNew();
+            var (randomWriteMBps, randomReadMBps) = await this.RunDriveSmallRandomPassAsync(ctx.RandomTempFilePath, passParams.RandomFileSizeBytes, passParams.RandomBlockSizeBytes, ctx.WriteOptions, cancellationToken, reportProgress);
+            randomDurationStopwatch.Stop();
+            results.RandomWrite.Add(randomWriteMBps);
+            results.RandomRead.Add(randomReadMBps);
+
+            Stopwatch parallelDurationStopwatch = Stopwatch.StartNew();
+            var (parallelWriteMBps, parallelReadMBps) = await this.RunDriveParallelPassAsync(ctx.TempDirectoryPath, ctx.FileSizeBytes, passParams.RandomBlockSizeBytes, passParams.ParallelWorkerCount, ctx.WriteOptions, cancellationToken, reportProgress);
+            parallelDurationStopwatch.Stop();
+            results.ParallelWrite.Add(parallelWriteMBps);
+            results.ParallelRead.Add(parallelReadMBps);
+
+            results.PassLines.Add($"Pass {pass} - Seq ({WidgetStatics.FormatDuration(sequentialDurationStopwatch.Elapsed)}): Write {sequentialWriteMBps:0.00} | Read {sequentialReadMBps:0.00} MiB/s");
+            results.PassLines.Add($"Pass {pass} - Rnd {passParams.RandomBlockSizeBytes / 1024} KiB ({WidgetStatics.FormatDuration(randomDurationStopwatch.Elapsed)}): Write {randomWriteMBps:0.00} | Read {randomReadMBps:0.00} MiB/s");
+            results.PassLines.Add($"Pass {pass} - Parallel x{passParams.ParallelWorkerCount} ({WidgetStatics.FormatDuration(parallelDurationStopwatch.Elapsed)}): Write {parallelWriteMBps:0.00} | Read {parallelReadMBps:0.00} MiB/s");
+        }
+
+        private static void TryDeleteTempFile(string filePath)
+        {
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    File.Delete(filePath);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private static (double average, double min, double max) CalculateMetrics(List<double> values)
+        {
+            if (values.Count == 0)
+            {
+                return (0, 0, 0);
+            }
+
+            return (values.Average(), values.Min(), values.Max());
+        }
+
+        private string BuildDriveSpeedReport(
+            DriveBenchmarkContext ctx,
+            Stopwatch totalStopwatch,
+            DriveSpeedResults results,
+            DrivePassParameters passParams)
+        {
             StringBuilder reportBuilder = new();
             _ = reportBuilder.AppendLine("Drive Speed Test Report");
             _ = reportBuilder.AppendLine(new string('-', 32));
-            _ = reportBuilder.AppendLine($"Drive: {rootPath}");
-            _ = reportBuilder.AppendLine($"Temp Folder: {tempDirectoryPath}");
+            _ = reportBuilder.AppendLine($"Drive: {ctx.RootPath}");
+            _ = reportBuilder.AppendLine($"Temp Folder: {ctx.TempDirectoryPath}");
             _ = reportBuilder.AppendLine($"Target File Size: {this._driveTestFileSizeMb} MiB");
             _ = reportBuilder.AppendLine($"Block Size: {this._driveTestBlockSizeKb} KiB");
-            _ = reportBuilder.AppendLine($"Passes: {passes}");
+            _ = reportBuilder.AppendLine($"Passes: {ctx.Passes}");
             _ = reportBuilder.AppendLine($"Threads: {this._driveTestWorkerThreads}");
             _ = reportBuilder.AppendLine($"Write Through: {(this.writeThroughToolStripMenuItem.Checked ? "On" : "Off")}");
             _ = reportBuilder.AppendLine($"Total Runtime: {totalStopwatch.Elapsed.TotalSeconds:0.00} s");
             _ = reportBuilder.AppendLine();
             _ = reportBuilder.AppendLine("Drive Hardware/Software Info:");
             _ = reportBuilder.AppendLine(new string('-', 32));
-            _ = reportBuilder.AppendLine(WidgetStatics.BuildDriveEnvironmentInfoBlock(rootPath));
+            _ = reportBuilder.AppendLine(WidgetStatics.BuildDriveEnvironmentInfoBlock(ctx.RootPath));
             _ = reportBuilder.AppendLine();
-            foreach (string passLine in passLines)
+            foreach (string passLine in results.PassLines)
             {
                 _ = reportBuilder.AppendLine(passLine);
             }
             _ = reportBuilder.AppendLine();
+            AppendMetricsSummary(reportBuilder, results);
+            return reportBuilder.ToString();
+        }
+
+        private static void AppendMetricsSummary(StringBuilder reportBuilder, DriveSpeedResults results)
+        {
+            var (seqWriteAvg, seqWriteMin, seqWriteMax) = CalculateMetrics(results.SequentialWrite);
+            var (seqReadAvg, seqReadMin, seqReadMax) = CalculateMetrics(results.SequentialRead);
+            var (rndWriteAvg, rndWriteMin, rndWriteMax) = CalculateMetrics(results.RandomWrite);
+            var (rndReadAvg, rndReadMin, rndReadMax) = CalculateMetrics(results.RandomRead);
+            var (parWriteAvg, parWriteMin, parWriteMax) = CalculateMetrics(results.ParallelWrite);
+            var (parReadAvg, parReadMin, parReadMax) = CalculateMetrics(results.ParallelRead);
+
             _ = reportBuilder.AppendLine("Sequential:");
             _ = reportBuilder.AppendLine($"  Write Avg/Min/Max: {seqWriteAvg:0.00} / {seqWriteMin:0.00} / {seqWriteMax:0.00} MiB/s");
             _ = reportBuilder.AppendLine($"  Read  Avg/Min/Max: {seqReadAvg:0.00} / {seqReadMin:0.00} / {seqReadMax:0.00} MiB/s");
@@ -448,7 +477,6 @@ namespace FormsSystemStatsWidget.Forms
             _ = reportBuilder.AppendLine("Parallel small blocks:");
             _ = reportBuilder.AppendLine($"  Write Avg/Min/Max: {parWriteAvg:0.00} / {parWriteMin:0.00} / {parWriteMax:0.00} MiB/s");
             _ = reportBuilder.AppendLine($"  Read  Avg/Min/Max: {parReadAvg:0.00} / {parReadMin:0.00} / {parReadMax:0.00} MiB/s");
-            return reportBuilder.ToString();
         }
 
         private void ShowDriveSpeedReportDialog(string report)
@@ -629,43 +657,6 @@ namespace FormsSystemStatsWidget.Forms
             catch
             {
             }
-        }
-
-        internal static async Task<string> ResolveWritableDriveTempDirectoryAsync(string rootPath, CancellationToken cancellationToken)
-        {
-            string normalizedRootPath = Path.GetPathRoot(rootPath) ?? rootPath;
-            string userTempPath = Path.GetTempPath();
-            string userTempRoot = Path.GetPathRoot(userTempPath) ?? string.Empty;
-
-            List<string> candidates = [];
-            if (string.Equals(userTempRoot, normalizedRootPath, StringComparison.OrdinalIgnoreCase))
-            {
-                candidates.Add(Path.Combine(userTempPath, "FormsSystemStatsWidget", "DriveSpeedTest"));
-            }
-
-            string userName = Environment.UserName;
-            candidates.Add(Path.Combine(normalizedRootPath, "Users", userName, "AppData", "Local", "Temp", "FormsSystemStatsWidget", "DriveSpeedTest"));
-            candidates.Add(Path.Combine(normalizedRootPath, "Users", "Public", "Documents", "FormsSystemStatsWidget", "DriveSpeedTest"));
-            candidates.Add(Path.Combine(normalizedRootPath, "Temp", "FormsSystemStatsWidget", "DriveSpeedTest"));
-
-            foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
-                {
-                    _ = Directory.CreateDirectory(candidate);
-                    string probeFilePath = Path.Combine(candidate, $".fssw-probe-{Guid.NewGuid():N}.tmp");
-                    await using FileStream probe = new(probeFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.DeleteOnClose);
-                    await probe.WriteAsync(new byte[] { 0xAA }, cancellationToken);
-                    return candidate;
-                }
-                catch
-                {
-                }
-            }
-
-            throw new UnauthorizedAccessException($"No writable temp folder was found on drive '{normalizedRootPath}'.");
         }
     }
 }

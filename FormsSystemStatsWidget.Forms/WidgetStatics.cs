@@ -52,13 +52,25 @@ namespace FormsSystemStatsWidget.Forms
         {
             StringBuilder infoBuilder = new();
 
+            AppendEnvironmentInfo(infoBuilder);
+            AppendLogicalDriveInfo(infoBuilder, rootPath);
+            AppendWmiStorageInfo(infoBuilder, rootPath);
+
+            return infoBuilder.ToString().TrimEnd();
+        }
+
+        private static void AppendEnvironmentInfo(StringBuilder infoBuilder)
+        {
             _ = infoBuilder.AppendLine("Environment:");
             _ = infoBuilder.AppendLine($"  OS: {RuntimeInformation.OSDescription}");
             _ = infoBuilder.AppendLine($"  Runtime: {RuntimeInformation.FrameworkDescription}");
             _ = infoBuilder.AppendLine($"  Process: {(Environment.Is64BitProcess ? "64-bit" : "32-bit")}, OS64: {(Environment.Is64BitOperatingSystem ? "Yes" : "No")}");
             _ = infoBuilder.AppendLine($"  Machine: {Environment.MachineName}");
             _ = infoBuilder.AppendLine($"  Logical CPU Cores: {Environment.ProcessorCount}");
+        }
 
+        private static void AppendLogicalDriveInfo(StringBuilder infoBuilder, string rootPath)
+        {
             try
             {
                 DriveInfo driveInfo = new(rootPath);
@@ -75,104 +87,129 @@ namespace FormsSystemStatsWidget.Forms
             {
                 _ = infoBuilder.AppendLine("Logical Drive: n/a");
             }
+        }
 
+        private static void AppendWmiStorageInfo(StringBuilder infoBuilder, string rootPath)
+        {
             string driveId = (Path.GetPathRoot(rootPath) ?? rootPath).TrimEnd('\\').ToUpperInvariant();
             try
             {
                 using ManagementObjectSearcher logicalDiskSearcher = new($"SELECT * FROM Win32_LogicalDisk WHERE DeviceID='{driveId}'");
                 using ManagementObjectCollection logicalDisks = logicalDiskSearcher.Get();
 
-                _ = infoBuilder.AppendLine("WMI Logical Disk:");
-                foreach (ManagementObject logicalDisk in logicalDisks.Cast<ManagementObject>())
-                {
-                    _ = infoBuilder.AppendLine($"  DeviceID: {GetSafePropertyValue(logicalDisk, "DeviceID")}");
-                    _ = infoBuilder.AppendLine($"  VolumeName: {GetSafePropertyValue(logicalDisk, "VolumeName")}");
-                    _ = infoBuilder.AppendLine($"  VolumeSerialNumber: {GetSafePropertyValue(logicalDisk, "VolumeSerialNumber")}");
-                    _ = infoBuilder.AppendLine($"  ProviderName: {GetSafePropertyValue(logicalDisk, "ProviderName")}");
-                    _ = infoBuilder.AppendLine($"  Compressed: {GetSafePropertyValue(logicalDisk, "Compressed")}");
-                    _ = infoBuilder.AppendLine($"  SupportsDiskQuotas: {GetSafePropertyValue(logicalDisk, "SupportsDiskQuotas")}");
-                    _ = infoBuilder.AppendLine($"  SupportsFileBasedCompression: {GetSafePropertyValue(logicalDisk, "SupportsFileBasedCompression")}");
-                }
+                AppendLogicalDiskDetails(infoBuilder, logicalDisks);
 
-                HashSet<string> diskDeviceIds = new(StringComparer.OrdinalIgnoreCase);
-                List<ManagementObject> diskDrives = [];
-
-                foreach (ManagementObject logicalDisk in logicalDisks.Cast<ManagementObject>())
-                {
-                    string logicalDiskPath = logicalDisk.Path.RelativePath;
-                    using ManagementObjectSearcher partitionSearcher = new($"ASSOCIATORS OF {{{logicalDiskPath}}} WHERE AssocClass = Win32_LogicalDiskToPartition");
-                    using ManagementObjectCollection partitions = partitionSearcher.Get();
-                    foreach (ManagementObject partition in partitions.Cast<ManagementObject>())
-                    {
-                        string partitionPath = partition.Path.RelativePath;
-                        using ManagementObjectSearcher diskSearcher = new($"ASSOCIATORS OF {{{partitionPath}}} WHERE AssocClass = Win32_DiskDriveToDiskPartition");
-                        using ManagementObjectCollection disks = diskSearcher.Get();
-                        foreach (ManagementObject disk in disks.Cast<ManagementObject>())
-                        {
-                            string deviceId = GetSafePropertyValue(disk, "DeviceID");
-                            if (diskDeviceIds.Add(deviceId))
-                            {
-                                diskDrives.Add(disk);
-                            }
-                        }
-                    }
-                }
-
-                if (diskDrives.Count > 0)
-                {
-                    bool raidCandidate = diskDrives.Count > 1;
-                    _ = infoBuilder.AppendLine("Physical Disk Mapping:");
-                    _ = infoBuilder.AppendLine($"  Mapped Physical Devices: {diskDrives.Count}");
-
-                    for (int index = 0; index < diskDrives.Count; index++)
-                    {
-                        ManagementObject disk = diskDrives[index];
-                        string model = GetSafePropertyValue(disk, "Model");
-                        string caption = GetSafePropertyValue(disk, "Caption");
-                        string manufacturer = GetSafePropertyValue(disk, "Manufacturer");
-                        string interfaceType = GetSafePropertyValue(disk, "InterfaceType");
-                        string mediaType = GetSafePropertyValue(disk, "MediaType");
-                        string serialNumber = GetSafePropertyValue(disk, "SerialNumber");
-                        string firmware = GetSafePropertyValue(disk, "FirmwareRevision");
-                        string pnpDeviceId = GetSafePropertyValue(disk, "PNPDeviceID");
-                        string sizeRaw = GetSafePropertyValue(disk, "Size");
-
-                        if (model.Contains("RAID", StringComparison.OrdinalIgnoreCase) || caption.Contains("RAID", StringComparison.OrdinalIgnoreCase) || pnpDeviceId.Contains("RAID", StringComparison.OrdinalIgnoreCase))
-                        {
-                            raidCandidate = true;
-                        }
-
-                        string sizeText = sizeRaw;
-                        if (long.TryParse(sizeRaw, out long diskBytes))
-                        {
-                            sizeText = $"{sizeRaw} ({FormatBytesToGiB(diskBytes)})";
-                        }
-
-                        _ = infoBuilder.AppendLine($"  Disk #{index + 1}:");
-                        _ = infoBuilder.AppendLine($"    Model: {model}");
-                        _ = infoBuilder.AppendLine($"    Caption: {caption}");
-                        _ = infoBuilder.AppendLine($"    Manufacturer: {manufacturer}");
-                        _ = infoBuilder.AppendLine($"    InterfaceType: {interfaceType}");
-                        _ = infoBuilder.AppendLine($"    MediaType: {mediaType}");
-                        _ = infoBuilder.AppendLine($"    Size: {sizeText}");
-                        _ = infoBuilder.AppendLine($"    FirmwareRevision: {firmware}");
-                        _ = infoBuilder.AppendLine($"    SerialNumber: {serialNumber}");
-                        _ = infoBuilder.AppendLine($"    PNPDeviceID: {pnpDeviceId}");
-                    }
-
-                    _ = infoBuilder.AppendLine($"  RAID / Multi-Disk Hint: {(raidCandidate ? "Likely" : "Not detected")}");
-                }
-                else
-                {
-                    _ = infoBuilder.AppendLine("Physical Disk Mapping: n/a");
-                }
+                List<ManagementObject> diskDrives = CollectPhysicalDisks(logicalDisks);
+                AppendPhysicalDiskMapping(infoBuilder, diskDrives);
             }
             catch (Exception ex)
             {
                 _ = infoBuilder.AppendLine($"WMI Storage Details: unavailable ({ex.GetType().Name})");
             }
+        }
 
-            return infoBuilder.ToString().TrimEnd();
+        private static void AppendLogicalDiskDetails(StringBuilder infoBuilder, ManagementObjectCollection logicalDisks)
+        {
+            _ = infoBuilder.AppendLine("WMI Logical Disk:");
+            foreach (ManagementObject logicalDisk in logicalDisks.Cast<ManagementObject>())
+            {
+                _ = infoBuilder.AppendLine($"  DeviceID: {GetSafePropertyValue(logicalDisk, "DeviceID")}");
+                _ = infoBuilder.AppendLine($"  VolumeName: {GetSafePropertyValue(logicalDisk, "VolumeName")}");
+                _ = infoBuilder.AppendLine($"  VolumeSerialNumber: {GetSafePropertyValue(logicalDisk, "VolumeSerialNumber")}");
+                _ = infoBuilder.AppendLine($"  ProviderName: {GetSafePropertyValue(logicalDisk, "ProviderName")}");
+                _ = infoBuilder.AppendLine($"  Compressed: {GetSafePropertyValue(logicalDisk, "Compressed")}");
+                _ = infoBuilder.AppendLine($"  SupportsDiskQuotas: {GetSafePropertyValue(logicalDisk, "SupportsDiskQuotas")}");
+                _ = infoBuilder.AppendLine($"  SupportsFileBasedCompression: {GetSafePropertyValue(logicalDisk, "SupportsFileBasedCompression")}");
+            }
+        }
+
+        private static List<ManagementObject> CollectPhysicalDisks(ManagementObjectCollection logicalDisks)
+        {
+            HashSet<string> diskDeviceIds = new(StringComparer.OrdinalIgnoreCase);
+            List<ManagementObject> diskDrives = [];
+
+            foreach (ManagementObject logicalDisk in logicalDisks.Cast<ManagementObject>())
+            {
+                foreach (ManagementObject disk in EnumerateAssociatedDisks(logicalDisk))
+                {
+                    string deviceId = GetSafePropertyValue(disk, "DeviceID");
+                    if (diskDeviceIds.Add(deviceId))
+                    {
+                        diskDrives.Add(disk);
+                    }
+                }
+            }
+
+            return diskDrives;
+        }
+
+        private static IEnumerable<ManagementObject> EnumerateAssociatedDisks(ManagementObject logicalDisk)
+        {
+            string logicalDiskPath = logicalDisk.Path.RelativePath;
+            using ManagementObjectSearcher partitionSearcher = new($"ASSOCIATORS OF {{{logicalDiskPath}}} WHERE AssocClass = Win32_LogicalDiskToPartition");
+            using ManagementObjectCollection partitions = partitionSearcher.Get();
+            foreach (ManagementObject partition in partitions.Cast<ManagementObject>())
+            {
+                string partitionPath = partition.Path.RelativePath;
+                using ManagementObjectSearcher diskSearcher = new($"ASSOCIATORS OF {{{partitionPath}}} WHERE AssocClass = Win32_DiskDriveToDiskPartition");
+                using ManagementObjectCollection disks = diskSearcher.Get();
+                foreach (ManagementObject disk in disks.Cast<ManagementObject>())
+                {
+                    yield return disk;
+                }
+            }
+        }
+
+        private static void AppendPhysicalDiskMapping(StringBuilder infoBuilder, List<ManagementObject> diskDrives)
+        {
+            if (diskDrives.Count == 0)
+            {
+                _ = infoBuilder.AppendLine("Physical Disk Mapping: n/a");
+                return;
+            }
+
+            bool raidCandidate = diskDrives.Count > 1;
+            _ = infoBuilder.AppendLine("Physical Disk Mapping:");
+            _ = infoBuilder.AppendLine($"  Mapped Physical Devices: {diskDrives.Count}");
+
+            for (int index = 0; index < diskDrives.Count; index++)
+            {
+                raidCandidate |= AppendPhysicalDiskDetails(infoBuilder, diskDrives[index], index);
+            }
+
+            _ = infoBuilder.AppendLine($"  RAID / Multi-Disk Hint: {(raidCandidate ? "Likely" : "Not detected")}");
+        }
+
+        private static bool AppendPhysicalDiskDetails(StringBuilder infoBuilder, ManagementObject disk, int index)
+        {
+            string model = GetSafePropertyValue(disk, "Model");
+            string caption = GetSafePropertyValue(disk, "Caption");
+            string manufacturer = GetSafePropertyValue(disk, "Manufacturer");
+            string interfaceType = GetSafePropertyValue(disk, "InterfaceType");
+            string mediaType = GetSafePropertyValue(disk, "MediaType");
+            string serialNumber = GetSafePropertyValue(disk, "SerialNumber");
+            string firmware = GetSafePropertyValue(disk, "FirmwareRevision");
+            string pnpDeviceId = GetSafePropertyValue(disk, "PNPDeviceID");
+            string sizeRaw = GetSafePropertyValue(disk, "Size");
+
+            bool raidCandidate = model.Contains("RAID", StringComparison.OrdinalIgnoreCase)
+                || caption.Contains("RAID", StringComparison.OrdinalIgnoreCase)
+                || pnpDeviceId.Contains("RAID", StringComparison.OrdinalIgnoreCase);
+
+            string sizeText = long.TryParse(sizeRaw, out long diskBytes) ? $"{sizeRaw} ({FormatBytesToGiB(diskBytes)})" : sizeRaw;
+
+            _ = infoBuilder.AppendLine($"  Disk #{index + 1}:");
+            _ = infoBuilder.AppendLine($"    Model: {model}");
+            _ = infoBuilder.AppendLine($"    Caption: {caption}");
+            _ = infoBuilder.AppendLine($"    Manufacturer: {manufacturer}");
+            _ = infoBuilder.AppendLine($"    InterfaceType: {interfaceType}");
+            _ = infoBuilder.AppendLine($"    MediaType: {mediaType}");
+            _ = infoBuilder.AppendLine($"    Size: {sizeText}");
+            _ = infoBuilder.AppendLine($"    FirmwareRevision: {firmware}");
+            _ = infoBuilder.AppendLine($"    SerialNumber: {serialNumber}");
+            _ = infoBuilder.AppendLine($"    PNPDeviceID: {pnpDeviceId}");
+
+            return raidCandidate;
         }
 
         internal static string Ellipsize(string text, int maxLen)
