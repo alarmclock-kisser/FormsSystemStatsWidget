@@ -14,6 +14,9 @@ namespace FormsSystemStatsWidget.Forms
 {
     public partial class WindowWidget
     {
+        internal string? LastGlobalIpv4 = null;
+
+
         private void TrySetWindowTitleSafe(string title)
         {
             if (this.IsDisposed || this.Disposing)
@@ -170,6 +173,12 @@ namespace FormsSystemStatsWidget.Forms
                     this.UpdateGpuUsageAsync(gpuUsage, gpuWattage),
                     this.UpdateVramUsageAsync(vramTotalGb, vramUsedGb)
                 );
+
+                if (DateTime.Now.Minute % 20 == 0 || string.IsNullOrEmpty(this.LastGlobalIpv4))
+                {
+                    this.LastGlobalIpv4 = await GlobalAddressNotifier.GetGlobalAddressIpv4Async();
+                    await GlobalAddressNotifier.CheckAndUpdateIpAsync();
+                }
 
                 if (this._closing)
                 {

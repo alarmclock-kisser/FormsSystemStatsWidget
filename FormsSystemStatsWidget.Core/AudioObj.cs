@@ -182,7 +182,7 @@ namespace FormsSystemStatsWidget.Core
                     {
                         // Use the exact other than set channels, if it's not mono or stereo
                         targetChannels = this.Channels == 1 ? 2 : 1;
-                       Logger.Log($"Invalid bitdepth detected ({targetChannels}). Using {targetChannels} since audio has {this.Channels} channels.");
+                        Logger.Log($"Invalid bitdepth detected ({targetChannels}). Using {targetChannels} since audio has {this.Channels} channels.");
                     }
 
                     ISampleProvider rechanneledProvider;
@@ -346,7 +346,7 @@ namespace FormsSystemStatsWidget.Core
                 bool success = await this.ResampleAsync(sampleRate.Value, bitDepth);
                 if (!success)
                 {
-                   Logger.Log($"Failed to resample audio for Base64 serialization. Aborting.");
+                    Logger.Log($"Failed to resample audio for Base64 serialization. Aborting.");
                     return null;
                 }
             }
@@ -356,7 +356,7 @@ namespace FormsSystemStatsWidget.Core
                 bool success = await this.RechannelAsync(channels.Value);
                 if (!success)
                 {
-                   Logger.Log("Failed to rechannel audio for Base64 serialization. Aborting.");
+                    Logger.Log("Failed to rechannel audio for Base64 serialization. Aborting.");
                     return null;
                 }
             }

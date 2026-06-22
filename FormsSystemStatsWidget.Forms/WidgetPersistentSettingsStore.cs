@@ -10,9 +10,9 @@ namespace FormsSystemStatsWidget.Forms
         public int UpdateIntervalMs { get; set; } = 420;
 
         public string DiagramColorHex { get; set; } = "#FFFFFF";
-        
+
         public int WindowOpacity { get; set; } = 100;
-        
+
         public string PerCorePercentColor { get; set; } = "#FFFFFF";
 
         public bool ShowPerCorePercent { get; set; } = true;

@@ -212,7 +212,7 @@ namespace FormsSystemStatsWidget.Forms
 
 
 
-    internal static class Keymapper
+internal static class Keymapper
 {
     internal static List<KeyMappingEntry> MappedKeys = [];
 

@@ -153,6 +153,6 @@ namespace FormsSystemStatsWidget.Core
             return DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff");
         }
 
-        
+
     }
 }
