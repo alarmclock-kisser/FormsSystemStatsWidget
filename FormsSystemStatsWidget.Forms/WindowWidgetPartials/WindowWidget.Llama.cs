@@ -53,9 +53,7 @@ namespace FormsSystemStatsWidget.Forms
             this.Cursor = Cursors.WaitCursor;
 
             string apiUrl = this.toolStripTextBox_openAiApiUrl.Text.Trim();
-            int? apiUrlPort = apiUrl != "" && Uri.TryCreate(apiUrl, UriKind.Absolute, out Uri? parsedUri) && parsedUri.IsLoopback ? parsedUri.Port : null;
-            apiUrl = apiUrl.Replace("http://", "").Replace("https://", "").Split(':').FirstOrDefault() ?? apiUrl;
-            int llamaPort = apiUrlPort == null ? int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080 : apiUrlPort.Value;
+            int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;
             this.toolStripTextBox_llamacppPort.Text = llamaPort.ToString();
             int ollamaPort = int.TryParse(this.toolStripTextBox_ollamaPort.Text.Trim(), out int parsedOllamaPort) ? parsedOllamaPort : 11434;
             this.toolStripTextBox_ollamaPort.Text = ollamaPort.ToString();
