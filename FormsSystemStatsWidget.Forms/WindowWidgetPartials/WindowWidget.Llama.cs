@@ -12,6 +12,7 @@ namespace FormsSystemStatsWidget.Forms
 {
     public partial class WindowWidget
     {
+        public bool BlockProcess => !this.toolStripMenuItem_additionalArgs.Checked;
 
         private async void rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged(object? sender, EventArgs e)
         {
@@ -323,6 +324,11 @@ namespace FormsSystemStatsWidget.Forms
 
             this._persistentSettings.AdditionalLoadArgs = this.toolStripTextBox_additionalArgs.Text;
             this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_additionalArgs_CheckedChanged(object sender, EventArgs e)
+        {
+            this.toolStripMenuItem_additionalArgs.Text = $"Additional Load Args ({LoadArgsRegex().Count(this.toolStripTextBox_additionalArgs.Text.Trim())}) ({(this.toolStripMenuItem_additionalArgs.Checked ? "Uncheck to Unblock Process" : "Check to Block Processs")})";
         }
 
         [GeneratedRegex(@"--?[a-zA-Z][\w-]*(?:\s+(?:"".*?""|'.*?'|(?!--?[a-zA-Z])[^\s]+))*")]

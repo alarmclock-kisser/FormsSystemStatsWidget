@@ -44,7 +44,7 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_loadLlamaCppServer.Click -= this.toolStripMenuItem_loadLlamaCppServer_Click;
             this.toolStripMenuItem_loadLlamaCppServer.Click -= this.ToolStripMenuItem_killLlamaServer_Click;
 
-            if (processes.Count > 0)
+            if (processes.Count > 0 && !this.BlockProcess)
             {
                 this.toolStripMenuItem_execModelLoadBat.Text = $"'{LlamaOllamaBridge.DetectedModelName}-{LlamaOllamaBridge.QuantizationLevel}'";
                 this.toolStripMenuItem_execModelLoadBat.Enabled = false;

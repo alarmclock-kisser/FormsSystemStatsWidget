@@ -154,6 +154,7 @@ namespace FormsSystemStatsWidget.Forms
         [GeneratedRegex(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled, "de-DE")]
         private static partial Regex MyRegex();
 
+        
     }
 }
 

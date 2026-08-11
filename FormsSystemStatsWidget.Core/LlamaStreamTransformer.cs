@@ -86,6 +86,8 @@ namespace FormsSystemStatsWidget.Core
                     return root.ToJsonString();
                 }
 
+                ConsolidateSystemMessages(messages);
+
                 // NEU: Strenge Instruktionen für Tool-Calling in den System-Prompt injizieren!
                 InjectStrictToolCallingRules(messages);
                 NormalizeMessages(messages, flattenToolHistory);
@@ -99,6 +101,83 @@ namespace FormsSystemStatsWidget.Core
             {
                 Logger.Log($"[Sanitizer-Error] {ex.Message}");
                 return jsonInput;
+            }
+        }
+
+        private static void ConsolidateSystemMessages(JsonArray messages)
+        {
+            if (messages.Count == 0)
+            {
+                return;
+            }
+
+            JsonObject? firstSystemMsg = null;
+            var indicesToRemove = new List<int>();
+
+            // 1. Ersten System-Prompt (oder developer) identifizieren oder initialisieren
+            string firstRole = messages[0]?["role"]?.ToString() ?? string.Empty;
+            if (string.Equals(firstRole, "system", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(firstRole, "developer", StringComparison.OrdinalIgnoreCase))
+            {
+                firstSystemMsg = messages[0] as JsonObject;
+                if (firstSystemMsg != null)
+                {
+                    firstSystemMsg["role"] = "system"; // Sicherstellen, dass die Rolle explizit "system" heißt
+                }
+            }
+
+            // 2. Nachrichten durchgehen und alle späteren System-Prompts finden
+            for (int i = 1; i < messages.Count; i++)
+            {
+                if (messages[i] is not JsonObject msg)
+                {
+                    continue;
+                }
+
+                string role = msg["role"]?.ToString() ?? string.Empty;
+                if (string.Equals(role, "system", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(role, "developer", StringComparison.OrdinalIgnoreCase))
+                {
+                    string extraContent = GetMessageTextContent(msg);
+
+                    if (!string.IsNullOrWhiteSpace(extraContent))
+                    {
+                        if (firstSystemMsg != null)
+                        {
+                            // An die allererste System-Message anhängen
+                            string baseContent = GetMessageTextContent(firstSystemMsg);
+                            firstSystemMsg["content"] = baseContent + "\n\n" + extraContent;
+                        }
+                        else
+                        {
+                            // Falls die allererste Message im Request KEINE System-Message war,
+                            // erstellen wir sie ganz am Anfang (Index 0).
+                            firstSystemMsg = new JsonObject
+                            {
+                                ["role"] = "system",
+                                ["content"] = extraContent
+                            };
+                            messages.Insert(0, firstSystemMsg);
+
+                            // Da wir bei Index 0 eingefügt haben, verschiebt sich die aktuelle Position
+                            i++;
+                        }
+                    }
+
+                    // Index zum Löschen vormerken
+                    indicesToRemove.Add(i);
+                }
+            }
+
+            // 3. Spätere System-Messages von hinten nach vorne austragen
+            for (int i = indicesToRemove.Count - 1; i >= 0; i--)
+            {
+                messages.RemoveAt(indicesToRemove[i]);
+            }
+
+            if (indicesToRemove.Count > 0)
+            {
+                Logger.Log($"[Sanitizer] Consolidating {indicesToRemove.Count} extra system/developer message(s) into the primary system prompt.");
             }
         }
 
