@@ -663,7 +663,7 @@
             this.toolStripMenuItem_reasoningEffort.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripComboBox_reasoningEffort });
             this.toolStripMenuItem_reasoningEffort.Name = "toolStripMenuItem_reasoningEffort";
             this.toolStripMenuItem_reasoningEffort.Size = new Size(340, 22);
-            this.toolStripMenuItem_reasoningEffort.Text = "xhigh";
+            this.toolStripMenuItem_reasoningEffort.Text = "Reasoning Effort";
             //
             // toolStripComboBox_reasoningEffort
             //
