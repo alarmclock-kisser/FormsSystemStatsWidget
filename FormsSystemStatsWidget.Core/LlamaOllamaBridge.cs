@@ -60,6 +60,8 @@ namespace FormsSystemStatsWidget.Core
         // Options / Settings from UI set
         public static double UserDefinedTemperature { get; set; } = 0.7;
         public static double UserDefinedRepetitionPenalty { get; set; } = 1.1;
+        public static double UserDefinedPresencePenalty { get; set; } = 1.0;
+        public static string? UserDefinedReasoningEffort { get; set; } = null;
         public static double UserDefinedTopP { get; set; }
         public static double UserDefinedMinP { get; set; }
         public static int UserDefinedTopK { get; set; }
@@ -331,7 +333,7 @@ namespace FormsSystemStatsWidget.Core
             Logger.Log("[LlamaBridge] Processing OpenAI-compatible direct stream...");
             using var reader = new StreamReader(request.InputStream);
             string requestBody = await reader.ReadToEndAsync();
-            string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK);
+            string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort);
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");

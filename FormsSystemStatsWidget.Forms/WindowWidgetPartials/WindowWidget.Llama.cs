@@ -283,6 +283,8 @@ namespace FormsSystemStatsWidget.Forms
             // Add non-load args for inference (tempetrature etc.) as comment in BAT file
             string inferenceParams = $":: temperature={LlamaOllamaBridge.UserDefinedTemperature.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
             inferenceParams += $":: repetition_penalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
+            inferenceParams += $":: presence_penalty={LlamaOllamaBridge.UserDefinedPresencePenalty.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
+            inferenceParams += $":: reasoning_effort={LlamaOllamaBridge.UserDefinedReasoningEffort ?? "xhigh"} " + Environment.NewLine;
             inferenceParams += $":: top_p={topP.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
             inferenceParams += $":: min_p={minP.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
             inferenceParams += $":: top_k={topK.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)} " + Environment.NewLine;
@@ -353,12 +355,14 @@ namespace FormsSystemStatsWidget.Forms
                 string[] inferenceParamsLines = lines.Where(line => line.TrimStart().StartsWith("::")).ToArray();
                 LlamaOllamaBridge.UserDefinedTemperature = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("temperature=")).Select(param => param.Substring("temperature=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float temp) ? temp : 0.75f).FirstOrDefault();
                 LlamaOllamaBridge.UserDefinedRepetitionPenalty = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("repetition_penalty=")).Select(param => param.Substring("repetition_penalty=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float penalty) ? penalty : 1.1f).FirstOrDefault();
+                LlamaOllamaBridge.UserDefinedPresencePenalty = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("presence_penalty=")).Select(param => param.Substring("presence_penalty=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float penalty) ? penalty : 1.0f).FirstOrDefault();
+                LlamaOllamaBridge.UserDefinedReasoningEffort = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("reasoning_effort=")).Select(param => param.Substring("reasoning_effort=".Length)).FirstOrDefault() ?? "xhigh";
                 LlamaOllamaBridge.UserDefinedTopP = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("top_p=")).Select(param => param.Substring("top_p=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float topP) ? topP : 0.9f).FirstOrDefault();
                 LlamaOllamaBridge.UserDefinedMinP = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("min_p=")).Select(param => param.Substring("min_p=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float minP) ? minP : 0.0f).FirstOrDefault();
                 LlamaOllamaBridge.UserDefinedTopK = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("top_k=")).Select(param => param.Substring("top_k=".Length)).Select(value => int.TryParse(value, out int topK) ? topK : 40).FirstOrDefault();
                 LlamaOllamaBridge.UserDefinedReasoningBudget = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("reasoning_budget=")).Select(param => param.Substring("reasoning_budget=".Length)).Select(value => int.TryParse(value, out int reasoningBudget) ? reasoningBudget : 2048).FirstOrDefault();
 
-                Logger.Log($"Loaded inference parameters from batch file: Temperature={LlamaOllamaBridge.UserDefinedTemperature}, RepetitionPenalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty}, TopP={LlamaOllamaBridge.UserDefinedTopP}, MinP={LlamaOllamaBridge.UserDefinedMinP}, TopK={LlamaOllamaBridge.UserDefinedTopK}, ReasoningBudget={LlamaOllamaBridge.UserDefinedReasoningBudget}");
+                Logger.Log($"Loaded inference parameters from batch file: Temperature={LlamaOllamaBridge.UserDefinedTemperature}, RepetitionPenalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty}, PresencePenalty={LlamaOllamaBridge.UserDefinedPresencePenalty}, ReasoningEffort={LlamaOllamaBridge.UserDefinedReasoningEffort}, TopP={LlamaOllamaBridge.UserDefinedTopP}, MinP={LlamaOllamaBridge.UserDefinedMinP}, TopK={LlamaOllamaBridge.UserDefinedTopK}, ReasoningBudget={LlamaOllamaBridge.UserDefinedReasoningBudget}");
 
                 _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                 {
@@ -692,6 +696,57 @@ namespace FormsSystemStatsWidget.Forms
 
             e.SuppressKeyPress = true;
             e.Handled = true;
+        }
+
+        private void toolStripTextBox_presencePenalty_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            string entered = this.toolStripTextBox_presencePenalty.Text.Trim();
+            if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float penalty) && penalty > 0)
+            {
+                this.toolStripTextBox_presencePenalty.Text = penalty.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                LlamaOllamaBridge.UserDefinedPresencePenalty = (double) penalty;
+            }
+            else
+            {
+                _ = MessageBox.Show(this, "Please enter a valid positive number for presence penalty.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_presencePenalty.Text = "1.0";
+            }
+            // Save persistant settings
+            this._persistentSettings.PresencePenalty = penalty;
+            this.SavePersistentSettings();
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripComboBox_reasoningEffort_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            string? selectedEffort = this.toolStripComboBox_reasoningEffort.SelectedItem as string;
+            if (selectedEffort == null)
+            {
+                return;
+            }
+            switch (selectedEffort.ToLowerInvariant())
+            {
+                case "low":
+                    LlamaOllamaBridge.UserDefinedReasoningEffort = "low";
+                    break;
+                case "medium":
+                    LlamaOllamaBridge.UserDefinedReasoningEffort = "medium";
+                    break;
+                case "high":
+                    LlamaOllamaBridge.UserDefinedReasoningEffort = "xhigh";
+                    break;
+                default:
+                    LlamaOllamaBridge.UserDefinedReasoningEffort = "xhigh";
+                    break;
+            }
+            // Save persistant settings
+            this._persistentSettings.ReasoningEffort = LlamaOllamaBridge.UserDefinedReasoningEffort;
+            this.SavePersistentSettings();
         }
 
         private void toolStripTextBox_contextSize_KeyDown(object sender, KeyEventArgs e)

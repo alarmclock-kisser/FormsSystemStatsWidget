@@ -328,7 +328,9 @@ namespace FormsSystemStatsWidget.Forms
                 // Apply to bridge defaults
                 LlamaOllamaBridge.UserDefinedTemperature = this._persistentSettings.Temperature;
                 LlamaOllamaBridge.UserDefinedRepetitionPenalty = this._persistentSettings.RepetitionPenalty;
+                LlamaOllamaBridge.UserDefinedPresencePenalty = this._persistentSettings.PresencePenalty;
                 LlamaOllamaBridge.UserDefinedReasoningBudget = this._persistentSettings.ReasoningBudget;
+                LlamaOllamaBridge.UserDefinedReasoningEffort = this._persistentSettings.ReasoningEffort;
                 LlamaOllamaBridge.UserDefinedTopP = this._persistentSettings.UserTopP;
                 LlamaOllamaBridge.UserDefinedMinP = this._persistentSettings.UserMinP;
                 LlamaOllamaBridge.UserDefinedTopK = this._persistentSettings.UserTopK;

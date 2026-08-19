@@ -66,7 +66,7 @@ namespace FormsSystemStatsWidget.Core
             "this", "that", "with", "from", "were", "have", "just"
         };
 
-        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40)
+        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double presencePenalty = 1.0, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40, string? reasoningEffort = null)
         {
             try
             {
@@ -81,9 +81,14 @@ namespace FormsSystemStatsWidget.Core
 
                 root["temperature"] = temperature;
                 root["repetition_penalty"] = repetitionPenalty;
+                root["presence_penalty"] = presencePenalty;
                 root["top_p"] = userDefinedTopP;
                 root["min_p"] = userDefinedMinP;
                 root["top_k"] = userDefinedTopK;
+                if (!string.IsNullOrEmpty(reasoningEffort))
+                {
+                    root["reasoning_effort"] = reasoningEffort;
+                }
                 _ = root.Remove("store");
 
                 if (root["messages"] is not JsonArray messages)
