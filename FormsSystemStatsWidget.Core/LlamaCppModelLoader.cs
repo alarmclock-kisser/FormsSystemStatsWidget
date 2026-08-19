@@ -10,7 +10,12 @@ namespace FormsSystemStatsWidget.Core
         public static string[] ModelFilePaths => GetModelFilePaths();
 
 
-        public static string[] GetModelFilePaths()
+        /// <summary>
+        /// Get all model file paths in the GGUF models directory, sorted by newest created model file first.
+        /// </summary>
+        /// <param name="mmprojRegex">Optional regex to filter mmproj files, so they won't get recognized as main model file. Default value filters for *mmproj*.gguf ('mmproj' substring somewhere in file name and with .gguf extension)</param>
+        /// <returns>Array of model file paths.</returns>
+        public static string[] GetModelFilePaths(string? mmprojRegex = @".*mmproj.*\.gguf$")
         {
             if (!System.IO.Directory.Exists(GgufModelsDirectory))
             {
@@ -27,7 +32,18 @@ namespace FormsSystemStatsWidget.Core
                 {
                     // Get the biggest gguf file path
                     var biggestGgufFilePath = ggufFiles.OrderByDescending(f => new System.IO.FileInfo(f).Length).First();
-                    modelFilePaths.Add(biggestGgufFilePath);
+                    
+                    if (string.IsNullOrEmpty(mmprojRegex))
+                    {
+                        modelFilePaths.Add(biggestGgufFilePath);
+                    }
+                    else
+                    {
+                        if (!System.Text.RegularExpressions.Regex.IsMatch(biggestGgufFilePath, mmprojRegex))
+                        {
+                            modelFilePaths.Add(biggestGgufFilePath);
+                        }
+                    }
                 }
             }
 
