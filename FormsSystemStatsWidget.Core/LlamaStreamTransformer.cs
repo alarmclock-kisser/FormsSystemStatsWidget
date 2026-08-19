@@ -818,14 +818,16 @@ namespace FormsSystemStatsWidget.Core
                         await writer.WriteLineAsync("data: " + statsText);
                         await writer.FlushAsync();
                     }
-
-                    try
+                    else
                     {
-                        await writer.WriteLineAsync(line);
-                        await writer.FlushAsync();
+                        try
+                        {
+                            await writer.WriteLineAsync(line);
+                            await writer.FlushAsync();
+                        }
+                        catch { }
+                        break;
                     }
-                    catch { }
-                    break;
                 }
 
                 try
