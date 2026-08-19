@@ -704,7 +704,7 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
             string entered = this.toolStripTextBox_presencePenalty.Text.Trim();
-            if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float penalty) && penalty > 0)
+            if (float.TryParse(entered, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float penalty) && penalty >= 0)
             {
                 this.toolStripTextBox_presencePenalty.Text = penalty.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 LlamaOllamaBridge.UserDefinedPresencePenalty = (double) penalty;
@@ -712,7 +712,7 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 _ = MessageBox.Show(this, "Please enter a valid positive number for presence penalty.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                this.toolStripTextBox_presencePenalty.Text = "1.0";
+                this.toolStripTextBox_presencePenalty.Text = "0.0";
             }
             // Save persistant settings
             this._persistentSettings.PresencePenalty = penalty;
@@ -1297,6 +1297,18 @@ namespace FormsSystemStatsWidget.Forms
 
             this._persistentSettings.AdditionalLoadArgs = this.toolStripTextBox_additionalArgs.Text;
             this.SavePersistentSettings();
+        }
+
+        private void printGenerationStatsToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            this.printGenerationStatsToolStripMenuItem.Checked = !this.printGenerationStatsToolStripMenuItem.Checked;
+            bool isChecked = this.printGenerationStatsToolStripMenuItem.Checked;
+
+            LlamaOllamaBridge.GetGenerationStatsText = isChecked;
+
+            // Apply to persistent settings
+            this._persistentSettings.PrintGenerationStats = isChecked;
+            WidgetPersistentSettingsStore.Save(this._persistentSettings);
         }
 
         [GeneratedRegex(@"--?[a-zA-Z][\w-]*(?:\s+(?:"".*?""|'.*?'|(?!--?[a-zA-Z])[^\s]+))*")]

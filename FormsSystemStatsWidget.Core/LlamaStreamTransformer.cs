@@ -770,7 +770,7 @@ namespace FormsSystemStatsWidget.Core
 
 
 
-        public static async Task TransformOpenAiStreamAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName)
+        public static async Task TransformOpenAiStreamAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false)
         {
             using var streamReader = new StreamReader(upstreamStream);
             using var writer = new StreamWriter(downstreamStream, new UTF8Encoding(false)) { AutoFlush = true };
@@ -807,6 +807,18 @@ namespace FormsSystemStatsWidget.Core
                 var dataStr = line["data: ".Length..].Trim();
                 if (dataStr == "[DONE]")
                 {
+                    if (getGenerationStatsText)
+                    {
+                        int deltaTokens = LlamaOllamaBridge.s_startContextTokens - await LlamaServerStats.GetCurrentContextTokensAsync();
+                        TimeSpan deltaTime = DateTime.Now - LlamaOllamaBridge.s_generationStartUtc;
+                        float rate = (float)(deltaTokens / deltaTime.TotalSeconds);
+                        string modelName = File.Exists(detectedModelName) ? Path.GetFileNameWithoutExtension(detectedModelName) : detectedModelName;
+
+                        string statsText = $"\n\n[Generation Stats] Model: '{modelName}', Tokens: {deltaTokens:N0}, Time: {deltaTime.TotalSeconds:F3}s, Rate: {rate:F3} tokens/s";
+                        await writer.WriteLineAsync("data: " + statsText);
+                        await writer.FlushAsync();
+                    }
+
                     try
                     {
                         await writer.WriteLineAsync(line);

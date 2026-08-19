@@ -72,6 +72,8 @@ namespace FormsSystemStatsWidget.Forms
         public string AdditionalLoadArgs { get; set; } = "--mlock -t 4 -tb 4";
         public Point WidgetPosition { get; set; } = new(0, 0);
         public bool BlackOutMode { get; set; } = false;
+
+        public bool PrintGenerationStats { get; set; } = false;
     }
 
     internal static class WidgetPersistentSettingsStore

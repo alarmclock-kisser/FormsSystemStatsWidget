@@ -38,6 +38,8 @@ namespace FormsSystemStatsWidget.Core
         private static string _llamaServerBaseUrl = "http://localhost:8080";
         private static string _bridgeBaseUrl = "http://localhost:11434";
         private static string _lastStartError = string.Empty;
+        internal static DateTime s_generationStartUtc;
+        internal static int s_startContextTokens;
 
         public static string? DetectedModelName => _detectedModelName;
         public static string? QuantizationLevel => _quantizationLevel;
@@ -66,6 +68,8 @@ namespace FormsSystemStatsWidget.Core
         public static double UserDefinedMinP { get; set; }
         public static int UserDefinedTopK { get; set; }
         public static int UserDefinedReasoningBudget { get; set; }
+
+        public static bool GetGenerationStatsText { get; set; } = false;
 
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(600) };
 
@@ -340,6 +344,12 @@ namespace FormsSystemStatsWidget.Core
             Logger.Log(sanitizedBody);
             Logger.Log("========================================");
 
+            if (GetGenerationStatsText)
+            {
+                s_generationStartUtc = DateTime.Now;
+                s_startContextTokens = await LlamaServerStats.GetCurrentContextTokensAsync();
+            }
+
             using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
             {
                 Content = new StringContent(sanitizedBody, Encoding.UTF8, "application/json")
@@ -351,7 +361,7 @@ namespace FormsSystemStatsWidget.Core
             response.SendChunked = true;
 
             using Stream upstreamStream = await upstreamRes.Content.ReadAsStreamAsync();
-            await LlamaStreamTransformer.TransformOpenAiStreamAsync(upstreamStream, response.OutputStream, _detectedModelName);
+            await LlamaStreamTransformer.TransformOpenAiStreamAsync(upstreamStream, response.OutputStream, _detectedModelName, GetGenerationStatsText);
 
             response.OutputStream.Close();
             Logger.Log("[LlamaBridge] OpenAI direct stream successfully ended.");

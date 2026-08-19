@@ -25,6 +25,8 @@ namespace FormsSystemStatsWidget.Forms
         private Color _diagramColor = Color.White;
         private Color? _percentageColor = Color.BlueViolet;
 
+        public bool AppendGenerationStats => this.printGenerationStatsToolStripMenuItem.Checked;
+
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         internal static extern int SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
@@ -47,12 +49,12 @@ namespace FormsSystemStatsWidget.Forms
         private Keys? _otherKey = null;
 
 
-        private Timer UpdateTimer;
+        private readonly Timer UpdateTimer;
         private GpuStats? Gpu;
         private GpuStats? Gpu2 = null;
-        private DynamicGradientProgressBar _progRam;
-        private DynamicGradientProgressBar _progVram;
-        private DynamicGradientProgressBar _progVram2;
+        private DynamicGradientProgressBar? _progRam;
+        private DynamicGradientProgressBar? _progVram;
+        private DynamicGradientProgressBar? _progVram2;
         private volatile bool _closing = false;
         private int _tickInProgress = 0;
         private CancellationTokenSource? _recordingCancellationTokenSource;
@@ -65,7 +67,6 @@ namespace FormsSystemStatsWidget.Forms
         private WidgetPersistentSettings _persistentSettings = new();
         private bool _explicitWidgetCloseRequested;
         private Process? _llamaServerProcess;
-        private CancellationTokenSource? _processCts;
         private readonly HashSet<Keys> _processingKeys = [];
         private static readonly Regex TokensPerSecondRegex = MyRegex();
         private double _lastStdOutTokensPerSecond;
@@ -85,7 +86,7 @@ namespace FormsSystemStatsWidget.Forms
             this.ConfigureContextMenuAutoCloseBehavior();
 
             this.InitializeProgressBars();
-            this.InitializeUpdateTimer();
+            this.UpdateTimer = this.InitializeUpdateTimer();
             this.InitializeGpuSelection();
             this.InitializeWidgetMouseHandlers();
 
@@ -174,12 +175,13 @@ namespace FormsSystemStatsWidget.Forms
             this.progressBar_vram2.Visible = false;
         }
 
-        private void InitializeUpdateTimer()
+        private Timer InitializeUpdateTimer()
         {
-            this.UpdateTimer = new Timer();
-            this.UpdateTimer.Interval = this._updateIntervalMs;
-            this.UpdateTimer.Tick += this.Timer_Tick;
-            this.UpdateTimer.Start();
+            var timer = new Timer();
+            timer.Interval = this._updateIntervalMs;
+            timer.Tick += this.Timer_Tick;
+            timer.Start();
+            return timer;
         }
 
         private void InitializeGpuSelection()
@@ -312,6 +314,9 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_reasoningBudget.Text = this._persistentSettings.ReasoningBudget.ToString();
             this.toolStripTextBox_additionalArgs.Text = this._persistentSettings.AdditionalLoadArgs;
             this.toolStripTextBox_additionalArgs_KeyDown(this.toolStripTextBox_additionalArgs, new KeyEventArgs(Keys.Enter));
+            this.toolStripTextBox_presencePenalty.Text = this._persistentSettings.PresencePenalty.ToString("0.0000", CultureInfo.InvariantCulture);
+            this.toolStripComboBox_reasoningEffort.Text = this._persistentSettings.ReasoningEffort;
+            this.printGenerationStatsToolStripMenuItem.Checked = this._persistentSettings.PrintGenerationStats;
 
             this.toolStripTextBox_modelsDirectory.Text = this._persistentSettings.GgufModelDirectory;
             this.toolStripTextBox_modelsDirectory_KeyDown(this.toolStripTextBox_modelsDirectory, new KeyEventArgs(Keys.Enter));
@@ -508,7 +513,7 @@ namespace FormsSystemStatsWidget.Forms
             this.label_gpuLoad2.Visible = hasSecondGpu;
             this.label_gpuWatts2.Visible = hasSecondGpu;
             this.label_gpuVram2.Visible = hasSecondGpu;
-            this._progVram2.Visible = hasSecondGpu;
+            this._progVram2?.Visible = hasSecondGpu;
 
             int clientHeight = hasSecondGpu ? MultiGpuClientHeight : SingleGpuClientHeight;
             this.ClientSize = new Size(this.ClientSize.Width, clientHeight);
@@ -769,8 +774,10 @@ namespace FormsSystemStatsWidget.Forms
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
 
             this.label_ram.Text = $"RAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
-            this._progRam.Value = Math.Clamp((int) percentUsed, 0, this._progRam.Maximum);
-
+            if (this._progRam != null)
+            {
+                this._progRam.Value = Math.Clamp((int) percentUsed, 0, this._progRam.Maximum);
+            }
 
             return Task.CompletedTask;
         }
@@ -805,7 +812,10 @@ namespace FormsSystemStatsWidget.Forms
 
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
             this.label_vram.Text = $"VRAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
-            this._progVram.Value = Math.Clamp((int) percentUsed, 0, this._progVram.Maximum);
+            if (this._progVram != null)
+            {
+                this._progVram.Value = Math.Clamp((int) percentUsed, 0, this._progVram.Maximum);
+            }
 
             if (this.Gpu2 != null)
             {
@@ -816,7 +826,10 @@ namespace FormsSystemStatsWidget.Forms
                 double gpu2PercentUsed = gpu2TotalBytes > 0 ? (Math.Max(0.0, gpu2UsedBytes) / gpu2TotalBytes) * 100.0 : 0.0;
 
                 this.label_gpuVram2.Text = $"VRAM: {gpu2UsedGb} GB / {gpu2TotalGb} GB ({gpu2PercentUsed:0.00}%)";
-                this._progVram2.Value = Math.Clamp((int) gpu2PercentUsed, 0, this._progVram2.Maximum);
+                if (this._progVram2 != null)
+                {
+                    this._progVram2.Value = Math.Clamp((int) gpu2PercentUsed, 0, this._progVram2.Maximum);
+                }
             }
 
             return Task.CompletedTask;
@@ -1318,6 +1331,7 @@ namespace FormsSystemStatsWidget.Forms
         [GeneratedRegex(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled, "de-DE")]
         private static partial Regex MyRegex();
 
+        
     }
 }
 

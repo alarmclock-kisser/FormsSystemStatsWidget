@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -27,6 +28,8 @@ namespace FormsSystemStatsWidget.Core
 
         private static readonly Regex TimingRegex = TokensPerSecondRegex();
         private static int _errorCount = 0;
+
+        public static int _lastHighContextTokens { get; private set; } = 0;
 
         /// <summary>
         /// Verbindet die Klasse direkt mit dem laufenden llama-server Prozess, 
@@ -206,6 +209,63 @@ namespace FormsSystemStatsWidget.Core
                 }
 
                 return _currentTps > 0 ? _currentTps : 0f;
+            }
+        }
+
+        /// <summary>
+        /// Liest die aktuell belegten Context-Tokens (n_prompt_tokens + n_decoded) aus /slots.
+        /// Fällt auf 0 zurück, wenn der Endpunkt nicht erreichbar ist.
+        /// </summary>
+        public static async Task<int> GetCurrentContextTokensAsync(int llamacppPort = 8080, bool useLastHigh = true)
+        {
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(2));
+                var response = await _statsClient.GetAsync($"http://localhost:{llamacppPort}/slots", cts.Token);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return 0;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                var slotsArray = JsonNode.Parse(content)?.AsArray();
+                if (slotsArray == null)
+                {
+                    return 0;
+                }
+
+                int total = 0;
+                foreach (var slotNode in slotsArray)
+                {
+                    if (slotNode == null)
+                    {
+                        continue;
+                    }
+
+                    if (TryReadInt(slotNode, out int promptTokens, "n_prompt_tokens", "n_prompt_tokens_processed"))
+                    {
+                        total += promptTokens;
+                    }
+
+                    // n_decoded liegt je nach llama.cpp-Version unter next_token[0].n_decoded oder direkt im Slot
+                    JsonNode? nextTokenArray = slotNode["next_token"];
+                    if (nextTokenArray != null && nextTokenArray.AsArray().Count > 0 && TryReadInt(nextTokenArray[0]!, out int nDecoded, "n_decoded"))
+                    {
+                        total += nDecoded;
+                    }
+                    else if (TryReadInt(slotNode, out int nDecodedDirect, "n_decoded_tokens", "n_decoded"))
+                    {
+                        total += nDecodedDirect;
+                    }
+                }
+
+                _lastHighContextTokens = total > _lastHighContextTokens ? total : _lastHighContextTokens;
+                return useLastHigh ? Math.Max(total, _lastHighContextTokens) : total;
+            }
+            catch
+            {
+                _lastHighContextTokens = 0;
+                return 0;
             }
         }
 

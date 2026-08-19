@@ -167,7 +167,7 @@ namespace FormsSystemStatsWidget.Core
 
             using var waveIn = new WaveInEvent
             {
-                DeviceNumber = deviceIndex.Value,
+                DeviceNumber = deviceIndex ?? 0 ,
                 WaveFormat = waveFormat
             };
 
@@ -198,7 +198,7 @@ namespace FormsSystemStatsWidget.Core
             };
 
             waveIn.StartRecording();
-            Logger.Log($"Recording started on device {deviceIndex.Value} with format {waveFormat.SampleRate}Hz, {waveFormat.BitsPerSample}bit, {waveFormat.Channels}ch");
+            Logger.Log($"Recording started on device {deviceIndex ?? 0} with format {waveFormat.SampleRate}Hz, {waveFormat.BitsPerSample}bit, {waveFormat.Channels}ch");
 
             try
             {
@@ -272,10 +272,10 @@ namespace FormsSystemStatsWidget.Core
                         double chunkDuration = (double) e.BytesRecorded / waveFormat.AverageBytesPerSecond;
                         currentSilenceSeconds += chunkDuration;
 
-                        if (currentSilenceSeconds >= autoStopSilenceSeconds.Value && !this.recordingCts.IsCancellationRequested)
+                        if (currentSilenceSeconds >= autoStopSilenceSeconds.Value && !(this.recordingCts?.IsCancellationRequested ?? true))
                         {
                             Logger.Log($"Silence of {autoStopSilenceSeconds}s detected. Stopping recording.");
-                            this.recordingCts.Cancel();
+                            this.recordingCts?.Cancel();
                         }
                     }
                 }

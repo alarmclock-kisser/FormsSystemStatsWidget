@@ -94,13 +94,13 @@
             this.toolStripTextBox_temperature = new ToolStripTextBox();
             this.toolStripMenuItem_repetitionPenalty = new ToolStripMenuItem();
             this.toolStripTextBox_repetationPenalty = new ToolStripTextBox();
-            this.toolStripMenuItem_thinking = new ToolStripMenuItem();
-            this.toolStripMenuItem_reasoningBudget = new ToolStripMenuItem();
-            this.toolStripTextBox_reasoningBudget = new ToolStripTextBox();
             this.ToolStripMenuItem_presencePenalty = new ToolStripMenuItem();
             this.toolStripTextBox_presencePenalty = new ToolStripTextBox();
             this.toolStripMenuItem_reasoningEffort = new ToolStripMenuItem();
             this.toolStripComboBox_reasoningEffort = new ToolStripComboBox();
+            this.toolStripMenuItem_thinking = new ToolStripMenuItem();
+            this.toolStripMenuItem_reasoningBudget = new ToolStripMenuItem();
+            this.toolStripTextBox_reasoningBudget = new ToolStripTextBox();
             this.toolStripMenuItem_topP = new ToolStripMenuItem();
             this.toolStripTextBox_topP = new ToolStripTextBox();
             this.toolStripMenuItem_minP = new ToolStripMenuItem();
@@ -118,6 +118,7 @@
             this.toolStripTextBox_llamacppPort = new ToolStripTextBox();
             this.ollamaPortToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripTextBox_ollamaPort = new ToolStripTextBox();
+            this.printGenerationStatsToolStripMenuItem = new ToolStripMenuItem();
             this.smartPromptOptimizationsToolStripMenuItem = new ToolStripMenuItem();
             this.enableSmartPromptOptimizationsToolStripMenuItem = new ToolStripMenuItem();
             this.promptSafetyRatioToolStripMenuItem = new ToolStripMenuItem();
@@ -643,34 +644,34 @@
             this.toolStripTextBox_repetationPenalty.Size = new Size(100, 23);
             this.toolStripTextBox_repetationPenalty.Text = "1.0";
             this.toolStripTextBox_repetationPenalty.KeyDown += this.toolStripTextBox_repetationPenalty_KeyDown;
-            //
-            // toolStripMenuItem_reasoningBudget
-            //
+            // 
+            // ToolStripMenuItem_presencePenalty
+            // 
             this.ToolStripMenuItem_presencePenalty.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_presencePenalty });
-            this.ToolStripMenuItem_presencePenalty.Name = "toolStripMenuItem_presencePenalty";
+            this.ToolStripMenuItem_presencePenalty.Name = "ToolStripMenuItem_presencePenalty";
             this.ToolStripMenuItem_presencePenalty.Size = new Size(340, 22);
             this.ToolStripMenuItem_presencePenalty.Text = "Presence Penalty";
-            //
+            // 
             // toolStripTextBox_presencePenalty
-            //
+            // 
             this.toolStripTextBox_presencePenalty.Name = "toolStripTextBox_presencePenalty";
             this.toolStripTextBox_presencePenalty.Size = new Size(100, 23);
             this.toolStripTextBox_presencePenalty.Text = "1.0";
             this.toolStripTextBox_presencePenalty.KeyDown += this.toolStripTextBox_presencePenalty_KeyDown;
-            //
+            // 
             // toolStripMenuItem_reasoningEffort
-            //
+            // 
             this.toolStripMenuItem_reasoningEffort.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripComboBox_reasoningEffort });
             this.toolStripMenuItem_reasoningEffort.Name = "toolStripMenuItem_reasoningEffort";
             this.toolStripMenuItem_reasoningEffort.Size = new Size(340, 22);
             this.toolStripMenuItem_reasoningEffort.Text = "Reasoning Effort";
-            //
+            // 
             // toolStripComboBox_reasoningEffort
-            //
-            this.toolStripComboBox_reasoningEffort.Items.AddRange(["xhigh", "medium", "low"]);
+            // 
+            this.toolStripComboBox_reasoningEffort.Items.AddRange(new object[] { "xhigh", "medium", "low" });
             this.toolStripComboBox_reasoningEffort.Name = "toolStripComboBox_reasoningEffort";
             this.toolStripComboBox_reasoningEffort.Size = new Size(100, 23);
-            this.toolStripComboBox_reasoningEffort.SelectedIndex = 0;
+            this.toolStripComboBox_reasoningEffort.Text = "xhigh";
             this.toolStripComboBox_reasoningEffort.SelectedIndexChanged += this.toolStripComboBox_reasoningEffort_SelectedIndexChanged;
             // 
             // toolStripMenuItem_thinking
@@ -766,7 +767,7 @@
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 
             this.rerouteAPILlamacppOllamaToolStripMenuItem.CheckOnClick = true;
-            this.rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_openAiApi, this.toolStripSeparator4, this.llamacppPortToolStripMenuItem, this.ollamaPortToolStripMenuItem });
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_openAiApi, this.toolStripSeparator4, this.llamacppPortToolStripMenuItem, this.ollamaPortToolStripMenuItem, this.printGenerationStatsToolStripMenuItem });
             this.rerouteAPILlamacppOllamaToolStripMenuItem.Name = "rerouteAPILlamacppOllamaToolStripMenuItem";
             this.rerouteAPILlamacppOllamaToolStripMenuItem.Size = new Size(274, 22);
             this.rerouteAPILlamacppOllamaToolStripMenuItem.Text = "Re-route API llama.cpp -> Ollama";
@@ -776,7 +777,7 @@
             // 
             this.toolStripMenuItem_openAiApi.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_openAiApiUrl });
             this.toolStripMenuItem_openAiApi.Name = "toolStripMenuItem_openAiApi";
-            this.toolStripMenuItem_openAiApi.Size = new Size(174, 22);
+            this.toolStripMenuItem_openAiApi.Size = new Size(188, 22);
             this.toolStripMenuItem_openAiApi.Text = "Source OpenAI API";
             // 
             // toolStripTextBox_openAiApiUrl
@@ -788,13 +789,13 @@
             // toolStripSeparator4
             // 
             this.toolStripSeparator4.Name = "toolStripSeparator4";
-            this.toolStripSeparator4.Size = new Size(171, 6);
+            this.toolStripSeparator4.Size = new Size(185, 6);
             // 
             // llamacppPortToolStripMenuItem
             // 
             this.llamacppPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_llamacppPort });
             this.llamacppPortToolStripMenuItem.Name = "llamacppPortToolStripMenuItem";
-            this.llamacppPortToolStripMenuItem.Size = new Size(174, 22);
+            this.llamacppPortToolStripMenuItem.Size = new Size(188, 22);
             this.llamacppPortToolStripMenuItem.Text = "llama.cpp Port";
             // 
             // toolStripTextBox_llamacppPort
@@ -808,7 +809,7 @@
             // 
             this.ollamaPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_ollamaPort });
             this.ollamaPortToolStripMenuItem.Name = "ollamaPortToolStripMenuItem";
-            this.ollamaPortToolStripMenuItem.Size = new Size(174, 22);
+            this.ollamaPortToolStripMenuItem.Size = new Size(188, 22);
             this.ollamaPortToolStripMenuItem.Text = "Ollama Port";
             // 
             // toolStripTextBox_ollamaPort
@@ -817,6 +818,16 @@
             this.toolStripTextBox_ollamaPort.Size = new Size(100, 23);
             this.toolStripTextBox_ollamaPort.Text = "11434";
             this.toolStripTextBox_ollamaPort.KeyDown += this.toolStripTextBox_ollamaPort_KeyDown;
+            // 
+            // printGenerationStatsToolStripMenuItem
+            // 
+            this.printGenerationStatsToolStripMenuItem.Checked = true;
+            this.printGenerationStatsToolStripMenuItem.CheckOnClick = true;
+            this.printGenerationStatsToolStripMenuItem.CheckState = CheckState.Checked;
+            this.printGenerationStatsToolStripMenuItem.Name = "printGenerationStatsToolStripMenuItem";
+            this.printGenerationStatsToolStripMenuItem.Size = new Size(188, 22);
+            this.printGenerationStatsToolStripMenuItem.Text = "Print Generation Stats";
+            this.printGenerationStatsToolStripMenuItem.Click += this.printGenerationStatsToolStripMenuItem_Click;
             // 
             // smartPromptOptimizationsToolStripMenuItem
             // 
@@ -1269,5 +1280,6 @@
         private ToolStripMenuItem toolStripMenuItem_additionalArgs;
         private ToolStripTextBox toolStripTextBox_additionalArgs;
         private ToolStripMenuItem toolStripMenuItem_blackOutMode;
+        private ToolStripMenuItem printGenerationStatsToolStripMenuItem;
     }
 }
