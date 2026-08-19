@@ -9,9 +9,22 @@ using System.Threading.Tasks;
 
 namespace FormsSystemStatsWidget.Core
 {
+    /// <summary>
+    /// Provides real-time statistics and monitoring for a running llama.cpp server process.
+    /// </summary>
+    /// <remarks>
+    /// This class connects directly to a running llama.cpp process to capture console output
+    /// in real-time and provides generation speed (tokens per second) and context token counts.
+    /// It supports both direct HTTP API access to the llama.cpp stats endpoint and StdOut polling.
+    /// </remarks>
     public static partial class LlamaServerStats
     {
-        // Timeout deutlich erhöht! 250ms war viel zu kurz für einen ausgelasteten KI-Server.
+        /// <summary>
+        /// HTTP client used to communicate with the llama.cpp server's statistics endpoint.
+        /// </summary>
+        /// <remarks>
+        /// Timeout is set to 2500ms to accommodate loaded AI servers that may respond slowly.
+        /// </remarks>
         private static readonly HttpClient _statsClient = new() { Timeout = TimeSpan.FromMilliseconds(2500) };
 
         private static int _lastTaskId = -1;
@@ -23,18 +36,47 @@ namespace FormsSystemStatsWidget.Core
         private static DateTime _liveTpsFromStdOutUtc = DateTime.MinValue;
         private static readonly TimeSpan IdlePollingInterval = TimeSpan.FromSeconds(2);
 
-        // FEHLENDER WERT HINZUGEFÜGT: Wie lange ein StdOut-TPS-Wert gültig bleibt (z.B. 4 Sekunden)
+        /// <summary>
+        /// The time-to-live (TTL) for a StdOut tokens-per-second value.
+        /// </summary>
+        /// <remarks>
+        /// A StdOut TPS value is only valid for this duration (e.g., 4 seconds) before it becomes stale.
+        /// </remarks>
         private static readonly TimeSpan StdOutTpsTtl = TimeSpan.FromSeconds(4);
 
-        private static readonly Regex TimingRegex = TokensPerSecondRegex();
-        private static int _errorCount = 0;
-
-        public static int _lastHighContextTokens { get; private set; } = 0;
+        /// <summary>
+                /// Regex pattern used to parse tokens-per-second values from llama.cpp console output.
+                /// </summary>
+                /// <remarks>
+                /// Matches log entries in the format "tg = 19.14 t/s" to extract the generation speed.
+                /// </remarks>
+                private static readonly Regex TimingRegex = TokensPerSecondRegex();
+        /// <summary>
+                /// Count of errors encountered while monitoring the llama.cpp server.
+                /// </summary>
+                /// <remarks>
+                /// Incremented when statistics requests fail or StdOut parsing encounters issues.
+                /// If the error count exceeds 15, the monitoring state is reset.
+                /// </remarks>
+                private static int _errorCount = 0;
 
         /// <summary>
-        /// Verbindet die Klasse direkt mit dem laufenden llama-server Prozess, 
-        /// um die Konsolenausgaben in Echtzeit abzufangen.
+                /// The last recorded count of context tokens from the llama.cpp server.
+                /// </summary>
+                /// <remarks>
+                /// This value is updated when new context token data is available from the /slots endpoint.
+                /// It tracks the highest context token count seen during active generation.
+                /// </remarks>
+                public static int _lastHighContextTokens { get; private set; } = 0;
+
+        /// <summary>
+        /// Attaches the class directly to a running llama.cpp process to capture console output in real-time.
         /// </summary>
+        /// <remarks>
+        /// llama.cpp sends almost all logs (including info) to StandardError, so both error and output
+        /// data events are hooked to capture all relevant information.
+        /// </summary>
+        /// <param name="llamaServerProcess">The running llama.cpp process to attach to.</param>
         public static void AttachToProcess(Process llamaServerProcess)
         {
             if (llamaServerProcess == null)
@@ -55,7 +97,15 @@ namespace FormsSystemStatsWidget.Core
             };
         }
 
-        public static void ParseStdOutLine(string? line)
+        /// <summary>
+                /// Parses a standard output line from the llama.cpp process to extract tokens-per-second values.
+                /// </summary>
+                /// <remarks>
+                /// If the line contains a matching tokens-per-second pattern, the generation speed is updated.
+                /// Lines that are null, empty, or whitespace are ignored.
+                /// </remarks>
+                /// <param name="line">The console output line to parse. Can be null or whitespace.</param>
+                public static void ParseStdOutLine(string? line)
         {
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -69,7 +119,17 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
-        public static async Task<float?> GetCurrentLlamaServerGenerationStatsAsync(int llamacppPort = 8080)
+        /// <summary>
+                /// Asynchronously retrieves the current generation statistics from the llama.cpp server.
+                /// </summary>
+                /// <remarks>
+                /// First attempts to get tokens-per-second from standard output (if recently captured).
+                /// Falls back to HTTP API call to the /slots endpoint if StdOut data is stale or unavailable.
+                /// Returns null if the server is unreachable or no active generation is detected.
+                /// </remarks>
+                /// <param name="llamacppPort">The port number where the llama.cpp server is listening (default: 8080).</param>
+                /// <returns>Current tokens-per-second value, or null if the server is unreachable.</returns>
+                public static async Task<float?> GetCurrentLlamaServerGenerationStatsAsync(int llamacppPort = 8080)
         {
             DateTime now = DateTime.UtcNow;
 
@@ -213,9 +273,16 @@ namespace FormsSystemStatsWidget.Core
         }
 
         /// <summary>
-        /// Liest die aktuell belegten Context-Tokens (n_prompt_tokens + n_decoded) aus /slots.
-        /// Fällt auf 0 zurück, wenn der Endpunkt nicht erreichbar ist.
+        /// Asynchronously retrieves the current context token count from the llama.cpp server.
         /// </summary>
+        /// <remarks>
+        /// Reads the total number of prompt and decoded tokens from the /slots endpoint.
+        /// Returns 0 if the endpoint is unreachable. The value is compared against the last high
+        /// context token count to track maximum usage.
+        /// </remarks>
+        /// <param name="llamacppPort">The port number where the llama.cpp server is listening (default: 8080).</param>
+        /// <param name="useLastHigh">If true, returns the maximum of the current and last high context token count.</param>
+        /// <returns>The current context token count, or the last high count if useLastHigh is true.</returns>
         public static async Task<int> GetCurrentContextTokensAsync(int llamacppPort = 8080, bool useLastHigh = true)
         {
             try
@@ -269,7 +336,15 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
-        public static void UpdateGenerationSpeed(float tokensPerSecond)
+        /// <summary>
+                /// Updates the generation speed based on a new tokens-per-second value from the StdOut.
+                /// </summary>
+                /// <remarks>
+                /// Stores the new TPS value and the current UTC timestamp. Also updates the current TPS
+                /// if the new value is greater than zero.
+                /// </remarks>
+                /// <param name="tokensPerSecond">The new tokens-per-second value to record.</param>
+                public static void UpdateGenerationSpeed(float tokensPerSecond)
         {
             if (tokensPerSecond <= 0f)
             {
@@ -281,7 +356,17 @@ namespace FormsSystemStatsWidget.Core
             _currentTps = tokensPerSecond;
         }
 
-        private static bool TryGetFreshStdOutTps(DateTime now, out float tokensPerSecond)
+        /// <summary>
+                /// Checks if the StdOut tokens-per-second value is still fresh (within the TTL).
+                /// </summary>
+                /// <remarks>
+                /// A StdOut TPS value is only considered fresh if it was captured within the StdOutTpsTtl
+                /// duration (e.g., 4 seconds). Returns false if no value has been captured yet or if it has expired.
+                /// </remarks>
+                /// <param name="now">The current UTC time.</param>
+                /// <param out tokensPerSecond>The tokens-per-second value if fresh, otherwise 0.</param>
+                /// <returns>true if the TPS value is fresh and valid; otherwise false.</returns>
+                private static bool TryGetFreshStdOutTps(DateTime now, out float tokensPerSecond)
         {
             tokensPerSecond = 0f;
             if (_liveTpsFromStdOut <= 0f)
@@ -298,7 +383,19 @@ namespace FormsSystemStatsWidget.Core
             return true;
         }
 
-        private static bool TryReadInt(JsonNode node, out int value, params string[] propertyNames)
+        /// <summary>
+                /// Tries to read an integer value from a JSON node by checking multiple property names.
+                /// </summary>
+                /// <remarks>
+                /// Iterates through the provided property name parameters and attempts to parse the first
+                /// found value as an integer. If no matching property is found or parsing fails, the output
+                /// value is set to 0 and the method returns false.
+                /// </remarks>
+                /// <param name="node">The JSON node to search for the integer value.</param>
+                /// <param out value>The output integer value. Set to 0 if no valid value is found.</param>
+                /// <param name="propertyNames">Variable-length list of property names to check for the value.</param>
+                /// <returns>true if an integer value was successfully parsed from one of the properties; otherwise false.</returns>
+                private static bool TryReadInt(JsonNode node, out int value, params string[] propertyNames)
         {
             value = 0;
             foreach (string propertyName in propertyNames)
