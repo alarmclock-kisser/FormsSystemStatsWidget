@@ -247,7 +247,6 @@ namespace FormsSystemStatsWidget.Forms
             if (noWarmup)
             {
                 _ = sb.Append("--no-warmup ");
-                _ = sb.Append("--no-mmap ");
             }
             if (kvOffload)
             {
