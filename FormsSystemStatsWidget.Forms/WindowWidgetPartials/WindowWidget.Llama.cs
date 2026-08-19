@@ -1301,7 +1301,6 @@ namespace FormsSystemStatsWidget.Forms
 
         private void printGenerationStatsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            this.printGenerationStatsToolStripMenuItem.Checked = !this.printGenerationStatsToolStripMenuItem.Checked;
             bool isChecked = this.printGenerationStatsToolStripMenuItem.Checked;
 
             LlamaOllamaBridge.GetGenerationStatsText = isChecked;
