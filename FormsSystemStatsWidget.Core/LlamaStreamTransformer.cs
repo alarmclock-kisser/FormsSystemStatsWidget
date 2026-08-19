@@ -107,6 +107,8 @@ namespace FormsSystemStatsWidget.Core
                     NormalizeToolHistoryMessage(message, flattenToolHistory);
                 }
 
+                EnsureSystemMessageFirst(messages);
+
                 double promptSafetyRatio = Math.Clamp(SmartPromptOptimizationSettings.PromptSafetyRatio, 0.10, 1.00);
                 int maxPromptTokens = (int) (numCtx * promptSafetyRatio);
                 int hardCharLimit = maxPromptTokens * 3;
@@ -174,6 +176,39 @@ namespace FormsSystemStatsWidget.Core
                 firstMsg["content"] = content + rules;
                 Logger.Log("[Sanitizer] Injected strict Tool-Calling and Diff rules into System Prompt.");
             }
+        }
+
+        private static void EnsureSystemMessageFirst(JsonArray messages)
+        {
+            if (messages.Count == 0)
+            {
+                return;
+            }
+
+            if (string.Equals(messages[0]?["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            int systemIndex = -1;
+            for (int i = 1; i < messages.Count; i++)
+            {
+                if (string.Equals(messages[i]?["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+                {
+                    systemIndex = i;
+                    break;
+                }
+            }
+
+            if (systemIndex < 0)
+            {
+                return;
+            }
+
+            JsonNode? systemMsg = messages[systemIndex];
+            messages.RemoveAt(systemIndex);
+            messages.Insert(0, systemMsg);
+            Logger.Log($"[Sanitizer] Moved system message from index {systemIndex} to position 0 (Ollama requires system message first).");
         }
 
         private static void OptimizeMessagesForSmartContext(JsonArray messages, int hardCharLimit)
