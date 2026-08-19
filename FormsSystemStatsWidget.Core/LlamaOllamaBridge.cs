@@ -81,31 +81,16 @@ namespace FormsSystemStatsWidget.Core
             // 1. Reachability test and detailed metadata query for llama-server
             try
             {
-                string normalizedApiHost = string.Empty;
-                if (!string.IsNullOrWhiteSpace(apiUrl))
-                {
-                    string rawApiUrl = apiUrl.Trim().TrimEnd('/');
-
-                    if (Uri.TryCreate(rawApiUrl, UriKind.Absolute, out Uri? parsedApiUri))
-                    {
-                        normalizedApiHost = parsedApiUri.Host;
-                    }
-                    else
-                    {
-                        normalizedApiHost = rawApiUrl
-                            .Replace("http://", string.Empty, StringComparison.OrdinalIgnoreCase)
-                            .Replace("https://", string.Empty, StringComparison.OrdinalIgnoreCase)
-                            .Split('/')[0]
-                            .Split(':')[0];
-                    }
-                }
-
                 var candidateBaseUrls = new List<string>();
-                if (!string.IsNullOrWhiteSpace(normalizedApiHost))
+                string configuredBaseUrl = BuildLlamaServerBaseUrl(apiUrl, llamacppPort);
+                if (!string.IsNullOrWhiteSpace(configuredBaseUrl))
                 {
-                    candidateBaseUrls.Add($"http://{normalizedApiHost}:{llamacppPort}");
+                    candidateBaseUrls.Add(configuredBaseUrl);
                 }
-                candidateBaseUrls.Add($"http://localhost:{llamacppPort}");
+                else
+                {
+                    candidateBaseUrls.Add($"http://localhost:{llamacppPort}");
+                }
 
                 Logger.Log($"[LlamaBridge] Reachability candidates: {string.Join(" | ", candidateBaseUrls.Distinct(StringComparer.OrdinalIgnoreCase))}");
 
@@ -173,43 +158,50 @@ namespace FormsSystemStatsWidget.Core
                 }
 
                 // Create a local timeout token for the second props probe
-                using var ctsProps = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-
-                // B. Extract context size and default temperature from /props
-                var propsResponse = await _httpClient.GetAsync($"{_llamaServerBaseUrl}/props", ctsProps.Token);
-                if (propsResponse.IsSuccessStatusCode)
+                try
                 {
-                    var propsContent = await propsResponse.Content.ReadAsStringAsync();
-                    var propsJson = JsonNode.Parse(propsContent);
+                    using var ctsProps = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-                    bool? supportsVisionFromProps = TryReadVisionSupportFromProps(propsJson);
-                    if (supportsVisionFromProps.HasValue)
+                    // B. Extract context size and default temperature from /props
+                    var propsResponse = await _httpClient.GetAsync($"{_llamaServerBaseUrl}/props", ctsProps.Token);
+                    if (propsResponse.IsSuccessStatusCode)
                     {
-                        _supportsVision = supportsVisionFromProps.Value;
-                    }
+                        var propsContent = await propsResponse.Content.ReadAsStringAsync();
+                        var propsJson = JsonNode.Parse(propsContent);
 
-                // Path-tolerant read of n_ctx
-                    var nCtxNode = propsJson?["default_generation_settings"]?["n_ctx"] ?? propsJson?["n_ctx"];
-                    if (nCtxNode != null && int.TryParse(nCtxNode.ToString(), out int parsedCtx))
+                        bool? supportsVisionFromProps = TryReadVisionSupportFromProps(propsJson);
+                        if (supportsVisionFromProps.HasValue)
+                        {
+                            _supportsVision = supportsVisionFromProps.Value;
+                        }
+
+                        // Path-tolerant read of n_ctx
+                        var nCtxNode = propsJson?["default_generation_settings"]?["n_ctx"] ?? propsJson?["n_ctx"];
+                        if (nCtxNode != null && int.TryParse(nCtxNode.ToString(), out int parsedCtx))
+                        {
+                            _detectedNumCtx = parsedCtx;
+                        }
+
+                        // Path-tolerant read of the default temperature
+                        var tempNode = propsJson?["default_generation_settings"]?["temperature"]
+                                       ?? propsJson?["default_generation_settings"]?["params"]?["temperature"]
+                                       ?? propsJson?["params"]?["temperature"];
+
+                        if (tempNode != null && double.TryParse(tempNode.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out double parsedTemp))
+                        {
+                            _detectedTemperature = parsedTemp;
+                        }
+
+                        Logger.Log($"[LlamaBridge] Server-Props loaded: Context={_detectedNumCtx}, Temp={_detectedTemperature}, Vision={_supportsVision}");
+                    }
+                    else
                     {
-                        _detectedNumCtx = parsedCtx;
+                        Logger.Log($"[LlamaBridge] Warning: /props unavailable on {_llamaServerBaseUrl} (HTTP {(int) propsResponse.StatusCode} {propsResponse.StatusCode}). Continuing with defaults.");
                     }
-
-                // Path-tolerant read of the default temperature
-                    var tempNode = propsJson?["default_generation_settings"]?["temperature"]
-                                   ?? propsJson?["default_generation_settings"]?["params"]?["temperature"]
-                                   ?? propsJson?["params"]?["temperature"];
-
-                    if (tempNode != null && double.TryParse(tempNode.ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out double parsedTemp))
-                    {
-                        _detectedTemperature = parsedTemp;
-                    }
-
-                    Logger.Log($"[LlamaBridge] Server-Props loaded: Context={_detectedNumCtx}, Temp={_detectedTemperature}, Vision={_supportsVision}");
                 }
-                else
+                catch (Exception propsEx)
                 {
-                    Logger.Log($"[LlamaBridge] Warning: /props unavailable on {_llamaServerBaseUrl} (HTTP {(int) propsResponse.StatusCode} {propsResponse.StatusCode}). Continuing with defaults.");
+                    Logger.Log($"[LlamaBridge] Warning: /props probe failed on {_llamaServerBaseUrl}: {propsEx.GetType().Name}: {propsEx.Message}. Continuing with defaults.");
                 }
             }
             catch (Exception ex)
@@ -239,6 +231,24 @@ namespace FormsSystemStatsWidget.Core
                 Logger.Log($"[LlamaBridge] {_lastStartError}");
                 return false;
             }
+        }
+
+        private static string BuildLlamaServerBaseUrl(string? apiUrl, int configuredPort)
+        {
+            if (string.IsNullOrWhiteSpace(apiUrl))
+            {
+                return string.Empty;
+            }
+
+            string rawApiUrl = apiUrl.Trim().TrimEnd('/');
+            if (!Uri.TryCreate(rawApiUrl, UriKind.Absolute, out Uri? parsedApiUri)
+                || (parsedApiUri.Scheme != Uri.UriSchemeHttp && parsedApiUri.Scheme != Uri.UriSchemeHttps))
+            {
+                return string.Empty;
+            }
+
+            int port = parsedApiUri.IsDefaultPort ? configuredPort : parsedApiUri.Port;
+            return new UriBuilder(parsedApiUri.Scheme, parsedApiUri.Host, port).Uri.GetLeftPart(UriPartial.Authority);
         }
 
         private static async Task ListenLoopAsync(int llamacppPort)

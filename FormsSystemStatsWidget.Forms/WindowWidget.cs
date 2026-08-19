@@ -1051,7 +1051,10 @@ namespace FormsSystemStatsWidget.Forms
                     item.Visible = true;
                 }
 
-                this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false;
+                if (!LlamaOllamaBridge.IsRunning)
+                {
+                    this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false;
+                }
                 this.toolStripMenuItem_loadLlamaCppServer.Click -= this.ToolStripMenuItem_killLlamaServer_Click;
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;
             }
