@@ -91,13 +91,27 @@ namespace FormsSystemStatsWidget.Core
                 }
                 _ = root.Remove("store");
 
+                // Handle top-level "system" field (Ollama-style): prepend as a system message
+                if (root["system"] is JsonNode sysField)
+                {
+                    string sysText = GetMessageContentText(sysField);
+                    if (!string.IsNullOrWhiteSpace(sysText) && root["messages"] is JsonArray existingMsgs)
+                    {
+                        // Only prepend if no system message already exists in the array
+                        bool hasSys = existingMsgs.OfType<JsonObject>().Any(m =>
+                            string.Equals(m["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase));
+                        if (!hasSys)
+                        {
+                            existingMsgs.Insert(0, new JsonObject { ["role"] = "system", ["content"] = sysText });
+                        }
+                    }
+                    _ = root.Remove("system");
+                }
+
                 if (root["messages"] is not JsonArray messages)
                 {
                     return root.ToJsonString();
                 }
-
-                // NEU: Strenge Instruktionen für Tool-Calling in den System-Prompt injizieren!
-                InjectStrictToolCallingRules(messages);
 
                 foreach (JsonObject message in messages.OfType<JsonObject>())
                 {
@@ -108,6 +122,7 @@ namespace FormsSystemStatsWidget.Core
                 }
 
                 EnsureSystemMessageFirst(messages);
+                InjectStrictToolCallingRules(messages);
 
                 double promptSafetyRatio = Math.Clamp(SmartPromptOptimizationSettings.PromptSafetyRatio, 0.10, 1.00);
                 int maxPromptTokens = (int) (numCtx * promptSafetyRatio);
@@ -185,30 +200,75 @@ namespace FormsSystemStatsWidget.Core
                 return;
             }
 
-            if (string.Equals(messages[0]?["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+            int firstSystemIndex = -1;
+            List<JsonObject> systemMessages = [];
+            for (int i = 0; i < messages.Count; i++)
             {
-                return;
-            }
-
-            int systemIndex = -1;
-            for (int i = 1; i < messages.Count; i++)
-            {
-                if (string.Equals(messages[i]?["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+                if (messages[i] is JsonObject message &&
+                    string.Equals(message["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
                 {
-                    systemIndex = i;
-                    break;
+                    firstSystemIndex = firstSystemIndex < 0 ? i : firstSystemIndex;
+                    systemMessages.Add(message);
                 }
             }
 
-            if (systemIndex < 0)
+            if (firstSystemIndex < 0)
             {
                 return;
             }
 
-            JsonNode? systemMsg = messages[systemIndex];
-            messages.RemoveAt(systemIndex);
-            messages.Insert(0, systemMsg);
-            Logger.Log($"[Sanitizer] Moved system message from index {systemIndex} to position 0 (Ollama requires system message first).");
+            JsonObject firstSystemMessage = systemMessages[0];
+            List<string> systemContents = systemMessages
+                .Select(message => GetMessageContentText(message["content"]))
+                .Where(content => !string.IsNullOrWhiteSpace(content))
+                .ToList();
+
+            firstSystemMessage["content"] = string.Join("\n\n", systemContents);
+
+            for (int i = messages.Count - 1; i >= 0; i--)
+            {
+                if (i != firstSystemIndex && messages[i] is JsonObject message &&
+                    string.Equals(message["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+                {
+                    messages.RemoveAt(i);
+                }
+            }
+
+            if (firstSystemIndex != 0)
+            {
+                messages.RemoveAt(firstSystemIndex);
+                messages.Insert(0, firstSystemMessage);
+            }
+
+            Logger.Log($"[Sanitizer] Normalized {systemMessages.Count} system message(s) to one system message at position 0.");
+        }
+
+        private static string GetMessageContentText(JsonNode? contentNode)
+        {
+            if (contentNode is null)
+            {
+                return string.Empty;
+            }
+
+            if (contentNode is JsonValue value && value.TryGetValue<string>(out string? text))
+            {
+                return text ?? string.Empty;
+            }
+
+            if (contentNode is JsonArray parts)
+            {
+                return string.Join("\n", parts.Select(part =>
+                {
+                    if (part is JsonObject partObject && partObject["text"] is JsonNode textNode)
+                    {
+                        return GetMessageContentText(textNode);
+                    }
+
+                    return GetMessageContentText(part);
+                }).Where(textPart => !string.IsNullOrWhiteSpace(textPart)));
+            }
+
+            return contentNode.ToJsonString();
         }
 
         private static void OptimizeMessagesForSmartContext(JsonArray messages, int hardCharLimit)

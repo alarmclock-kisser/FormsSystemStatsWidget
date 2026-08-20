@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -341,6 +342,7 @@ namespace FormsSystemStatsWidget.Core
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
+            LogMessageLayout(sanitizedBody);
             Logger.Log(sanitizedBody);
             Logger.Log("========================================");
 
@@ -368,6 +370,27 @@ namespace FormsSystemStatsWidget.Core
             return true;
         }
 
+        private static void LogMessageLayout(string requestBody)
+        {
+            try
+            {
+                JsonNode? root = JsonNode.Parse(requestBody);
+                if (root?["messages"] is not JsonArray messages)
+                {
+                    Logger.Log("[LlamaBridge] Sanitized request contains no messages array.");
+                    return;
+                }
+
+                string layout = string.Join(", ", messages.Select((message, index) =>
+                    $"{index}={message?["role"]?.ToString() ?? "<missing>"}"));
+                Logger.Log($"[LlamaBridge] Sanitized message layout: [{layout}]");
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[LlamaBridge] Could not inspect sanitized message layout: {ex.Message}");
+            }
+        }
+
         private static async Task<bool> TryHandleOllamaChatAsync(HttpListenerRequest request, HttpListenerResponse response)
         {
             if (!IsEndpoint(request, "POST", "/api/chat"))
@@ -380,16 +403,63 @@ namespace FormsSystemStatsWidget.Core
             string body = await reader.ReadToEndAsync();
             JsonNode? ollamaReq = JsonNode.Parse(body);
 
+            // Build messages array, handling Ollama's separate 'system' field
+            var messagesArray = new JsonArray();
+            if (ollamaReq is JsonObject ollamaObj)
+            {
+                bool hasSystemInMessages = false;
+                if (ollamaObj["messages"] is JsonArray ollamaMessages)
+                {
+                    foreach (JsonNode? msg in ollamaMessages)
+                    {
+                        if (msg is JsonObject msgObj &&
+                            string.Equals(msgObj["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasSystemInMessages = true;
+                            break;
+                        }
+                    }
+                }
+
+                string? systemPrompt = ollamaObj["system"]?.GetValue<string>();
+                if (!hasSystemInMessages && !string.IsNullOrWhiteSpace(systemPrompt))
+                {
+                    messagesArray.Add(new JsonObject { ["role"] = "system", ["content"] = systemPrompt });
+                }
+
+                if (ollamaObj["messages"] is JsonArray ollamaMessages2)
+                {
+                    foreach (JsonNode? msg in ollamaMessages2)
+                    {
+                        if (msg is JsonObject msgObj)
+                        {
+                            messagesArray.Add(msgObj.DeepClone());
+                        }
+                    }
+                }
+            }
+
             var openAiReq = new JsonObject
             {
                 ["model"] = _detectedModelName,
-                ["messages"] = ollamaReq?["messages"]?.DeepClone(),
+                ["messages"] = messagesArray,
                 ["stream"] = ollamaReq?["stream"] ?? true
             };
 
+            // Sanitize: ensures system message is first, trims context, normalizes tool history
+            string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(
+                openAiReq.ToJsonString(), _modelFamily, _detectedNumCtx,
+                UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty,
+                UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort);
+
+            Logger.Log("========================================");
+            Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE (OLLAMA PATH)]");
+            Logger.Log(sanitizedBody);
+            Logger.Log("========================================");
+
             using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
             {
-                Content = new StringContent(openAiReq.ToJsonString(), Encoding.UTF8, "application/json")
+                Content = new StringContent(sanitizedBody, Encoding.UTF8, "application/json")
             };
 
             using HttpResponseMessage upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
