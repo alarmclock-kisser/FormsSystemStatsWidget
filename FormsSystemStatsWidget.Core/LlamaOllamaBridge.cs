@@ -31,7 +31,22 @@ namespace FormsSystemStatsWidget.Core
 
         private static HttpListener? _listener;
         private static bool _isRunning;
-        private static string _detectedModelName = "local-llama-model";
+        private static string _detectedModelId = "local-llama-model";
+        private static string _detectedModelName
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(_detectedModelId) && File.Exists(_detectedModelId))
+                {
+                    return Path.GetFileNameWithoutExtension(_detectedModelId);
+                }
+                return _detectedModelId;
+            }
+            set
+            {
+                _detectedModelId = value;
+            }
+        }
         private static string _quantizationLevel = "unknown";
         private static string _parameterSize = "unknown";
         private static string _modelFamily = "llama";
@@ -43,6 +58,9 @@ namespace FormsSystemStatsWidget.Core
         internal static int s_startContextTokens;
 
         public static string? DetectedModelName => _detectedModelName;
+        public static string DisplayName => !string.IsNullOrEmpty(_detectedModelName) && File.Exists(_detectedModelName) 
+            ? Path.GetFileNameWithoutExtension(_detectedModelName) 
+            : _detectedModelName;
         public static string? QuantizationLevel => _quantizationLevel;
         public static string? ParameterSize => _parameterSize;
         public static string? ModelFamily => _modelFamily;
