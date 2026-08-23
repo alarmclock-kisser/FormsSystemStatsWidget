@@ -166,6 +166,11 @@ namespace FormsSystemStatsWidget.Core
         // --- NEUE METHODE: Gehirnwäsche für lokale Modelle (Prompt Injection) ---
         private static void InjectStrictToolCallingRules(JsonArray messages)
         {
+            if (messages.Count <= 0 || !SmartPromptOptimizationSettings.InjectStrictToolCallingRules)
+            {
+                return;
+            }
+
             var firstMsg = messages.FirstOrDefault() as JsonObject;
             if (firstMsg == null)
             {
@@ -181,12 +186,12 @@ namespace FormsSystemStatsWidget.Core
             string content = firstMsg["content"]?.ToString() ?? "";
 
             // Exaktes Format vorgeben
-            string rules = "\n\n[CRITICAL SYSTEM INSTRUCTIONS FOR TOOLS & EDITS]\n" +
+            string rules = string.IsNullOrEmpty(SmartPromptOptimizationSettings.StrictToolCallingRulesInjectionPrompt) ? "\n\n[CRITICAL SYSTEM INSTRUCTIONS FOR TOOLS & EDITS]\n" +
                            "1. NEVER wrap tool calls in Markdown code blocks (e.g., " + "``" + "`json). Output the raw JSON tool format directly.\n" +
                            "2. When using file edit/replace tools, your indentation and leading spaces MUST EXACTLY MATCH the original source file. Do not strip leading spaces.\n" +
-                           "3. Output ONLY the valid JSON tool call. Use the exact schema: {\"name\": \"function_name\", \"arguments\": {...}} without extra conversational text.";
+                           "3. Output ONLY the valid JSON tool call. Use the exact schema: {\"name\": \"function_name\", \"arguments\": {...}} without extra conversational text." : SmartPromptOptimizationSettings.StrictToolCallingRulesInjectionPrompt.Trim();
 
-            if (!content.Contains("[CRITICAL SYSTEM INSTRUCTIONS FOR TOOLS & EDITS]"))
+            if (!content.Contains(rules.Trim()[..30], StringComparison.OrdinalIgnoreCase))
             {
                 firstMsg["content"] = content + rules;
                 Logger.Log("[Sanitizer] Injected strict Tool-Calling and Diff rules into System Prompt.");
@@ -301,6 +306,11 @@ namespace FormsSystemStatsWidget.Core
         {
             foreach (JsonObject message in messages.OfType<JsonObject>())
             {
+                if (string.Equals(message["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 if (!TryGetStringContent(message, out string content))
                 {
                     continue;
@@ -487,6 +497,11 @@ namespace FormsSystemStatsWidget.Core
             }
 
             if (index == messages.Count - 1 || index == latestUserIndex)
+            {
+                return false;
+            }
+
+            if (string.Equals(messages[index]?["role"]?.ToString(), "tool") || messages[index]?["tool_calls"] != null)
             {
                 return false;
             }

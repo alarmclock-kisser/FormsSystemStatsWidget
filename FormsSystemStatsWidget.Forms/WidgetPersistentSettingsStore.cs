@@ -43,6 +43,12 @@ namespace FormsSystemStatsWidget.Forms
 
         public int SmartPromptTailKeepBonusChars { get; set; } = 500;
 
+        public string StrictToolCallingRulesInjectionPrompt { get; set; } = "\n\n[CRITICAL SYSTEM INSTRUCTIONS FOR TOOLS & EDITS]\n" +
+                          "1. NEVER wrap tool calls in Markdown code blocks (e.g., " + "``" + "`json). Output the raw JSON tool format directly.\n" +
+                          "2. When using file edit/replace tools, your indentation and leading spaces MUST EXACTLY MATCH the original source file. Do not strip leading spaces.\n" +
+                          "3. Output ONLY the valid JSON tool call. Use the exact schema: {\"name\": \"function_name\", \"arguments\": {...}} without extra conversational text.";
+        public bool InjectStrictToolCallingRules { get; set; } = true;
+
 
 
         // Persisted Llama sampling parameters (used for model load defaults / UI)

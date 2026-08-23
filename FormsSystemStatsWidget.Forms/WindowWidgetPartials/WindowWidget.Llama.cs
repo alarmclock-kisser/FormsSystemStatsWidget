@@ -1002,9 +1002,9 @@ namespace FormsSystemStatsWidget.Forms
             this.SavePersistentSettings();
         }
 
-        private void enableSmartPromptOptimizationsToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        private void smartPromptOptimizationsToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
-            SmartPromptOptimizationSettings.IsEnabled = this.enableSmartPromptOptimizationsToolStripMenuItem.Checked;
+            SmartPromptOptimizationSettings.IsEnabled = this.smartPromptOptimizationsToolStripMenuItem.Checked;
             this._persistentSettings.SmartPromptEnabled = SmartPromptOptimizationSettings.IsEnabled;
             this.SavePersistentSettings();
         }
@@ -1307,7 +1307,31 @@ namespace FormsSystemStatsWidget.Forms
 
             // Apply to persistent settings
             this._persistentSettings.PrintGenerationStats = isChecked;
-            WidgetPersistentSettingsStore.Save(this._persistentSettings);
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripTextBox_injectToolCallingRules_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_injectToolCallingRules.Text.Trim();
+            SmartPromptOptimizationSettings.StrictToolCallingRulesInjectionPrompt = entered;
+
+            this._persistentSettings.StrictToolCallingRulesInjectionPrompt = entered;
+            this.SavePersistentSettings();
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void injectToolCallingRulesToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            SmartPromptOptimizationSettings.InjectStrictToolCallingRules = this.injectToolCallingRulesToolStripMenuItem.Checked;
+            this._persistentSettings.InjectStrictToolCallingRules = SmartPromptOptimizationSettings.InjectStrictToolCallingRules;
+            this.SavePersistentSettings();
         }
 
         [GeneratedRegex(@"--?[a-zA-Z][\w-]*(?:\s+(?:"".*?""|'.*?'|(?!--?[a-zA-Z])[^\s]+))*")]

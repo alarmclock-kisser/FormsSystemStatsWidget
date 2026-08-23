@@ -39,5 +39,15 @@ namespace FormsSystemStatsWidget.Core
         /// Extra characters that are preferentially preserved from the end during final last-message trimming.
         /// </summary>
         public static int TailKeepBonusChars { get; set; } = 500;
+
+        /// <summary>
+        /// Enables or disables strict tool calling rules injection.
+        /// </summary>
+        public static bool InjectStrictToolCallingRules { get; set; } = true;
+
+        public static string StrictToolCallingRulesInjectionPrompt { get; set; } = "\n\n[CRITICAL SYSTEM INSTRUCTIONS FOR TOOLS & EDITS]\n" +
+                           "1. NEVER wrap tool calls in Markdown code blocks (e.g., " + "``" + "`json). Output the raw JSON tool format directly.\n" +
+                           "2. When using file edit/replace tools, your indentation and leading spaces MUST EXACTLY MATCH the original source file. Do not strip leading spaces.\n" +
+                           "3. Output ONLY the valid JSON tool call. Use the exact schema: {\"name\": \"function_name\", \"arguments\": {...}} without extra conversational text.";
     }
 }

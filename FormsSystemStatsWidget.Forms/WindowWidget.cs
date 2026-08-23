@@ -137,7 +137,7 @@ namespace FormsSystemStatsWidget.Forms
             this.InitializeLlamaUiSelections();
             this.InitializeBridgeSamplingSettingsFromUi();
 
-            this.enableSmartPromptOptimizationsToolStripMenuItem.Checked = SmartPromptOptimizationSettings.IsEnabled;
+            this.smartPromptOptimizationsToolStripMenuItem.Checked = SmartPromptOptimizationSettings.IsEnabled;
             this.toolStripTextBox_promptSafetyRatio.Text = SmartPromptOptimizationSettings.PromptSafetyRatio.ToString("0.00", CultureInfo.InvariantCulture);
             this.toolStripTextBox_smartBudgetRatio.Text = SmartPromptOptimizationSettings.SmartBudgetRatio.ToString("0.00", CultureInfo.InvariantCulture);
             this.toolStripTextBox_largeMessageThresholdChars.Text = SmartPromptOptimizationSettings.LargeMessageThresholdChars.ToString(CultureInfo.InvariantCulture);
@@ -186,14 +186,12 @@ namespace FormsSystemStatsWidget.Forms
 
         private void InitializeGpuSelection()
         {
-            this.toolStripComboBox_gpus.Items.Clear();
-            this.toolStripComboBox_gpus.Items.AddRange(GpuStats.GpuNames.ToArray());
-            if (this.toolStripComboBox_gpus.Items.Count > 0)
+            if (GpuStats.GpuNames.Count <= 0)
             {
-                this.toolStripComboBox_gpus.SelectedIndex = 0;
+                return;
             }
 
-            this.Gpu = new GpuStats(this.toolStripComboBox_gpus.SelectedIndex);
+            this.Gpu = new GpuStats(0);
             if (GpuStats.GpuNames.Count > 1)
             {
                 this.Gpu2 = new GpuStats(1);
@@ -239,7 +237,7 @@ namespace FormsSystemStatsWidget.Forms
         private void InitializeSplitModeDefaults()
         {
             this.toolStripComboBox_splitMode.SelectedIndex = 0;
-            if (this.toolStripComboBox_gpus.Items.Count <= 1)
+            if (this.Gpu2 == null || this.Gpu2.GetTotalVramBytes() <= 1)
             {
                 return;
             }
@@ -317,6 +315,8 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_presencePenalty.Text = this._persistentSettings.PresencePenalty.ToString("0.0000", CultureInfo.InvariantCulture);
             this.toolStripComboBox_reasoningEffort.Text = this._persistentSettings.ReasoningEffort;
             this.printGenerationStatsToolStripMenuItem.Checked = this._persistentSettings.PrintGenerationStats;
+            this.injectToolCallingRulesToolStripMenuItem.Checked = this._persistentSettings.InjectStrictToolCallingRules;
+            this.toolStripTextBox_injectToolCallingRules.Text = this._persistentSettings.StrictToolCallingRulesInjectionPrompt.Trim();
 
             this.toolStripTextBox_modelsDirectory.Text = this._persistentSettings.GgufModelDirectory;
             this.toolStripTextBox_modelsDirectory_KeyDown(this.toolStripTextBox_modelsDirectory, new KeyEventArgs(Keys.Enter));
@@ -346,7 +346,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             LlamaOllamaBridge.EnableRawChunkLogging = this.toolStripMenuItem_includeRawChunksLog.Checked;
 
-            this.enableSmartPromptOptimizationsToolStripMenuItem.Checked = this._persistentSettings.SmartPromptEnabled;
+            this.smartPromptOptimizationsToolStripMenuItem.Checked = this._persistentSettings.SmartPromptEnabled;
             this.toolStripTextBox_promptSafetyRatio.Text = this._persistentSettings.SmartPromptSafetyRatio.ToString("0.00", CultureInfo.InvariantCulture);
             this.toolStripTextBox_smartBudgetRatio.Text = this._persistentSettings.SmartPromptBudgetRatio.ToString("0.00", CultureInfo.InvariantCulture);
             this.toolStripTextBox_largeMessageThresholdChars.Text = this._persistentSettings.SmartPromptLargeMessageThresholdChars.ToString(CultureInfo.InvariantCulture);
@@ -354,13 +354,15 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_focusKeywordLimit.Text = this._persistentSettings.SmartPromptFocusKeywordLimit.ToString(CultureInfo.InvariantCulture);
             this.toolStripTextBox_tailKeepBonusChars.Text = this._persistentSettings.SmartPromptTailKeepBonusChars.ToString(CultureInfo.InvariantCulture);
 
-            SmartPromptOptimizationSettings.IsEnabled = this.enableSmartPromptOptimizationsToolStripMenuItem.Checked;
+            SmartPromptOptimizationSettings.IsEnabled = this.smartPromptOptimizationsToolStripMenuItem.Checked;
             SmartPromptOptimizationSettings.PromptSafetyRatio = this._persistentSettings.SmartPromptSafetyRatio;
             SmartPromptOptimizationSettings.SmartBudgetRatio = this._persistentSettings.SmartPromptBudgetRatio;
             SmartPromptOptimizationSettings.LargeMessageThresholdChars = this._persistentSettings.SmartPromptLargeMessageThresholdChars;
             SmartPromptOptimizationSettings.SkeletonMaxLines = this._persistentSettings.SmartPromptSkeletonMaxLines;
             SmartPromptOptimizationSettings.FocusKeywordLimit = this._persistentSettings.SmartPromptFocusKeywordLimit;
             SmartPromptOptimizationSettings.TailKeepBonusChars = this._persistentSettings.SmartPromptTailKeepBonusChars;
+            SmartPromptOptimizationSettings.InjectStrictToolCallingRules = this._persistentSettings.InjectStrictToolCallingRules;
+            SmartPromptOptimizationSettings.StrictToolCallingRulesInjectionPrompt = this._persistentSettings.StrictToolCallingRulesInjectionPrompt;
 
             this.toolStripMenuItem_blackOutMode.Checked = this._persistentSettings.BlackOutMode;
         }
@@ -873,12 +875,6 @@ namespace FormsSystemStatsWidget.Forms
 
 
         // ToolStripMenu Event Handlers
-        private void toolStripComboBox_gpus_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            this.Gpu?.Dispose();
-            this.Gpu = new GpuStats(this.toolStripComboBox_gpus.SelectedIndex);
-        }
-
         private void toolStripTextBox_diagramColor_TextChanged(object sender, EventArgs e)
         {
             string hex = this.toolStripTextBox_diagramColor.Text.Replace("#", "");
@@ -1046,6 +1042,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripMenuItem_execModelLoadBat.Text = $"'{LlamaOllamaBridge.DetectedModelName}-{LlamaOllamaBridge.QuantizationLevel}'";
                 this.toolStripMenuItem_execModelLoadBat.Enabled = false;
                 this.toolStripMenuItem_loadLlamaCppServer.Text = $"Kill llama-server ({processes.Count})";
+                this.toolStripMenuItem_loadLlamaCppServer.ForeColor = Color.Red;
 
                 foreach (ToolStripItem item in this.toolStripMenuItem_loadLlamaCppServer.DropDownItems)
                 {
@@ -1058,18 +1055,21 @@ namespace FormsSystemStatsWidget.Forms
             else
             {
                 this.toolStripMenuItem_execModelLoadBat.Enabled = true;
-                this.toolStripMenuItem_execModelLoadBat.Text = "Execute Model Load .BAT";
-                this.toolStripMenuItem_loadLlamaCppServer.Text = "Load Model (llama-server.exe)";
+                this.toolStripMenuItem_execModelLoadBat.Text = "📜 Execute Model Load .BAT";
+                this.toolStripMenuItem_loadLlamaCppServer.Text = "⚙ Load Model (llama-server.exe)";
+                this.toolStripMenuItem_loadLlamaCppServer.ForeColor = SystemColors.ControlText;
 
                 foreach (ToolStripItem item in this.toolStripMenuItem_loadLlamaCppServer.DropDownItems)
                 {
                     item.Visible = true;
                 }
 
-                if (!LlamaOllamaBridge.IsRunning)
+                this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false;
+                if (LlamaOllamaBridge.IsRunning)
                 {
-                    this.rerouteAPILlamacppOllamaToolStripMenuItem.Checked = false;
+                    LlamaOllamaBridge.Stop();
                 }
+
                 this.toolStripMenuItem_loadLlamaCppServer.Click -= this.ToolStripMenuItem_killLlamaServer_Click;
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;
             }
