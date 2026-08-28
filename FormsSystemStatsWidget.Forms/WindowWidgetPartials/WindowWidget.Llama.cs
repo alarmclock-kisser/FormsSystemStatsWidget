@@ -1337,8 +1337,10 @@ namespace FormsSystemStatsWidget.Forms
         private void extendCopilotSystemPromptToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
             bool isChecked = this.extendCopilotSystemPromptToolStripMenuItem.Checked;
+            string entered = this.toolStripTextBox_additionalCopilotSystemPrompt.Text.Trim();
 
             this._persistentSettings.ExtendCopilotSystemPrompt = isChecked;
+            this._persistentSettings.AdditionalCopilotSystemPrompt = entered;
             LlamaOllamaBridge.AdditionalCopilotSystemPrompt = isChecked ? this._persistentSettings.AdditionalCopilotSystemPrompt : string.Empty;
 
             this.SavePersistentSettings();
@@ -1352,8 +1354,11 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             string entered = this.toolStripTextBox_additionalCopilotSystemPrompt.Text.Trim();
+            bool isChecked = this.extendCopilotSystemPromptToolStripMenuItem.Checked;
+
             this._persistentSettings.AdditionalCopilotSystemPrompt = entered;
-            LlamaOllamaBridge.AdditionalCopilotSystemPrompt = this.extendCopilotSystemPromptToolStripMenuItem.Checked ? entered : string.Empty;
+            this._persistentSettings.ExtendCopilotSystemPrompt = isChecked;
+            LlamaOllamaBridge.AdditionalCopilotSystemPrompt = isChecked ? entered : null;
 
             this.SavePersistentSettings();
             e.SuppressKeyPress = true;

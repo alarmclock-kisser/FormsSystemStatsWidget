@@ -318,7 +318,7 @@ namespace FormsSystemStatsWidget.Forms
             this.injectToolCallingRulesToolStripMenuItem.Checked = this._persistentSettings.InjectStrictToolCallingRules;
             this.toolStripTextBox_injectToolCallingRules.Text = this._persistentSettings.StrictToolCallingRulesInjectionPrompt.Trim();
             this.toolStripMenuItem_additionalArgs.Checked = this._persistentSettings.ExtendCopilotSystemPrompt;
-            this.toolStripTextBox_additionalArgs.Text = this._persistentSettings.AdditionalCopilotSystemPrompt.Trim();
+            this.toolStripTextBox_additionalCopilotSystemPrompt.Text = this._persistentSettings.AdditionalCopilotSystemPrompt.Trim();
 
             this.toolStripTextBox_modelsDirectory.Text = this._persistentSettings.GgufModelDirectory;
             this.toolStripTextBox_modelsDirectory_KeyDown(this.toolStripTextBox_modelsDirectory, new KeyEventArgs(Keys.Enter));
