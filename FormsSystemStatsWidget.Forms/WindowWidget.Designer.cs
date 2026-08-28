@@ -118,6 +118,7 @@
             this.toolStripTextBox_ollamaPort = new ToolStripTextBox();
             this.printGenerationStatsToolStripMenuItem = new ToolStripMenuItem();
             this.showTokenssToolStripMenuItem = new ToolStripMenuItem();
+            this.extendCopilotSystemPromptToolStripMenuItem = new ToolStripMenuItem();
             this.smartPromptOptimizationsToolStripMenuItem = new ToolStripMenuItem();
             this.promptSafetyRatioToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripTextBox_promptSafetyRatio = new ToolStripTextBox();
@@ -153,6 +154,7 @@
             this.label_topTasksList = new Label();
             this.button_recordUsages = new Button();
             this.label_routingPortsInfo = new Label();
+            this.toolStripTextBox_additionalCopilotSystemPrompt = new ToolStripTextBox();
             ((System.ComponentModel.ISupportInitialize) this.pictureBox_cpu).BeginInit();
             this.contextMenuStrip_widget.SuspendLayout();
             this.SuspendLayout();
@@ -753,7 +755,7 @@
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 
             this.rerouteAPILlamacppOllamaToolStripMenuItem.CheckOnClick = true;
-            this.rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_openAiApi, this.toolStripSeparator4, this.llamacppPortToolStripMenuItem, this.ollamaPortToolStripMenuItem, this.printGenerationStatsToolStripMenuItem, this.showTokenssToolStripMenuItem });
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_openAiApi, this.toolStripSeparator4, this.llamacppPortToolStripMenuItem, this.ollamaPortToolStripMenuItem, this.printGenerationStatsToolStripMenuItem, this.showTokenssToolStripMenuItem, this.extendCopilotSystemPromptToolStripMenuItem });
             this.rerouteAPILlamacppOllamaToolStripMenuItem.Name = "rerouteAPILlamacppOllamaToolStripMenuItem";
             this.rerouteAPILlamacppOllamaToolStripMenuItem.Size = new Size(274, 22);
             this.rerouteAPILlamacppOllamaToolStripMenuItem.Text = "🔗 Re-route API llama.cpp -> Ollama";
@@ -763,7 +765,7 @@
             // 
             this.toolStripMenuItem_openAiApi.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_openAiApiUrl });
             this.toolStripMenuItem_openAiApi.Name = "toolStripMenuItem_openAiApi";
-            this.toolStripMenuItem_openAiApi.Size = new Size(188, 22);
+            this.toolStripMenuItem_openAiApi.Size = new Size(232, 22);
             this.toolStripMenuItem_openAiApi.Text = "Source OpenAI API";
             // 
             // toolStripTextBox_openAiApiUrl
@@ -775,13 +777,13 @@
             // toolStripSeparator4
             // 
             this.toolStripSeparator4.Name = "toolStripSeparator4";
-            this.toolStripSeparator4.Size = new Size(185, 6);
+            this.toolStripSeparator4.Size = new Size(229, 6);
             // 
             // llamacppPortToolStripMenuItem
             // 
             this.llamacppPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_llamacppPort });
             this.llamacppPortToolStripMenuItem.Name = "llamacppPortToolStripMenuItem";
-            this.llamacppPortToolStripMenuItem.Size = new Size(188, 22);
+            this.llamacppPortToolStripMenuItem.Size = new Size(232, 22);
             this.llamacppPortToolStripMenuItem.Text = "llama.cpp Port";
             // 
             // toolStripTextBox_llamacppPort
@@ -795,7 +797,7 @@
             // 
             this.ollamaPortToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_ollamaPort });
             this.ollamaPortToolStripMenuItem.Name = "ollamaPortToolStripMenuItem";
-            this.ollamaPortToolStripMenuItem.Size = new Size(188, 22);
+            this.ollamaPortToolStripMenuItem.Size = new Size(232, 22);
             this.ollamaPortToolStripMenuItem.Text = "Ollama Port";
             // 
             // toolStripTextBox_ollamaPort
@@ -811,7 +813,7 @@
             this.printGenerationStatsToolStripMenuItem.CheckOnClick = true;
             this.printGenerationStatsToolStripMenuItem.CheckState = CheckState.Checked;
             this.printGenerationStatsToolStripMenuItem.Name = "printGenerationStatsToolStripMenuItem";
-            this.printGenerationStatsToolStripMenuItem.Size = new Size(188, 22);
+            this.printGenerationStatsToolStripMenuItem.Size = new Size(232, 22);
             this.printGenerationStatsToolStripMenuItem.Text = "Print Generation Stats";
             this.printGenerationStatsToolStripMenuItem.Click += this.printGenerationStatsToolStripMenuItem_Click;
             // 
@@ -821,8 +823,19 @@
             this.showTokenssToolStripMenuItem.CheckOnClick = true;
             this.showTokenssToolStripMenuItem.CheckState = CheckState.Checked;
             this.showTokenssToolStripMenuItem.Name = "showTokenssToolStripMenuItem";
-            this.showTokenssToolStripMenuItem.Size = new Size(188, 22);
+            this.showTokenssToolStripMenuItem.Size = new Size(232, 22);
             this.showTokenssToolStripMenuItem.Text = "Show tokens/s";
+            // 
+            // extendCopilotSystemPromptToolStripMenuItem
+            // 
+            this.extendCopilotSystemPromptToolStripMenuItem.Checked = true;
+            this.extendCopilotSystemPromptToolStripMenuItem.CheckOnClick = true;
+            this.extendCopilotSystemPromptToolStripMenuItem.CheckState = CheckState.Checked;
+            this.extendCopilotSystemPromptToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_additionalCopilotSystemPrompt });
+            this.extendCopilotSystemPromptToolStripMenuItem.Name = "extendCopilotSystemPromptToolStripMenuItem";
+            this.extendCopilotSystemPromptToolStripMenuItem.Size = new Size(232, 22);
+            this.extendCopilotSystemPromptToolStripMenuItem.Text = "Extend Copilot SystemPrompt";
+            this.extendCopilotSystemPromptToolStripMenuItem.CheckedChanged += this.extendCopilotSystemPromptToolStripMenuItem_CheckedChanged;
             // 
             // smartPromptOptimizationsToolStripMenuItem
             // 
@@ -1115,6 +1128,12 @@
             this.label_routingPortsInfo.Text = "Port: ----- to -----";
             this.label_routingPortsInfo.Visible = false;
             // 
+            // toolStripTextBox_additionalCopilotSystemPrompt
+            // 
+            this.toolStripTextBox_additionalCopilotSystemPrompt.Name = "toolStripTextBox_additionalCopilotSystemPrompt";
+            this.toolStripTextBox_additionalCopilotSystemPrompt.Size = new Size(100, 23);
+            this.toolStripTextBox_additionalCopilotSystemPrompt.KeyDown += this.toolStripTextBox_additionalCopilotSystemPrompt_KeyDown;
+            // 
             // WindowWidget
             // 
             this.AutoScaleDimensions = new SizeF(7F, 15F);
@@ -1278,5 +1297,7 @@
         private ToolStripMenuItem injectToolCallingRulesToolStripMenuItem;
         private ToolStripTextBox toolStripTextBox_injectToolCallingRules;
         private ToolStripMenuItem showTokenssToolStripMenuItem;
+        private ToolStripMenuItem extendCopilotSystemPromptToolStripMenuItem;
+        private ToolStripTextBox toolStripTextBox_additionalCopilotSystemPrompt;
     }
 }

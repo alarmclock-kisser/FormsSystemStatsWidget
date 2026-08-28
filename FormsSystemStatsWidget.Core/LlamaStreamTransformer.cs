@@ -123,6 +123,7 @@ namespace FormsSystemStatsWidget.Core
 
                 EnsureSystemMessageFirst(messages);
                 InjectStrictToolCallingRules(messages);
+                ExpandSystemPrompt(messages);
 
                 double promptSafetyRatio = Math.Clamp(SmartPromptOptimizationSettings.PromptSafetyRatio, 0.10, 1.00);
                 int maxPromptTokens = (int) (numCtx * promptSafetyRatio);
@@ -195,6 +196,34 @@ namespace FormsSystemStatsWidget.Core
             {
                 firstMsg["content"] = content + rules;
                 Logger.Log("[Sanitizer] Injected strict Tool-Calling and Diff rules into System Prompt.");
+            }
+        }
+
+        private static void ExpandSystemPrompt(JsonArray messages)
+        {
+            if (messages.Count <= 0 || string.IsNullOrEmpty(LlamaOllamaBridge.AdditionalCopilotSystemPrompt))
+            {
+                return;
+            }
+
+            var firstMsg = messages.FirstOrDefault() as JsonObject;
+            if (firstMsg == null)
+            {
+                return;
+            }
+
+            string role = firstMsg["role"]?.ToString() ?? "";
+            if (!string.Equals(role, "system", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            string existingContent = firstMsg["content"]?.ToString() ?? "";
+            string additionalPrompt = LlamaOllamaBridge.AdditionalCopilotSystemPrompt;
+            if (!string.IsNullOrWhiteSpace(additionalPrompt) && !existingContent.Contains(additionalPrompt, StringComparison.OrdinalIgnoreCase))
+            {
+                firstMsg["content"] = existingContent + "\n\n" + additionalPrompt;
+                Logger.Log("[Sanitizer] Extended System Prompt with Additional Copilot System Prompt.");
             }
         }
 

@@ -89,6 +89,7 @@ namespace FormsSystemStatsWidget.Core
         public static int UserDefinedReasoningBudget { get; set; }
 
         public static bool GetGenerationStatsText { get; set; } = false;
+        public static string AdditionalCopilotSystemPrompt { get; set; } = string.Empty;
 
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(600) };
 

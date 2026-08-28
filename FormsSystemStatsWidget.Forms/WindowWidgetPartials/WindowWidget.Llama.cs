@@ -1334,6 +1334,32 @@ namespace FormsSystemStatsWidget.Forms
             this.SavePersistentSettings();
         }
 
+        private void extendCopilotSystemPromptToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            bool isChecked = this.extendCopilotSystemPromptToolStripMenuItem.Checked;
+
+            this._persistentSettings.ExtendCopilotSystemPrompt = isChecked;
+            LlamaOllamaBridge.AdditionalCopilotSystemPrompt = isChecked ? this._persistentSettings.AdditionalCopilotSystemPrompt : string.Empty;
+
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripTextBox_additionalCopilotSystemPrompt_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_additionalCopilotSystemPrompt.Text.Trim();
+            this._persistentSettings.AdditionalCopilotSystemPrompt = entered;
+            LlamaOllamaBridge.AdditionalCopilotSystemPrompt = this.extendCopilotSystemPromptToolStripMenuItem.Checked ? entered : string.Empty;
+
+            this.SavePersistentSettings();
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
         [GeneratedRegex(@"--?[a-zA-Z][\w-]*(?:\s+(?:"".*?""|'.*?'|(?!--?[a-zA-Z])[^\s]+))*")]
         private static partial Regex LoadArgsRegex();
     }
