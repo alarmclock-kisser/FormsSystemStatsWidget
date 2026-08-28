@@ -123,7 +123,7 @@ namespace FormsSystemStatsWidget.Core
 
                 EnsureSystemMessageFirst(messages);
                 InjectStrictToolCallingRules(messages);
-                ExpandSystemPrompt(messages);
+                EnsureAdditionalSystemPrompt(messages);
 
                 double promptSafetyRatio = Math.Clamp(SmartPromptOptimizationSettings.PromptSafetyRatio, 0.10, 1.00);
                 int maxPromptTokens = (int) (numCtx * promptSafetyRatio);
@@ -199,7 +199,7 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
-        private static void ExpandSystemPrompt(JsonArray messages)
+        private static void EnsureAdditionalSystemPrompt(JsonArray messages)
         {
             if (messages.Count <= 0 || string.IsNullOrEmpty(LlamaOllamaBridge.AdditionalCopilotSystemPrompt))
             {
@@ -215,15 +215,18 @@ namespace FormsSystemStatsWidget.Core
             string role = firstMsg["role"]?.ToString() ?? "";
             if (!string.Equals(role, "system", StringComparison.OrdinalIgnoreCase))
             {
-                return;
+                EnsureSystemMessageFirst(messages);
             }
 
             string existingContent = firstMsg["content"]?.ToString() ?? "";
             string additionalPrompt = LlamaOllamaBridge.AdditionalCopilotSystemPrompt;
             if (!string.IsNullOrWhiteSpace(additionalPrompt) && !existingContent.Contains(additionalPrompt, StringComparison.OrdinalIgnoreCase))
             {
-                firstMsg["content"] = existingContent + "\n\n" + additionalPrompt;
-                Logger.Log("[Sanitizer] Extended System Prompt with Additional Copilot System Prompt.");
+                if (!existingContent.Contains(existingContent.Trim()[..30], StringComparison.OrdinalIgnoreCase))
+                {
+                    firstMsg["content"] = existingContent + "\n\n" + additionalPrompt;
+                    Logger.Log("[Sanitizer] Extended System Prompt with Additional Copilot System Prompt.");
+                }
             }
         }
 
