@@ -315,8 +315,13 @@ namespace FormsSystemStatsWidget.Core
             try
             {
                 _listener = new HttpListener();
-                _listener.Prefixes.Add($"http://localhost:{ollamaPort}/");
-                Logger.Log($"[LlamaBridge] Starting local listener on http://localhost:{ollamaPort}/");
+                // Register a wildcard host prefix so http.sys accepts ANY Host header
+                // (localhost, 127.0.0.1, [::1], LAN IP). A hostname-specific prefix like
+                // "http://localhost:PORT/" rejects non-matching hosts with 400 Invalid Hostname
+                // BEFORE the request ever reaches HandleRequestAsync (breaks PowerToys, which
+                // may resolve 'localhost' to 127.0.0.1/::1 and send that as the Host header).
+                _listener.Prefixes.Add($"http://*:{ollamaPort}/");
+                Logger.Log($"[LlamaBridge] Starting local listener on http://*:{ollamaPort}/ (wildcard host)");
                 _listener.Start();
                 _isRunning = true;
 
