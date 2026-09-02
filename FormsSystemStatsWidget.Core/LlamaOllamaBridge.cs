@@ -34,23 +34,25 @@ namespace FormsSystemStatsWidget.Core
         private static string _detectedModelId = "local-llama-model";
         private static string _detectedModelName
         {
-            get
-            {
-                if (!string.IsNullOrEmpty(_detectedModelId) && File.Exists(_detectedModelId))
-                {
-                    return Path.GetFileNameWithoutExtension(_detectedModelId);
-                }
-                return _detectedModelId;
-            }
-            set
-            {
-                _detectedModelId = value;
-            }
+            get => _detectedModelId;
+            set => _detectedModelId = value;
         }
         private static string _quantizationLevel = "unknown";
         private static string _parameterSize = "unknown";
         private static string _modelFamily = "llama";
         private static bool _supportsVision;
+
+        // Echte GGUF-Metadaten aus /v1/models (meta) und /props
+        private static long _modelFileSizeBytes;
+        private static long _modelNParams;
+        private static int _modelNCtx;
+        private static string _modelFtype = "unknown";
+        private static long _modelNVocab;
+        private static long _modelNEmbd;
+        private static int _modelNCtxTrain;
+        private static string _modelParentModel = "";
+        private static string _modelDescription = "";
+        private static List<string> _modelTags = new();
         private static string _llamaServerBaseUrl = "http://localhost:8080";
         private static string _bridgeBaseUrl = "http://localhost:11434";
         private static string _lastStartError = string.Empty;
@@ -166,14 +168,66 @@ namespace FormsSystemStatsWidget.Core
 
                     if (!string.IsNullOrEmpty(modelId))
                     {
-                        _detectedModelName = modelId;
-                        _quantizationLevel = ExtractQuantization(modelId);
-                        _parameterSize = ExtractParameterSize(modelId);
-                        _modelFamily = ExtractModelFamily(modelId);
-                        _supportsVision = DetectVisionSupportByModelName(modelId);
+                        // Kürze den Modell-Namen: wenn die ID ein Dateipfad ist, nimm nur den File-Name ohne Extension
+                        _detectedModelName = SanitizeModelId(modelId);
 
-                        Logger.Log($"[LlamaBridge] Model detected: {_detectedModelName}");
-                        Logger.Log($"[LlamaBridge] Parser result: Family={_modelFamily}, Size={_parameterSize}, Quant={_quantizationLevel}, VisionHeuristic={_supportsVision}");
+                        // Extrahiere echte GGUF-Metadaten aus data[0].meta
+                        var metaNode = json?["data"]?[0]?["meta"];
+                        if (metaNode is JsonObject metaObj)
+                        {
+                            _modelFtype = metaObj["ftype"]?.GetValue<string>() ?? "unknown";
+                            _modelNParams = metaObj["n_params"]?.GetValue<long>() ?? 0;
+                            _modelNCtx = metaObj["n_ctx"]?.GetValue<int>() ?? 0;
+                            _modelFileSizeBytes = metaObj["size"]?.GetValue<long>() ?? 0;
+                            _modelNVocab = metaObj["n_vocab"]?.GetValue<long>() ?? 0;
+                            _modelNEmbd = metaObj["n_embd"]?.GetValue<long>() ?? 0;
+                            _modelNCtxTrain = metaObj["n_ctx_train"]?.GetValue<int>() ?? 0;
+                            _modelParentModel = metaObj["parent_model"]?.GetValue<string>() ?? "";
+                            _modelDescription = metaObj["description"]?.GetValue<string>() ?? "";
+                        }
+
+                        // Quantisierung: ftype aus meta bevorzugen, Fallback Regex auf den Namen
+                        _quantizationLevel = !string.Equals(_modelFtype, "unknown", StringComparison.OrdinalIgnoreCase)
+                            ? _modelFtype
+                            : ExtractQuantization(_detectedModelName);
+
+                        // Parameter-Größe: n_params aus meta bevorzugen, Fallback Regex auf den Namen
+                        _parameterSize = _modelNParams > 0
+                            ? FormatParameterSize(_modelNParams)
+                            : ExtractParameterSize(_detectedModelName);
+
+                        // Tags: aus data[0].tags (OpenAI-Format) oder meta.general.tags (GGUF)
+                        _modelTags = new List<string>();
+                        if (json?["data"]?[0]?["tags"] is JsonArray openAiTags)
+                        {
+                            foreach (var tag in openAiTags)
+                            {
+                                string? tagStr = tag?.ToString();
+                                if (!string.IsNullOrWhiteSpace(tagStr))
+                                    _modelTags.Add(tagStr);
+                            }
+                        }
+                        if (_modelTags.Count == 0 && metaNode is JsonObject metaObj2 && metaObj2["general"]?["tags"] is JsonArray ggufTags)
+                        {
+                            foreach (var tag in ggufTags)
+                            {
+                                string? tagStr = tag?.ToString();
+                                if (!string.IsNullOrWhiteSpace(tagStr))
+                                    _modelTags.Add(tagStr);
+                            }
+                        }
+
+                        _modelFamily = ExtractModelFamily(_detectedModelName);
+                        _supportsVision = DetectVisionSupportByModelName(_detectedModelName);
+
+                        // n_ctx aus meta als Fallback für /props
+                        if (_modelNCtx > 0)
+                        {
+                            _detectedNumCtx = _modelNCtx;
+                        }
+
+                        Logger.Log($"[LlamaBridge] Model detected: {_detectedModelName} (raw ID: {modelId})");
+                        Logger.Log($"[LlamaBridge] Parser result: Family={_modelFamily}, Size={_parameterSize}, Quant={_quantizationLevel}, VisionHeuristic={_supportsVision}, NParams={_modelNParams}, Ftype={_modelFtype}");
                     }
                 }
                 else
@@ -206,6 +260,26 @@ namespace FormsSystemStatsWidget.Core
                         if (nCtxNode != null && int.TryParse(nCtxNode.ToString(), out int parsedCtx))
                         {
                             _detectedNumCtx = parsedCtx;
+                        }
+
+                        // Path-tolerant read of n_ctx_train (nur wenn /v1/models meta es nicht geliefert hat)
+                        var nCtxTrainNode = propsJson?["default_generation_settings"]?["n_ctx_train"] ?? propsJson?["n_ctx_train"];
+                        if (_modelNCtxTrain == 0 && nCtxTrainNode != null && int.TryParse(nCtxTrainNode.ToString(), out int parsedCtxTrain))
+                        {
+                            _modelNCtxTrain = parsedCtxTrain;
+                        }
+
+                        // Path-tolerant read of n_vocab und n_embd (nur wenn /v1/models meta sie nicht geliefert hat)
+                        var nVocabNode = propsJson?["default_generation_settings"]?["n_vocab"] ?? propsJson?["n_vocab"];
+                        if (_modelNVocab == 0 && nVocabNode != null && long.TryParse(nVocabNode.ToString(), out long parsedNVocab))
+                        {
+                            _modelNVocab = parsedNVocab;
+                        }
+
+                        var nEmbdNode = propsJson?["default_generation_settings"]?["n_embd"] ?? propsJson?["n_embd"];
+                        if (_modelNEmbd == 0 && nEmbdNode != null && long.TryParse(nEmbdNode.ToString(), out long parsedNEmbd))
+                        {
+                            _modelNEmbd = parsedNEmbd;
                         }
 
                         // Path-tolerant read of the default temperature
@@ -329,6 +403,16 @@ namespace FormsSystemStatsWidget.Core
                 }
 
                 if (await TryHandleRootAsync(request, response))
+                {
+                    return;
+                }
+
+                if (await TryHandleV1ModelsAsync(request, response))
+                {
+                    return;
+                }
+
+                if (await TryHandleUpstreamPassthroughAsync(request, response))
                 {
                     return;
                 }
@@ -573,6 +657,12 @@ namespace FormsSystemStatsWidget.Core
                 return false;
             }
 
+            long fileSize = GetModelFileSize();
+            string[] capabilities = _supportsVision
+                ? new[] { "completion", "multimodal" }
+                : new[] { "completion" };
+            string[] tags = _modelTags.Count > 0 ? _modelTags.ToArray() : new[] { _quantizationLevel };
+
             var tagsData = new
             {
                 models = new[]
@@ -580,9 +670,14 @@ namespace FormsSystemStatsWidget.Core
                     new {
                         name = _detectedModelName,
                         model = _detectedModelName,
-                        modified_at = DateTime.UtcNow,
-                        size = 0,
+                        modified_at = GetModelModifiedAt().ToString("o"),
+                        size = fileSize,
                         digest = "proxy_identity_digest",
+                        type = "model",
+                        description = _modelDescription,
+                        tags = tags,
+                        capabilities = capabilities,
+                        parameters = _modelNParams > 0 ? _modelNParams.ToString(CultureInfo.InvariantCulture) : string.Empty,
                         details = CreateModelDetails()
                     }
                 }
@@ -599,6 +694,12 @@ namespace FormsSystemStatsWidget.Core
                 return false;
             }
 
+            long psFileSize = GetModelFileSize();
+            string[] psCapabilities = _supportsVision
+                ? new[] { "completion", "multimodal" }
+                : new[] { "completion" };
+            string[] psTags = _modelTags.Count > 0 ? _modelTags.ToArray() : new[] { _quantizationLevel };
+
             var psData = new
             {
                 models = new[]
@@ -606,8 +707,13 @@ namespace FormsSystemStatsWidget.Core
                     new {
                         name = _detectedModelName,
                         model = _detectedModelName,
-                        size = 0,
+                        size = psFileSize,
                         digest = "proxy_identity_digest",
+                        type = "model",
+                        description = _modelDescription,
+                        tags = psTags,
+                        capabilities = psCapabilities,
+                        parameters = _modelNParams > 0 ? _modelNParams.ToString(CultureInfo.InvariantCulture) : string.Empty,
                         details = CreateModelDetails()
                     }
                 }
@@ -658,6 +764,151 @@ namespace FormsSystemStatsWidget.Core
             return true;
         }
 
+        private static readonly (string method, string path)[] UpstreamPassthroughRoutes =
+        [
+            ("POST", "/v1/completions"),
+            ("POST", "/v1/embeddings"),
+            ("GET", "/props"),
+        ];
+
+        private static async Task<bool> TryHandleV1ModelsAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            if (!IsEndpoint(request, "GET", "/v1/models"))
+            {
+                return false;
+            }
+
+            string modelId = _detectedModelName;
+            long fileSize = GetModelFileSize();
+
+            // created: LastWriteTimeUtc der GGUF-Datei (FileInfo), Fallback 0 wenn nicht vorhanden
+            long createdUnixTs = 0;
+            string modifiedAtIso = string.Empty;
+            if (File.Exists(_detectedModelId))
+            {
+                try
+                {
+                    var lastWrite = File.GetLastWriteTimeUtc(_detectedModelId);
+                    createdUnixTs = (long)(lastWrite - DateTime.UnixEpoch).TotalSeconds;
+                    modifiedAtIso = lastWrite.ToString("o");
+                }
+                catch { }
+            }
+
+            string[] capabilities = _supportsVision
+                ? new[] { "completion", "multimodal" }
+                : new[] { "completion" };
+
+            // Ollama-Format: models-Array
+            var modelsArray = new JsonArray();
+            modelsArray.Add(new JsonObject
+            {
+                ["name"] = modelId,
+                ["model"] = modelId,
+                ["modified_at"] = modifiedAtIso,
+                ["size"] = fileSize,
+                ["digest"] = "proxy_identity_digest",
+                ["type"] = "model",
+                ["description"] = _modelDescription,
+                ["tags"] = BuildJsonArray(_modelTags.Count > 0 ? _modelTags.ToArray() : new[] { _quantizationLevel }),
+                ["capabilities"] = BuildJsonArray(capabilities),
+                ["parameters"] = _modelNParams > 0 ? _modelNParams.ToString(CultureInfo.InvariantCulture) : string.Empty,
+                ["details"] = new JsonObject
+                {
+                    ["parent_model"] = _modelParentModel,
+                    ["format"] = "gguf",
+                    ["family"] = _modelFamily,
+                    ["families"] = BuildJsonArray(new[] { _modelFamily }),
+                    ["parameter_size"] = _parameterSize,
+                    ["quantization_level"] = _quantizationLevel
+                }
+            });
+
+            // OpenAI-Format: data-Array
+            var metaObj = new JsonObject
+            {
+                ["vocab_type"] = true,
+                ["n_vocab"] = _modelNVocab,
+                ["n_ctx"] = _detectedNumCtx,
+                ["n_ctx_train"] = _modelNCtxTrain,
+                ["n_embd"] = _modelNEmbd,
+                ["n_params"] = _modelNParams,
+                ["size"] = fileSize,
+                ["ftype"] = !string.Equals(_modelFtype, "unknown", StringComparison.OrdinalIgnoreCase)
+                    ? _modelFtype
+                    : _quantizationLevel
+            };
+
+            var dataArray = new JsonArray();
+            dataArray.Add(new JsonObject
+            {
+                ["id"] = modelId,
+                ["aliases"] = BuildJsonArray(new[] { modelId }),
+                ["tags"] = new JsonArray(),
+                ["object"] = "model",
+                ["created"] = createdUnixTs,
+                ["owned_by"] = "llamacpp",
+                ["meta"] = metaObj
+            });
+
+            // Dual-Format: Ollama (models) + OpenAI (data) in einem Objekt
+            var v1Data = new JsonObject
+            {
+                ["models"] = modelsArray,
+                ["object"] = "list",
+                ["data"] = dataArray
+            };
+
+            await SendJsonResponseAsync(response, v1Data);
+            return true;
+        }
+
+        private static async Task<bool> TryHandleUpstreamPassthroughAsync(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            string path = request.Url?.AbsolutePath ?? "";
+            bool isWhitelisted = UpstreamPassthroughRoutes.Any(route => route.method == request.HttpMethod && route.path == path);
+            if (!isWhitelisted)
+            {
+                return false;
+            }
+
+            Logger.Log($"[LlamaBridge] Passthrough: {request.HttpMethod} -> {path}");
+
+            string? requestBody = null;
+            if (request.HasEntityBody)
+            {
+                using var reader = new StreamReader(request.InputStream);
+                requestBody = await reader.ReadToEndAsync();
+            }
+
+            try
+            {
+                using var upstreamReq = new HttpRequestMessage(new HttpMethod(request.HttpMethod), $"{_llamaServerBaseUrl}{path}")
+                {
+                    Content = requestBody is null ? null : new StringContent(requestBody, Encoding.UTF8, "application/json")
+                };
+
+                using HttpResponseMessage upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
+                response.StatusCode = (int) upstreamRes.StatusCode;
+                string contentType = upstreamRes.Content.Headers.ContentType?.ToString() ?? "application/json";
+                response.ContentType = contentType.Contains("event-stream", StringComparison.OrdinalIgnoreCase) ? "text/event-stream" : contentType;
+                response.SendChunked = true;
+
+                using Stream upstreamStream = await upstreamRes.Content.ReadAsStreamAsync();
+                await upstreamStream.CopyToAsync(response.OutputStream);
+                response.OutputStream.Close();
+                Logger.Log($"[LlamaBridge] Passthrough completed: {request.HttpMethod} -> {path} ({(int) upstreamRes.StatusCode})");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[LlamaBridge-Exception] Passthrough failed for {request.HttpMethod} -> {path}: {ex.GetType().Name}: {ex.Message}");
+                response.StatusCode = (int) HttpStatusCode.BadGateway;
+                response.OutputStream.Close();
+                return true;
+            }
+        }
+
         private static async Task HandleUnknownRouteAsync(HttpListenerResponse response, string path)
         {
             Logger.Log($"[LlamaBridge] Unknown path rejected (404): {path}");
@@ -666,17 +917,41 @@ namespace FormsSystemStatsWidget.Core
             response.OutputStream.Close();
         }
 
+        private static JsonArray BuildJsonArray(string[] items)
+        {
+            var arr = new JsonArray();
+            foreach (string item in items)
+            {
+                arr.Add(item);
+            }
+            return arr;
+        }
+
         private static object CreateModelDetails()
         {
             return new
             {
-                parent_model = "",
+                parent_model = _modelParentModel,
                 format = "gguf",
                 family = _modelFamily,
                 families = new[] { _modelFamily },
                 parameter_size = _parameterSize,
                 quantization_level = _quantizationLevel
             };
+        }
+
+        private static long GetModelFileSize()
+        {
+            if (_modelFileSizeBytes > 0)
+            {
+                return _modelFileSizeBytes;
+            }
+            try { return File.Exists(_detectedModelId) ? new FileInfo(_detectedModelId).Length : 0; } catch { return 0; }
+        }
+
+        private static DateTime GetModelModifiedAt()
+        {
+            try { return File.Exists(_detectedModelId) ? File.GetLastWriteTimeUtc(_detectedModelId) : DateTime.UtcNow; } catch { return DateTime.UtcNow; }
         }
 
         private static async Task SendJsonResponseAsync(HttpListenerResponse response, object data)
@@ -848,6 +1123,49 @@ namespace FormsSystemStatsWidget.Core
             }
 
             return null;
+        }
+
+        private static string SanitizeModelId(string modelId)
+        {
+            if (string.IsNullOrWhiteSpace(modelId))
+            {
+                return "local-llama-model";
+            }
+
+            // Wenn die ID ein Dateipfad ist (enthält \ oder /), nimm nur den File-Name ohne Extension
+            bool looksLikePath = modelId.Contains('\\') || modelId.Contains('/');
+            if (looksLikePath)
+            {
+                string fileName = Path.GetFileName(modelId);
+                return Path.GetFileNameWithoutExtension(fileName);
+            }
+
+            // Wenn die ID bereits eine .gguf-Extension hat, entferne sie
+            if (modelId.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            {
+                return Path.GetFileNameWithoutExtension(modelId);
+            }
+
+            return modelId;
+        }
+
+        private static string FormatParameterSize(long nParams)
+        {
+            if (nParams <= 0)
+            {
+                return "unknown";
+            }
+
+            double billions = nParams / 1_000_000_000.0;
+            if (billions < 1.0)
+            {
+                long millions = nParams / 1_000_000L;
+                return $"{millions}M";
+            }
+
+            // Runden auf eine Dezimalstelle, aber ganze Zahlen ohne ".0"
+            string formatted = billions.ToString("0.##", CultureInfo.InvariantCulture);
+            return $"{formatted}B";
         }
 
         public static void Stop()
