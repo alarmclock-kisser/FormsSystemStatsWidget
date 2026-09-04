@@ -192,7 +192,7 @@
             // 
             this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.diagramColorToolStripMenuItem, this.toolStripMenuItem_opacity, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.toolStripSeparator5, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.toolStripMenuItem_execModelLoadBat, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.smartPromptOptimizationsToolStripMenuItem, this.toolStripSeparator2, this.toolStripMenuItem_configureVoiceInputHotkey, this.toolStripMenuItem_remapAnyKey, this.toolStripSeparator6, this.openDebugConsoleToolStripMenuItem });
             this.contextMenuStrip_widget.Name = "contextMenuStrip_widget";
-            this.contextMenuStrip_widget.Size = new Size(275, 336);
+            this.contextMenuStrip_widget.Size = new Size(275, 358);
             this.contextMenuStrip_widget.Text = "Settings";
             this.contextMenuStrip_widget.Opening += this.contextMenuStrip_widget_Opening;
             // 
@@ -846,9 +846,12 @@
             // 
             // toolStripMenuItem_appendParams
             // 
+            this.toolStripMenuItem_appendParams.Checked = true;
+            this.toolStripMenuItem_appendParams.CheckOnClick = true;
+            this.toolStripMenuItem_appendParams.CheckState = CheckState.Checked;
             this.toolStripMenuItem_appendParams.Name = "toolStripMenuItem_appendParams";
-            this.toolStripMenuItem_appendParams.Size = new Size(258, 22);
-            this.toolStripMenuItem_appendParams.Text = "toolStripMenuItem_appendParams";
+            this.toolStripMenuItem_appendParams.Size = new Size(216, 22);
+            this.toolStripMenuItem_appendParams.Text = "Tell LLM the args + params";
             this.toolStripMenuItem_appendParams.CheckedChanged += this.toolStripMenuItem_appendParams_CheckedChanged;
             // 
             // smartPromptOptimizationsToolStripMenuItem
