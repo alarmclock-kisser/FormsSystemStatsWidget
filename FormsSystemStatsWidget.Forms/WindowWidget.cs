@@ -317,8 +317,13 @@ namespace FormsSystemStatsWidget.Forms
             this.printGenerationStatsToolStripMenuItem.Checked = this._persistentSettings.PrintGenerationStats;
             this.injectToolCallingRulesToolStripMenuItem.Checked = this._persistentSettings.InjectStrictToolCallingRules;
             this.toolStripTextBox_injectToolCallingRules.Text = this._persistentSettings.StrictToolCallingRulesInjectionPrompt.Trim();
-            this.toolStripMenuItem_additionalArgs.Checked = this._persistentSettings.ExtendCopilotSystemPrompt;
             this.toolStripTextBox_additionalCopilotSystemPrompt.Text = this._persistentSettings.AdditionalCopilotSystemPrompt.Trim();
+            this.extendCopilotSystemPromptToolStripMenuItem.Checked = this._persistentSettings.ExtendCopilotSystemPrompt;
+            this.toolStripMenuItem_appendParams.Checked = this._persistentSettings.AppendParams;
+            LlamaOllamaBridge.AdditionalCopilotSystemPrompt = this._persistentSettings.ExtendCopilotSystemPrompt
+                ? this._persistentSettings.AdditionalCopilotSystemPrompt
+                : string.Empty;
+            LlamaOllamaBridge.AppendParams = this._persistentSettings.AppendParams;
 
             this.toolStripTextBox_modelsDirectory.Text = this._persistentSettings.GgufModelDirectory;
             this.toolStripTextBox_modelsDirectory_KeyDown(this.toolStripTextBox_modelsDirectory, new KeyEventArgs(Keys.Enter));
@@ -1332,6 +1337,8 @@ namespace FormsSystemStatsWidget.Forms
         private static partial Regex SetVoiceInputHotkeyRegex();
         [GeneratedRegex(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled, "de-DE")]
         private static partial Regex MyRegex();
+
+    
     }
 }
 

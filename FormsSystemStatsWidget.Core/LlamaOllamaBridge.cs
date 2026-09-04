@@ -92,6 +92,7 @@ namespace FormsSystemStatsWidget.Core
 
         public static bool GetGenerationStatsText { get; set; } = false;
         public static string? AdditionalCopilotSystemPrompt { get; set; } = null;
+        public static bool AppendParams { get; set; }
 
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(600) };
 
@@ -322,7 +323,18 @@ namespace FormsSystemStatsWidget.Core
                 // may resolve 'localhost' to 127.0.0.1/::1 and send that as the Host header).
                 _listener.Prefixes.Add($"http://*:{ollamaPort}/");
                 Logger.Log($"[LlamaBridge] Starting local listener on http://*:{ollamaPort}/ (wildcard host)");
-                _listener.Start();
+                try
+                {
+                    _listener.Start();
+                }
+                catch (HttpListenerException ex) when (ex.ErrorCode == 5)
+                {
+                    _listener.Close();
+                    _listener = new HttpListener();
+                    _listener.Prefixes.Add($"http://localhost:{ollamaPort}/");
+                    Logger.Log($"[LlamaBridge] Wildcard listener requires elevated URL ACL ({ex.Message}). Retrying on http://localhost:{ollamaPort}/ without administrator rights.");
+                    _listener.Start();
+                }
                 _isRunning = true;
 
                 // Dispatch the listening loop to the thread pool
@@ -332,7 +344,12 @@ namespace FormsSystemStatsWidget.Core
             }
             catch (Exception ex)
             {
-                _lastStartError = $"Port {ollamaPort} blocked or listener error: {ex.GetType().Name}: {ex.Message}";
+                try { _listener?.Close(); } catch { }
+                _listener = null;
+                _isRunning = false;
+                _lastStartError = ex is HttpListenerException listenerException && listenerException.ErrorCode == 5
+                    ? $"The bridge could not bind localhost:{ollamaPort} without administrator rights. A Windows HTTP URL ACL or another listener configuration is required: {ex.Message}"
+                    : $"Could not start the bridge listener on port {ollamaPort}. The port may already be in use: {ex.GetType().Name}: {ex.Message}";
                 Logger.Log($"[LlamaBridge] {_lastStartError}");
                 return false;
             }

@@ -119,6 +119,8 @@
             this.printGenerationStatsToolStripMenuItem = new ToolStripMenuItem();
             this.showTokenssToolStripMenuItem = new ToolStripMenuItem();
             this.extendCopilotSystemPromptToolStripMenuItem = new ToolStripMenuItem();
+            this.toolStripTextBox_additionalCopilotSystemPrompt = new ToolStripTextBox();
+            this.toolStripMenuItem_appendParams = new ToolStripMenuItem();
             this.smartPromptOptimizationsToolStripMenuItem = new ToolStripMenuItem();
             this.promptSafetyRatioToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripTextBox_promptSafetyRatio = new ToolStripTextBox();
@@ -154,7 +156,6 @@
             this.label_topTasksList = new Label();
             this.button_recordUsages = new Button();
             this.label_routingPortsInfo = new Label();
-            this.toolStripTextBox_additionalCopilotSystemPrompt = new ToolStripTextBox();
             ((System.ComponentModel.ISupportInitialize) this.pictureBox_cpu).BeginInit();
             this.contextMenuStrip_widget.SuspendLayout();
             this.SuspendLayout();
@@ -191,7 +192,7 @@
             // 
             this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.diagramColorToolStripMenuItem, this.toolStripMenuItem_opacity, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.toolStripSeparator5, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.toolStripMenuItem_execModelLoadBat, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.smartPromptOptimizationsToolStripMenuItem, this.toolStripSeparator2, this.toolStripMenuItem_configureVoiceInputHotkey, this.toolStripMenuItem_remapAnyKey, this.toolStripSeparator6, this.openDebugConsoleToolStripMenuItem });
             this.contextMenuStrip_widget.Name = "contextMenuStrip_widget";
-            this.contextMenuStrip_widget.Size = new Size(275, 358);
+            this.contextMenuStrip_widget.Size = new Size(275, 336);
             this.contextMenuStrip_widget.Text = "Settings";
             this.contextMenuStrip_widget.Opening += this.contextMenuStrip_widget_Opening;
             // 
@@ -831,11 +832,24 @@
             this.extendCopilotSystemPromptToolStripMenuItem.Checked = true;
             this.extendCopilotSystemPromptToolStripMenuItem.CheckOnClick = true;
             this.extendCopilotSystemPromptToolStripMenuItem.CheckState = CheckState.Checked;
-            this.extendCopilotSystemPromptToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_additionalCopilotSystemPrompt });
+            this.extendCopilotSystemPromptToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripTextBox_additionalCopilotSystemPrompt, this.toolStripMenuItem_appendParams });
             this.extendCopilotSystemPromptToolStripMenuItem.Name = "extendCopilotSystemPromptToolStripMenuItem";
             this.extendCopilotSystemPromptToolStripMenuItem.Size = new Size(232, 22);
             this.extendCopilotSystemPromptToolStripMenuItem.Text = "Extend Copilot SystemPrompt";
             this.extendCopilotSystemPromptToolStripMenuItem.CheckedChanged += this.extendCopilotSystemPromptToolStripMenuItem_CheckedChanged;
+            // 
+            // toolStripTextBox_additionalCopilotSystemPrompt
+            // 
+            this.toolStripTextBox_additionalCopilotSystemPrompt.Name = "toolStripTextBox_additionalCopilotSystemPrompt";
+            this.toolStripTextBox_additionalCopilotSystemPrompt.Size = new Size(100, 23);
+            this.toolStripTextBox_additionalCopilotSystemPrompt.KeyDown += this.toolStripTextBox_additionalCopilotSystemPrompt_KeyDown;
+            // 
+            // toolStripMenuItem_appendParams
+            // 
+            this.toolStripMenuItem_appendParams.Name = "toolStripMenuItem_appendParams";
+            this.toolStripMenuItem_appendParams.Size = new Size(258, 22);
+            this.toolStripMenuItem_appendParams.Text = "toolStripMenuItem_appendParams";
+            this.toolStripMenuItem_appendParams.CheckedChanged += this.toolStripMenuItem_appendParams_CheckedChanged;
             // 
             // smartPromptOptimizationsToolStripMenuItem
             // 
@@ -1128,12 +1142,6 @@
             this.label_routingPortsInfo.Text = "Port: ----- to -----";
             this.label_routingPortsInfo.Visible = false;
             // 
-            // toolStripTextBox_additionalCopilotSystemPrompt
-            // 
-            this.toolStripTextBox_additionalCopilotSystemPrompt.Name = "toolStripTextBox_additionalCopilotSystemPrompt";
-            this.toolStripTextBox_additionalCopilotSystemPrompt.Size = new Size(100, 23);
-            this.toolStripTextBox_additionalCopilotSystemPrompt.KeyDown += this.toolStripTextBox_additionalCopilotSystemPrompt_KeyDown;
-            // 
             // WindowWidget
             // 
             this.AutoScaleDimensions = new SizeF(7F, 15F);
@@ -1299,5 +1307,6 @@
         private ToolStripMenuItem showTokenssToolStripMenuItem;
         private ToolStripMenuItem extendCopilotSystemPromptToolStripMenuItem;
         private ToolStripTextBox toolStripTextBox_additionalCopilotSystemPrompt;
+        private ToolStripMenuItem toolStripMenuItem_appendParams;
     }
 }

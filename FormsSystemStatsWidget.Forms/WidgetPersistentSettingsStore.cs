@@ -82,6 +82,7 @@ namespace FormsSystemStatsWidget.Forms
         public bool PrintGenerationStats { get; set; } = false;
         public string AdditionalCopilotSystemPrompt { get; set; } = string.Empty;
         public bool ExtendCopilotSystemPrompt { get; set; } = false;
+        public bool AppendParams { get; set; } = false;
     }
 
     internal static class WidgetPersistentSettingsStore

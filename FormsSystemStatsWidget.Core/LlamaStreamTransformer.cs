@@ -201,7 +201,8 @@ namespace FormsSystemStatsWidget.Core
 
         private static void EnsureAdditionalSystemPrompt(JsonArray messages)
         {
-            if (messages.Count <= 0 || string.IsNullOrEmpty(LlamaOllamaBridge.AdditionalCopilotSystemPrompt))
+            if (messages.Count <= 0 ||
+                (string.IsNullOrEmpty(LlamaOllamaBridge.AdditionalCopilotSystemPrompt) && !LlamaOllamaBridge.AppendParams))
             {
                 return;
             }
@@ -219,7 +220,26 @@ namespace FormsSystemStatsWidget.Core
             }
 
             string existingContent = firstMsg["content"]?.ToString() ?? "";
-            string additionalPrompt = LlamaOllamaBridge.AdditionalCopilotSystemPrompt;
+            string additionalPrompt = LlamaOllamaBridge.AdditionalCopilotSystemPrompt ?? string.Empty;
+            if (LlamaOllamaBridge.AppendParams)
+            {
+                string inferenceParams = string.Join(
+                    Environment.NewLine,
+                    "[CURRENT INFERENCE PARAMETERS]",
+                    $"temperature={LlamaOllamaBridge.UserDefinedTemperature.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"repetition_penalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"presence_penalty={LlamaOllamaBridge.UserDefinedPresencePenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"top_p={LlamaOllamaBridge.UserDefinedTopP.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"min_p={LlamaOllamaBridge.UserDefinedMinP.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"top_k={LlamaOllamaBridge.UserDefinedTopK.ToString(CultureInfo.InvariantCulture)}",
+                    $"reasoning_effort={LlamaOllamaBridge.UserDefinedReasoningEffort ?? string.Empty}",
+                    $"reasoning_budget={LlamaOllamaBridge.UserDefinedReasoningBudget.ToString(CultureInfo.InvariantCulture)}");
+
+                additionalPrompt = string.IsNullOrWhiteSpace(additionalPrompt)
+                    ? inferenceParams
+                    : additionalPrompt + Environment.NewLine + Environment.NewLine + inferenceParams;
+            }
+
             if (!string.IsNullOrWhiteSpace(additionalPrompt) && !existingContent.Contains(additionalPrompt, StringComparison.OrdinalIgnoreCase))
             {
                 if (!existingContent.Contains(existingContent.Trim()[..30], StringComparison.OrdinalIgnoreCase))

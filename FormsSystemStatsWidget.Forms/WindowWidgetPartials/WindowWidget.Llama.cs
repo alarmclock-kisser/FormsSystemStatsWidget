@@ -1367,5 +1367,19 @@ namespace FormsSystemStatsWidget.Forms
 
         [GeneratedRegex(@"--?[a-zA-Z][\w-]*(?:\s+(?:"".*?""|'.*?'|(?!--?[a-zA-Z])[^\s]+))*")]
         private static partial Regex LoadArgsRegex();
+
+
+        private void toolStripMenuItem_appendParams_CheckedChanged(object sender, EventArgs e)
+        {
+            bool isChecked = this.toolStripMenuItem_appendParams.Checked;
+
+            LlamaOllamaBridge.AppendParams = isChecked;
+            this._persistentSettings.AppendParams = isChecked;
+            this.SavePersistentSettings();
+        }
+
+
     }
+
+
 }
