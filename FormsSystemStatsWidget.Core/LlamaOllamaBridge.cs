@@ -93,6 +93,7 @@ namespace FormsSystemStatsWidget.Core
         public static bool GetGenerationStatsText { get; set; } = false;
         public static string? AdditionalCopilotSystemPrompt { get; set; } = null;
         public static bool AppendParams { get; set; }
+        public static string ModelLoadArguments { get; set; } = string.Empty;
 
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(600) };
 
@@ -463,7 +464,7 @@ namespace FormsSystemStatsWidget.Core
             Logger.Log("[LlamaBridge] Processing OpenAI-compatible direct stream...");
             using var reader = new StreamReader(request.InputStream);
             string requestBody = await reader.ReadToEndAsync();
-            string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort);
+            string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget);
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
@@ -575,7 +576,7 @@ namespace FormsSystemStatsWidget.Core
             string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(
                 openAiReq.ToJsonString(), _modelFamily, _detectedNumCtx,
                 UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty,
-                UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort);
+                UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget);
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE (OLLAMA PATH)]");

@@ -66,7 +66,7 @@ namespace FormsSystemStatsWidget.Core
             "this", "that", "with", "from", "were", "have", "just"
         };
 
-        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double presencePenalty = 1.0, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40, string? reasoningEffort = null)
+        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double presencePenalty = 1.0, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40, string? reasoningEffort = null, int reasoningBudget = 0)
         {
             try
             {
@@ -123,7 +123,7 @@ namespace FormsSystemStatsWidget.Core
 
                 EnsureSystemMessageFirst(messages);
                 InjectStrictToolCallingRules(messages);
-                EnsureAdditionalSystemPrompt(messages);
+                EnsureAdditionalSystemPrompt(messages, temperature, repetitionPenalty, presencePenalty, userDefinedTopP, userDefinedMinP, userDefinedTopK, reasoningEffort, reasoningBudget);
 
                 double promptSafetyRatio = Math.Clamp(SmartPromptOptimizationSettings.PromptSafetyRatio, 0.10, 1.00);
                 int maxPromptTokens = (int) (numCtx * promptSafetyRatio);
@@ -199,7 +199,7 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
-        private static void EnsureAdditionalSystemPrompt(JsonArray messages)
+        private static void EnsureAdditionalSystemPrompt(JsonArray messages, double temperature, double repetitionPenalty, double presencePenalty, double userDefinedTopP, double userDefinedMinP, int userDefinedTopK, string? reasoningEffort, int reasoningBudget)
         {
             if (messages.Count <= 0 ||
                 (string.IsNullOrEmpty(LlamaOllamaBridge.AdditionalCopilotSystemPrompt) && !LlamaOllamaBridge.AppendParams))
@@ -217,36 +217,49 @@ namespace FormsSystemStatsWidget.Core
             if (!string.Equals(role, "system", StringComparison.OrdinalIgnoreCase))
             {
                 EnsureSystemMessageFirst(messages);
+                firstMsg = messages.FirstOrDefault() as JsonObject;
+                if (firstMsg == null)
+                {
+                    return;
+                }
             }
 
             string existingContent = firstMsg["content"]?.ToString() ?? "";
             string additionalPrompt = LlamaOllamaBridge.AdditionalCopilotSystemPrompt ?? string.Empty;
             if (LlamaOllamaBridge.AppendParams)
             {
+                string loadArguments = string.IsNullOrWhiteSpace(LlamaOllamaBridge.ModelLoadArguments)
+                    ? "<not available>"
+                    : LlamaOllamaBridge.ModelLoadArguments.Replace("\r", " ", StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal).Trim();
                 string inferenceParams = string.Join(
+                    " ",
+                    $"temperature={temperature.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"repetition_penalty={repetitionPenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"presence_penalty={presencePenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"top_p={userDefinedTopP.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"min_p={userDefinedMinP.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"top_k={userDefinedTopK.ToString(CultureInfo.InvariantCulture)}",
+                    $"reasoning_effort={reasoningEffort ?? string.Empty}",
+                    $"reasoning_budget={reasoningBudget.ToString(CultureInfo.InvariantCulture)}");
+                string appendedParams = string.Join(
                     Environment.NewLine,
-                    "[CURRENT INFERENCE PARAMETERS]",
-                    $"temperature={LlamaOllamaBridge.UserDefinedTemperature.ToString("0.######", CultureInfo.InvariantCulture)}",
-                    $"repetition_penalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
-                    $"presence_penalty={LlamaOllamaBridge.UserDefinedPresencePenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
-                    $"top_p={LlamaOllamaBridge.UserDefinedTopP.ToString("0.######", CultureInfo.InvariantCulture)}",
-                    $"min_p={LlamaOllamaBridge.UserDefinedMinP.ToString("0.######", CultureInfo.InvariantCulture)}",
-                    $"top_k={LlamaOllamaBridge.UserDefinedTopK.ToString(CultureInfo.InvariantCulture)}",
-                    $"reasoning_effort={LlamaOllamaBridge.UserDefinedReasoningEffort ?? string.Empty}",
-                    $"reasoning_budget={LlamaOllamaBridge.UserDefinedReasoningBudget.ToString(CultureInfo.InvariantCulture)}");
+                    "[APPENDED LLAMA PARAMETERS]",
+                    $"[MODEL LOAD ARGUMENTS] {loadArguments}",
+                    $"[INFERENCE PARAMETERS] {inferenceParams}");
 
                 additionalPrompt = string.IsNullOrWhiteSpace(additionalPrompt)
-                    ? inferenceParams
-                    : additionalPrompt + Environment.NewLine + Environment.NewLine + inferenceParams;
+                    ? appendedParams
+                    : additionalPrompt + Environment.NewLine + Environment.NewLine + appendedParams;
             }
 
-            if (!string.IsNullOrWhiteSpace(additionalPrompt) && !existingContent.Contains(additionalPrompt, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(additionalPrompt) &&
+                !existingContent.Contains("[APPENDED LLAMA PARAMETERS]", StringComparison.OrdinalIgnoreCase) &&
+                !existingContent.Contains(additionalPrompt, StringComparison.OrdinalIgnoreCase))
             {
-                if (!existingContent.Contains(existingContent.Trim()[..30], StringComparison.OrdinalIgnoreCase))
-                {
-                    firstMsg["content"] = existingContent + "\n\n" + additionalPrompt;
-                    Logger.Log("[Sanitizer] Extended System Prompt with Additional Copilot System Prompt.");
-                }
+                firstMsg["content"] = string.IsNullOrWhiteSpace(existingContent)
+                    ? additionalPrompt
+                    : existingContent + "\n\n" + additionalPrompt;
+                Logger.Log("[Sanitizer] Extended System Prompt with Additional Copilot System Prompt.");
             }
         }
 

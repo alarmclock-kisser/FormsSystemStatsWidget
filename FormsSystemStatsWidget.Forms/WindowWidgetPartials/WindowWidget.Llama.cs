@@ -299,6 +299,9 @@ namespace FormsSystemStatsWidget.Forms
             {
                 return;
             }
+
+            LlamaOllamaBridge.ModelLoadArguments = sb.ToString().Trim();
+
             if (result == DialogResult.Yes)
             {
                 // SFD with default file name "LOAD_[MODELNAME].BAT" and default directory to save in
@@ -351,6 +354,13 @@ namespace FormsSystemStatsWidget.Forms
             {
                 // Read comment lines from the batch file to extract inference parameters and update the LlamaOllamaBridge properties accordingly (so they are applied when the user starts a new chat after loading the model with the BAT file)
                 string[] lines = File.ReadAllLines(batFilePath);
+                int commandStart = Array.FindIndex(lines, line => line.TrimStart().StartsWith("llama-server", StringComparison.OrdinalIgnoreCase));
+                int commandEnd = Array.FindIndex(lines, commandStart < 0 ? 0 : commandStart, lines.Length - (commandStart < 0 ? 0 : commandStart), line => line.TrimStart().StartsWith("::", StringComparison.Ordinal));
+                if (commandStart >= 0)
+                {
+                    int commandLineCount = commandEnd >= 0 ? commandEnd - commandStart : lines.Length - commandStart;
+                    LlamaOllamaBridge.ModelLoadArguments = string.Join(" ", lines, commandStart, commandLineCount).Replace("^", string.Empty, StringComparison.Ordinal).Trim();
+                }
                 string[] inferenceParamsLines = lines.Where(line => line.TrimStart().StartsWith("::")).ToArray();
                 LlamaOllamaBridge.UserDefinedTemperature = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("temperature=")).Select(param => param.Substring("temperature=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float temp) ? temp : 0.75f).FirstOrDefault();
                 LlamaOllamaBridge.UserDefinedRepetitionPenalty = inferenceParamsLines.Select(line => line.TrimStart().Substring(2).Trim()).Where(param => param.StartsWith("repetition_penalty=")).Select(param => param.Substring("repetition_penalty=".Length)).Select(value => float.TryParse(value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out float penalty) ? penalty : 1.1f).FirstOrDefault();
