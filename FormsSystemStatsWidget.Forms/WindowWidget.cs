@@ -563,7 +563,9 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     double total = Math.Round(CpuStats.GetTotalMemoryBytes() / 1_073_741_824.0, 3);
                     double used = Math.Round(CpuStats.GetUsedMemoryBytes() / 1_073_741_824.0, 3);
-                    return (total, used);
+                    double pageFileUsedGb = CpuStats.GetUsedPageFileGb();
+                    double pageFileMaxGb = CpuStats.GetMaxPageFileGb();
+                    return (total, used, pageFileUsedGb, pageFileMaxGb);
                 });
                 var gpuTask = Task.Run(() =>
                 {
@@ -586,7 +588,7 @@ namespace FormsSystemStatsWidget.Forms
 
                 var threads = threadsTask.Result;
                 var topTasks = topTasksTask.Result;
-                var (ramTotalGb, ramUsedGb) = ramTask.Result;
+                var (ramTotalGb, ramUsedGb, pageFileUsedGb, pageFileMaxGb) = ramTask.Result;
                 var (gpuUsage, gpuWattage, vramTotalGb, vramUsedGb) = gpuTask.Result;
 
                 this.UpdateAverageCpuLoadAndTemperatureLabel(threads);
@@ -595,7 +597,7 @@ namespace FormsSystemStatsWidget.Forms
 
                 await Task.WhenAll(
                     this.UpdateCpuUsageAsync(threads),
-                    this.UpdateRamUsageAsync(ramTotalGb, ramUsedGb),
+                    this.UpdateRamUsageAsync(ramTotalGb, ramUsedGb, pageFileUsedGb, pageFileMaxGb),
                     this.UpdateGpuUsageAsync(gpuUsage, gpuWattage),
                     this.UpdateVramUsageAsync(vramTotalGb, vramUsedGb)
                 );
@@ -773,7 +775,7 @@ namespace FormsSystemStatsWidget.Forms
             this.label_topTasksList.Text = string.Join(Environment.NewLine, lines);
         }
 
-        private Task UpdateRamUsageAsync(double totalGb, double usedGb)
+        private Task UpdateRamUsageAsync(double totalGb, double usedGb, double pageFileUsedGb, double pageFileMaxGb)
         {
             if (this._closing)
             {
@@ -782,7 +784,13 @@ namespace FormsSystemStatsWidget.Forms
 
             double percentUsed = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
 
-            this.label_ram.Text = $"RAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%)";
+            string pageFilePart = "";
+            if (pageFileMaxGb > 0)
+            {
+                pageFilePart = $" + ({pageFileUsedGb:0.0} / {pageFileMaxGb:0.0} GB)";
+            }
+
+            this.label_ram.Text = $"RAM: {usedGb} GB / {totalGb} GB ({percentUsed:0.00}%){pageFilePart}";
             if (this._progRam != null)
             {
                 this._progRam.Value = Math.Clamp((int) percentUsed, 0, this._progRam.Maximum);

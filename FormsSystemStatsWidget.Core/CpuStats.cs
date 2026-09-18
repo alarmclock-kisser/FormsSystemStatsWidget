@@ -1110,6 +1110,54 @@ namespace FormsSystemStatsWidget.Core
             ulong used = status.ullTotalPhys - status.ullAvailPhys;
             return (long) used;
         }
+
+        private static double? _cachedPageFileMaxGb;
+
+        /// <summary>
+        /// Verwendete Pagefile in GB (aus WMI Win32_PageFileUsage.CurrentUsage).
+        /// </summary>
+        public static double GetUsedPageFileGb()
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher("SELECT CurrentUsage FROM Win32_PageFileUsage WHERE NOT TempPageFile");
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    return Convert.ToDouble(obj["CurrentUsage"]) / 1024.0;
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        /// <summary>
+        /// Maximale Pagefile in GB (aus WMI Win32_PageFileSetting.MaximumSize, gecacht da nur bei Reboot änderbar).
+        /// </summary>
+        public static double GetMaxPageFileGb()
+        {
+            if (_cachedPageFileMaxGb.HasValue)
+            {
+                return _cachedPageFileMaxGb.Value;
+            }
+
+            try
+            {
+                using var searcher = new ManagementObjectSearcher("SELECT MaximumSize FROM Win32_PageFileSetting");
+                foreach (ManagementObject obj in searcher.Get())
+                {
+                    double maxMb = Convert.ToDouble(obj["MaximumSize"]);
+                    if (maxMb > 0)
+                    {
+                        _cachedPageFileMaxGb = maxMb / 1024.0;
+                        return _cachedPageFileMaxGb.Value;
+                    }
+                }
+            }
+            catch { }
+
+            _cachedPageFileMaxGb = 0;
+            return 0;
+        }
     }
 
 }
