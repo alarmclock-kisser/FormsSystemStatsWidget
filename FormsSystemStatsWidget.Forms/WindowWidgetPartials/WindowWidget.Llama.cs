@@ -1,5 +1,4 @@
 ﻿using FormsSystemStatsWidget.Core;
-using FormsSystemStatsWidget.Forms.Services;
 using Microsoft.VisualBasic;
 using System;
 using System.Collections.Generic;

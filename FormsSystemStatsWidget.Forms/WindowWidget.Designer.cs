@@ -137,7 +137,6 @@
             this.injectToolCallingRulesToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripTextBox_injectToolCallingRules = new ToolStripTextBox();
             this.toolStripSeparator2 = new ToolStripSeparator();
-            this.toolStripMenuItem_configureVoiceInputHotkey = new ToolStripMenuItem();
             this.toolStripMenuItem_remapAnyKey = new ToolStripMenuItem();
             this.toolStripSeparator6 = new ToolStripSeparator();
             this.openDebugConsoleToolStripMenuItem = new ToolStripMenuItem();
@@ -190,9 +189,9 @@
             // 
             // contextMenuStrip_widget
             // 
-            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.diagramColorToolStripMenuItem, this.toolStripMenuItem_opacity, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.toolStripSeparator5, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.toolStripMenuItem_execModelLoadBat, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.smartPromptOptimizationsToolStripMenuItem, this.toolStripSeparator2, this.toolStripMenuItem_configureVoiceInputHotkey, this.toolStripMenuItem_remapAnyKey, this.toolStripSeparator6, this.openDebugConsoleToolStripMenuItem });
+            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.diagramColorToolStripMenuItem, this.toolStripMenuItem_opacity, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.toolStripSeparator5, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.toolStripMenuItem_execModelLoadBat, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.smartPromptOptimizationsToolStripMenuItem, this.toolStripSeparator2, this.toolStripMenuItem_remapAnyKey, this.toolStripSeparator6, this.openDebugConsoleToolStripMenuItem });
             this.contextMenuStrip_widget.Name = "contextMenuStrip_widget";
-            this.contextMenuStrip_widget.Size = new Size(275, 358);
+            this.contextMenuStrip_widget.Size = new Size(275, 336);
             this.contextMenuStrip_widget.Text = "Settings";
             this.contextMenuStrip_widget.Opening += this.contextMenuStrip_widget_Opening;
             // 
@@ -971,14 +970,6 @@
             this.toolStripSeparator2.Name = "toolStripSeparator2";
             this.toolStripSeparator2.Size = new Size(271, 6);
             // 
-            // toolStripMenuItem_configureVoiceInputHotkey
-            // 
-            this.toolStripMenuItem_configureVoiceInputHotkey.Enabled = false;
-            this.toolStripMenuItem_configureVoiceInputHotkey.Name = "toolStripMenuItem_configureVoiceInputHotkey";
-            this.toolStripMenuItem_configureVoiceInputHotkey.Size = new Size(274, 22);
-            this.toolStripMenuItem_configureVoiceInputHotkey.Text = "Set Voice Input Hotkey ... (Ctrl+RShift)";
-            this.toolStripMenuItem_configureVoiceInputHotkey.Click += this.toolStripMenuItem_configureVoiceInputHotkey_Click;
-            // 
             // toolStripMenuItem_remapAnyKey
             // 
             this.toolStripMenuItem_remapAnyKey.Enabled = false;
@@ -1171,8 +1162,6 @@
             this.MinimumSize = new Size(256, 310);
             this.Name = "WindowWidget";
             this.Text = "System Statistics";
-            this.KeyDown += this.WindowWidget_KeyDown;
-            this.KeyUp += this.WindowWidget_KeyUp;
             ((System.ComponentModel.ISupportInitialize) this.pictureBox_cpu).EndInit();
             this.contextMenuStrip_widget.ResumeLayout(false);
             this.ResumeLayout(false);
@@ -1295,7 +1284,6 @@
         private ToolStripTextBox toolStripTextBox_presencePenalty;
         private ToolStripMenuItem toolStripMenuItem_reasoningEffort;
         private ToolStripComboBox toolStripComboBox_reasoningEffort;
-        private ToolStripMenuItem toolStripMenuItem_configureVoiceInputHotkey;
         private ToolStripSeparator toolStripSeparator6;
         private ToolStripMenuItem toolStripMenuItem_remapAnyKey;
         private ToolStripMenuItem toolStripMenuItem_kvCacheType;
