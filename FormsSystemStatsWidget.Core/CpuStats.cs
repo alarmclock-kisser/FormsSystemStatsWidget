@@ -1120,7 +1120,7 @@ namespace FormsSystemStatsWidget.Core
         {
             try
             {
-                using var searcher = new ManagementObjectSearcher("SELECT CurrentUsage FROM Win32_PageFileUsage WHERE NOT TempPageFile");
+                using var searcher = new ManagementObjectSearcher("SELECT CurrentUsage FROM Win32_PageFileUsage WHERE TempPageFile = FALSE");
                 foreach (ManagementObject obj in searcher.Get())
                 {
                     return Convert.ToDouble(obj["CurrentUsage"]) / 1024.0;
