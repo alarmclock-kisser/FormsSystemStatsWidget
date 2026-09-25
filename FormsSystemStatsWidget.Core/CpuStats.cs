@@ -1114,27 +1114,22 @@ namespace FormsSystemStatsWidget.Core
         private static double? _cachedPageFileMaxGb;
 
         /// <summary>
-        /// Tatsächlich belegte Pagefile in GB, ohne den physischen RAM.
+        /// Geschätzter Pagefile-Anteil des zugesicherten Speichers in GB.
         /// </summary>
         public static double GetUsedPageFileGb()
         {
-            try
-            {
-                using var searcher = new ManagementObjectSearcher(
-                    "SELECT CurrentUsage FROM Win32_PageFileUsage WHERE TempPageFile = FALSE");
+            MEMORYSTATUSEX status = GetMemoryStatus();
+            ulong committedBytes = status.ullTotalPageFile >= status.ullAvailPageFile
+                ? status.ullTotalPageFile - status.ullAvailPageFile
+                : 0;
+            ulong usedPhysicalBytes = status.ullTotalPhys >= status.ullAvailPhys
+                ? status.ullTotalPhys - status.ullAvailPhys
+                : 0;
+            ulong usedPageFileBytes = committedBytes > usedPhysicalBytes
+                ? committedBytes - usedPhysicalBytes
+                : 0;
 
-                double usedMegabytes = 0;
-                foreach (ManagementObject obj in searcher.Get())
-                {
-                    usedMegabytes += Convert.ToDouble(obj["CurrentUsage"]);
-                }
-
-                return usedMegabytes / 1024.0;
-            }
-            catch
-            {
-                return 0;
-            }
+            return usedPageFileBytes / 1_073_741_824.0;
         }
 
         /// <summary>
