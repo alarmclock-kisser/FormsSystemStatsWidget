@@ -296,5 +296,79 @@ namespace FormsSystemStatsWidget.Forms
             return killCount;
         }
 
+        /// <summary>
+        /// Kills the ONNX runner and any child processes it started.
+        /// </summary>
+        /// <returns>The number of processes killed.</returns>
+        public static int? KillOnnxGenaiServerProcesses(IEnumerable<Process>? processes = null)
+        {
+            int killCount = 0;
+            try
+            {
+                IEnumerable<Process> targetProcesses = processes ?? GetOnnxGenaiServerProcesses();
+                foreach (Process proc in targetProcesses)
+                {
+                    try
+                    {
+                        proc.Kill(true);
+                        killCount++;
+                    }
+                    catch
+                    {
+                        // Ignore processes we can't kill
+                    }
+                }
+            }
+            catch
+            {
+                // Handle any exceptions that may occur when retrieving or killing processes
+            }
+            return killCount;
+        }
+
+        /// <summary>
+        /// Finds ONNX runner processes by executable name and command line.
+        /// </summary>
+        /// <returns>List of onnx-genai-server processes.</returns>
+        public static List<Process> GetOnnxGenaiServerProcesses()
+        {
+            List<Process> onnxGenaiServerProcesses = [];
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    "SELECT ProcessId, Name, CommandLine FROM Win32_Process");
+                using var results = searcher.Get();
+                foreach (ManagementObject processInfo in results)
+                {
+                    try
+                    {
+                        string processName = processInfo["Name"]?.ToString() ?? string.Empty;
+                        string commandLine = processInfo["CommandLine"]?.ToString() ?? string.Empty;
+                        bool isOnnxRunner = commandLine.Contains("run_onnx_genai_server.py", StringComparison.OrdinalIgnoreCase)
+                            || commandLine.Contains("FormsSystemStatsWidget.OnnxGenaiServer.csproj", StringComparison.OrdinalIgnoreCase)
+                            || commandLine.Contains("FormsSystemStatsWidget.OnnxGenaiServer.dll", StringComparison.OrdinalIgnoreCase);
+
+                        if (string.Equals(processName, "onnx-genai-server.exe", StringComparison.OrdinalIgnoreCase)
+                            || (isOnnxRunner && (string.Equals(processName, "python.exe", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(processName, "pythonw.exe", StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(processName, "dotnet.exe", StringComparison.OrdinalIgnoreCase))))
+                        {
+                            int processId = Convert.ToInt32(processInfo["ProcessId"]);
+                            onnxGenaiServerProcesses.Add(Process.GetProcessById(processId));
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore processes we can't access
+                    }
+                }
+            }
+            catch
+            {
+                // Handle any exceptions that may occur when retrieving processes
+            }
+            return onnxGenaiServerProcesses;
+        }
+
     }
 }

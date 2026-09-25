@@ -57,6 +57,8 @@ namespace FormsSystemStatsWidget.Forms
         private DebugConsoleForm? _debugConsoleForm;
         private WidgetPersistentSettings _persistentSettings = new();
         private bool _explicitWidgetCloseRequested;
+        private bool _onnxSettingsInitialized;
+        private bool _refreshingOnnxModels;
         private Process? _llamaServerProcess;
         private readonly HashSet<Keys> _processingKeys = [];
         private static readonly Regex TokensPerSecondRegex = MyRegex();
@@ -74,6 +76,7 @@ namespace FormsSystemStatsWidget.Forms
             this.DoubleBuffered = true;
             this._persistentSettings = WidgetPersistentSettingsStore.Load();
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
+            this.ApplyApplicationIcon();
             this.ConfigureContextMenuAutoCloseBehavior();
 
             this.InitializeProgressBars();
@@ -139,6 +142,47 @@ namespace FormsSystemStatsWidget.Forms
             this.EnsureModelLoadBatsDirectory();
 
             this.ApplyPersistentSettings();
+
+            // Python-Env für ONNX-Genai-Server initial checken (einmalig am Startup)
+            _ = this.CheckOnnxPythonEnvironmentAtStartupAsync();
+        }
+
+        /// <summary>
+        /// Einmaliger Python-Env-Check am Widget-Startup. Bei Fehler wird der
+        /// ONNX-Loader-Contextmenu-Eintrag ausgegraut (disabled).
+        /// </summary>
+        private async Task CheckOnnxPythonEnvironmentAtStartupAsync()
+        {
+            try
+            {
+                bool success = await this.EnsureOnnxPythonEnvironmentAsync(showProgress: true);
+
+                // UI-Update auf dem UI-Thread
+                this.Invoke((System.Windows.Forms.MethodInvoker)delegate
+                {
+                    if (success)
+                    {
+                        this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = true;
+                        this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server";
+                        Logger.Log("[ONNX] Python env check succeeded. ONNX loader entry enabled.");
+                    }
+                    else
+                    {
+                        this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = false;
+                        this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server (Python Env Failed)";
+                        Logger.Log("[ONNX] Python env check failed. ONNX loader entry disabled.");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                this.Invoke((System.Windows.Forms.MethodInvoker)delegate
+                {
+                    this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = false;
+                    this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server (Python Env fehlgeschlagen)";
+                    Logger.Log($"[ONNX] Python-Env-Check Exception: {ex.Message}. ONNX-Loader-Eintrag deaktiviert.");
+                });
+            }
         }
 
         private void InitializeProgressBars()
@@ -253,12 +297,37 @@ namespace FormsSystemStatsWidget.Forms
 
         private void EnsureModelLoadBatsDirectory()
         {
-            string batsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs");
-            if (!Directory.Exists(batsDirectory))
+            string batsDirectory = GetModelLoadBatsDirectory();
+            Directory.CreateDirectory(batsDirectory);
+
+            string[] legacyDirectories =
+            [
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "LlamaCppLoad_BATs")
+            ];
+
+            foreach (string legacyDirectory in legacyDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                Directory.CreateDirectory(batsDirectory);
+                if (!Directory.Exists(legacyDirectory) || string.Equals(Path.GetFullPath(legacyDirectory), Path.GetFullPath(batsDirectory), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                foreach (string sourcePath in Directory.EnumerateFiles(legacyDirectory, "*.bat"))
+                {
+                    string destinationPath = Path.Combine(batsDirectory, Path.GetFileName(sourcePath));
+                    if (!File.Exists(destinationPath))
+                    {
+                        File.Copy(sourcePath, destinationPath);
+                    }
+                }
             }
         }
+
+        private static string GetModelLoadBatsDirectory() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "FSSWidget",
+            "llama.cpp_load_BATs");
 
         private void ApplyPersistentSettings()
         {
@@ -283,6 +352,18 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_includeRawChunksLog.Checked = this._persistentSettings.DebugConsoleIncludeRawChunks;
             this.toolStripMenuItem_logGenerationSpeed.Checked = this._persistentSettings.DebugConsoleLogGenerationSpeed;
             this.toolStripMenuItem_hideCmd.Checked = this._persistentSettings.HideCmd;
+            this.toolStripTextBox_onnxModelRootDir.Text = this._persistentSettings.OnnxModelRootDirectory;
+            this.toolStripTextBox_onnxContextLength.Text = this._persistentSettings.OnnxContextLength.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxMaxTokens.Text = this._persistentSettings.OnnxMaxTokens.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxTemperature.Text = this._persistentSettings.OnnxTemperature.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxTopP.Text = this._persistentSettings.OnnxTopP.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxTopK.Text = this._persistentSettings.OnnxTopK.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxRepeatPenalty.Text = this._persistentSettings.OnnxRepeatPenalty.ToString(CultureInfo.InvariantCulture);
+            string persistedEp = this._persistentSettings.OnnxExecutionProvider;
+            int epIndex = this.toolStripComboBox_onnxExecutionProvider.Items.IndexOf(persistedEp);
+            this.toolStripComboBox_onnxExecutionProvider.SelectedIndex = epIndex >= 0 ? epIndex : -1;
+            if (epIndex < 0) this.toolStripComboBox_onnxExecutionProvider.Text = string.Empty;
+            this.toolStripMenuItem_onnxHideCmd.Checked = this._persistentSettings.OnnxHideConsole;
 
             this.toolStripTextBox_opacity.Text = this._persistentSettings.WindowOpacity.ToString() + "%";
             this.toolStripTextBox_opacity_KeyDown(this.toolStripTextBox_opacity, new KeyEventArgs(Keys.Enter));
@@ -361,6 +442,7 @@ namespace FormsSystemStatsWidget.Forms
             SmartPromptOptimizationSettings.StrictToolCallingRulesInjectionPrompt = this._persistentSettings.StrictToolCallingRulesInjectionPrompt;
 
             this.toolStripMenuItem_blackOutMode.Checked = this._persistentSettings.BlackOutMode;
+            this._onnxSettingsInitialized = true;
         }
 
 
@@ -489,11 +571,73 @@ namespace FormsSystemStatsWidget.Forms
             this._debugConsoleForm.AppendLogLine(text);
         }
 
+        /// <summary>
+        /// Setzt das eigene FSS-Widget-Icon (ICO, Fallback PNG) als Fenster-Icon.
+        /// Damit erscheint das eigene Icon in Taskbar und Titelleiste statt des
+        /// Windows-Forms-Default-Icons.
+        /// </summary>
+        private void ApplyApplicationIcon()
+        {
+            try
+            {
+                string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "FSS_Widget.favicon.ico");
+                if (File.Exists(icoPath))
+                {
+                    this.Icon = new Icon(icoPath);
+                    return;
+                }
+
+                string pngPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "FSS_Widget.favicon.png");
+                if (File.Exists(pngPath))
+                {
+                    using var image = Image.FromFile(pngPath);
+                    using var bitmap = new Bitmap(image);
+                    IntPtr hIcon = bitmap.GetHicon();
+                    this.Icon = Icon.FromHandle(hIcon);
+                    DestroyIcon(hIcon);
+                }
+            }
+            catch
+            {
+                // Icon-Setup ist optional - Fehler hier dürfen die App nicht blockieren.
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool DestroyIcon(IntPtr handle);
+
         private void ConfigureContextMenuAutoCloseBehavior()
         {
             this.toolStripMenuItem_loadLlamaCppServer.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.toolStripMenuItem_execModelLoadBat.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.openDebugConsoleToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_loadOnnxGenaiServer.DropDown.Closing += this.KeepOnnxSubMenuOpenForInputInteractions;
+        }
+
+        /// <summary>
+        /// ONNX-Submenüs bleiben geöffnet, solange der User in einem Eingabefeld
+        /// (TextBox/ComboBox) interagiert. Ein Klick auf ein reines Menü-Item
+        /// (z.B. "Hide Console") schließt das Menü weiterhin normal.
+        /// </summary>
+        private void KeepOnnxSubMenuOpenForInputInteractions(object? sender, ToolStripDropDownClosingEventArgs e)
+        {
+            if (e.CloseReason != ToolStripDropDownCloseReason.ItemClicked) return;
+
+            Control? active = this.ActiveControl;
+            if (active is null) return;
+
+            bool isOnnxInput =
+                ReferenceEquals(active, this.toolStripTextBox_onnxModelRootDir) ||
+                ReferenceEquals(active, this.toolStripComboBox_onnxModels) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxContextLength) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxMaxTokens) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxTemperature) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxTopP) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxTopK) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxRepeatPenalty) ||
+                ReferenceEquals(active, this.toolStripComboBox_onnxExecutionProvider);
+
+            if (isOnnxInput) e.Cancel = true;
         }
 
         private void KeepSelectedSubMenuOpenForItemClicks(object? sender, ToolStripDropDownClosingEventArgs e)
@@ -1069,9 +1213,34 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;
             }
 
+            // ONNX-GenAI Server process management
+            var onnxGenaiProcesses = WidgetStatics.GetOnnxGenaiServerProcesses();
+            if (onnxGenaiProcesses.Count > 0)
+            {
+                this.toolStripMenuItem_loadOnnxGenaiServer.Text = $"Kill ONNX-GenAI Server ({onnxGenaiProcesses.Count})";
+                this.toolStripMenuItem_loadOnnxGenaiServer.ForeColor = Color.Red;
+
+                foreach (ToolStripItem item in this.toolStripMenuItem_loadOnnxGenaiServer.DropDownItems)
+                {
+                    item.Visible = false;
+                }
+
+            }
+            else
+            {
+                this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server";
+                this.toolStripMenuItem_loadOnnxGenaiServer.ForeColor = SystemColors.ControlText;
+
+                foreach (ToolStripItem item in this.toolStripMenuItem_loadOnnxGenaiServer.DropDownItems)
+                {
+                    item.Visible = true;
+                }
+
+            }
+
 
             // Get & fill all .BAT files from EXE directory \ llama.cpp_load_BATs \ 
-            string batsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs");
+            string batsDirectory = GetModelLoadBatsDirectory();
             if (!Directory.Exists(batsDirectory))
             {
                 Directory.CreateDirectory(batsDirectory);
@@ -1086,6 +1255,9 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripComboBox_modelLoadBats.SelectedIndex = 0;
             }
+
+            // Refresh ONNX models list
+            this.PopulateOnnxModelsList();
         }
 
         private void toolStripTextBox_opacity_KeyDown(object sender, KeyEventArgs e)

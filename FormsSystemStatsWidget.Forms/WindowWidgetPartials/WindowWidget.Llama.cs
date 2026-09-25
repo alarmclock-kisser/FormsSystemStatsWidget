@@ -310,7 +310,7 @@ namespace FormsSystemStatsWidget.Forms
                     Title = "Save Model Load Configuration as Batch File",
                     Filter = "Batch Files (*.bat)|*.bat",
                     FileName = batName,
-                    InitialDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs")
+                    InitialDirectory = GetModelLoadBatsDirectory()
                 };
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
@@ -380,6 +380,15 @@ namespace FormsSystemStatsWidget.Forms
                     CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
                     WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? System.Diagnostics.ProcessWindowStyle.Hidden : System.Diagnostics.ProcessWindowStyle.Normal
                 });
+
+                try
+                {
+                    File.SetLastWriteTimeUtc(batFilePath, DateTime.UtcNow);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[Model Load BAT] Could not update last-used timestamp for '{batFilePath}': {ex.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -397,7 +406,7 @@ namespace FormsSystemStatsWidget.Forms
                 return false;
             }
 
-            batFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs", selectedBatName + ".BAT");
+            batFilePath = Path.Combine(GetModelLoadBatsDirectory(), selectedBatName + ".BAT");
             if (!File.Exists(batFilePath))
             {
                 _ = MessageBox.Show(this, $"The selected batch file does not exist:\n{batFilePath}", "Batch File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -420,6 +429,22 @@ namespace FormsSystemStatsWidget.Forms
             catch (Exception ex)
             {
                 _ = MessageBox.Show(this, $"Failed to kill llama-server processes. Error: {ex.Message}", "Error Killing Processes", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void toolStripMenuItem_killOnnxGenaiServer_Click(object? sender, EventArgs e)
+        {
+            try
+            {
+                List<Process> processes = WidgetStatics.GetOnnxGenaiServerProcesses();
+                int? killed = WidgetStatics.KillOnnxGenaiServerProcesses(processes);
+                this.StopTrackedOnnxGenaiServerProcess();
+                Logger.Log($"[WindowWidget] Killed {killed} ONNX-GenAI Server process(es).");
+                this.ContextMenuStrip?.Close();
+            }
+            catch (Exception ex)
+            {
+                _ = MessageBox.Show(this, $"Failed to kill ONNX-GenAI Server processes. Error: {ex.Message}", "Error Killing Processes", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

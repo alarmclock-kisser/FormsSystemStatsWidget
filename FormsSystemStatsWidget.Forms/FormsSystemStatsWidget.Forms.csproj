@@ -23,7 +23,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="Ressources\FSS_Widget.favicon.ico" />
+    <Content Include="Ressources\FSS_Widget.favicon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Ressources\FSS_Widget.favicon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Scripts\*.py" CopyToOutputDirectory="Always" />
+    <Content Include="Ressources\LlamaCppLoad_BATs\*.BAT" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

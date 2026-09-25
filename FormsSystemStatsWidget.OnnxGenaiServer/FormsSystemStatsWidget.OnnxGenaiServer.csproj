@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>FormsSystemStatsWidget.OnnxGenaiServer</RootNamespace>
+    <AssemblyName>FormsSystemStatsWidget.OnnxGenaiServer</AssemblyName>
+    <Title>FSSW ONNX GenAI Server</Title>
+    <Authors>alarmclock-kisser</Authors>
+    <Company>AKAZUEFFLI</Company>
+    <Product>FSSWidget</Product>
+    <Description>OpenAI-kompatibler ONNX GenAI Server (DirectML) als Pendant zu llama-server (GGUF)</Description>
+    <PackageProjectUrl>https://github.com/alarmclock-kisser/FormsSystemStatsWidget</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/alarmclock-kisser/FormsSystemStatsWidget</RepositoryUrl>
+    <PackageTags>onnx; genai; directml; openai; inference; server;</PackageTags>
+    <NeutralLanguage>en</NeutralLanguage>
+    <AssemblyVersion>1.0.0</AssemblyVersion>
+    <IncludeSymbols>False</IncludeSymbols>
+  </PropertyGroup>
+
+  <!-- Keine ONNX-NuGets: Inference läuft im Python-Prozess,
+       C# hostet nur die OpenAI-API und ruft den Python-Server per HTTP ab. -->
+
+</Project>

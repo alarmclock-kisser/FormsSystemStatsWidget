@@ -83,6 +83,17 @@ namespace FormsSystemStatsWidget.Forms
         public string AdditionalCopilotSystemPrompt { get; set; } = string.Empty;
         public bool ExtendCopilotSystemPrompt { get; set; } = false;
         public bool AppendParams { get; set; } = false;
+
+        public string OnnxModelRootDirectory { get; set; } = @"D:\Models\ONNX";
+        public string OnnxModel { get; set; } = string.Empty;
+        public int OnnxContextLength { get; set; } = 4096;
+        public int OnnxMaxTokens { get; set; } = 1024;
+        public double OnnxTemperature { get; set; } = 0.8;
+        public double OnnxTopP { get; set; } = 0.9;
+        public int OnnxTopK { get; set; } = 40;
+        public double OnnxRepeatPenalty { get; set; } = 1.1;
+        public string OnnxExecutionProvider { get; set; } = "Dml";
+        public bool OnnxHideConsole { get; set; } = true;
     }
 
     internal static class WidgetPersistentSettingsStore

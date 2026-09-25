@@ -108,6 +108,24 @@
             this.toolStripMenuItem_execModelLoadBat = new ToolStripMenuItem();
             this.toolStripComboBox_modelLoadBats = new ToolStripComboBox();
             this.toolStripMenuItem_hideCmd = new ToolStripMenuItem();
+            this.toolStripMenuItem_loadOnnxGenaiServer = new ToolStripMenuItem();
+            this.toolStripMenuItem_onnxModelRootDir = new ToolStripMenuItem();
+            this.toolStripMenuItem_onnxContextLength = new ToolStripMenuItem();
+            this.toolStripMenuItem_onnxMaxTokens = new ToolStripMenuItem();
+            this.toolStripMenuItem_onnxTemperature = new ToolStripMenuItem();
+            this.toolStripMenuItem_onnxTopP = new ToolStripMenuItem();
+            this.toolStripMenuItem_onnxTopK = new ToolStripMenuItem();
+            this.toolStripMenuItem_onnxRepeatPenalty = new ToolStripMenuItem();
+            this.toolStripTextBox_onnxModelRootDir = new ToolStripTextBox();
+            this.toolStripComboBox_onnxModels = new ToolStripComboBox();
+            this.toolStripTextBox_onnxContextLength = new ToolStripTextBox();
+            this.toolStripTextBox_onnxMaxTokens = new ToolStripTextBox();
+            this.toolStripTextBox_onnxTemperature = new ToolStripTextBox();
+            this.toolStripTextBox_onnxTopP = new ToolStripTextBox();
+            this.toolStripTextBox_onnxTopK = new ToolStripTextBox();
+            this.toolStripTextBox_onnxRepeatPenalty = new ToolStripTextBox();
+            this.toolStripComboBox_onnxExecutionProvider = new ToolStripComboBox();
+            this.toolStripMenuItem_onnxHideCmd = new ToolStripMenuItem();
             this.rerouteAPILlamacppOllamaToolStripMenuItem = new ToolStripMenuItem();
             this.toolStripMenuItem_openAiApi = new ToolStripMenuItem();
             this.toolStripTextBox_openAiApiUrl = new ToolStripTextBox();
@@ -189,7 +207,7 @@
             // 
             // contextMenuStrip_widget
             // 
-            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.diagramColorToolStripMenuItem, this.toolStripMenuItem_opacity, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.toolStripSeparator5, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.toolStripMenuItem_execModelLoadBat, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.smartPromptOptimizationsToolStripMenuItem, this.toolStripSeparator2, this.toolStripMenuItem_remapAnyKey, this.toolStripSeparator6, this.openDebugConsoleToolStripMenuItem });
+            this.contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { this.updateIntervalToolStripMenuItem, this.diagramColorToolStripMenuItem, this.toolStripMenuItem_opacity, this.showUsageToolStripMenuItem, this.alwaysOnTopToolStripMenuItem, this.trafficThresholdToolStripMenuItem, this.toolStripSeparator5, this.driveSpeedTestToolStripMenuItem, this.toolStripSeparator1, this.toolStripMenuItem_loadLlamaCppServer, this.toolStripMenuItem_execModelLoadBat, this.toolStripMenuItem_loadOnnxGenaiServer, this.rerouteAPILlamacppOllamaToolStripMenuItem, this.smartPromptOptimizationsToolStripMenuItem, this.toolStripSeparator2, this.toolStripMenuItem_remapAnyKey, this.toolStripSeparator6, this.openDebugConsoleToolStripMenuItem });
             this.contextMenuStrip_widget.Name = "contextMenuStrip_widget";
             this.contextMenuStrip_widget.Size = new Size(275, 336);
             this.contextMenuStrip_widget.Text = "Settings";
@@ -736,6 +754,118 @@
             this.toolStripMenuItem_execModelLoadBat.Text = "📜 Execute Model Load .BAT";
             this.toolStripMenuItem_execModelLoadBat.Click += this.toolStripMenuItem_execModelLoadBat_Click;
             // 
+            // toolStripMenuItem_loadOnnxGenaiServer
+            // 
+            this.toolStripMenuItem_loadOnnxGenaiServer.DropDownItems.AddRange(new ToolStripItem[] { this.toolStripMenuItem_onnxModelRootDir, this.toolStripComboBox_onnxModels, this.toolStripMenuItem_onnxContextLength, this.toolStripMenuItem_onnxMaxTokens, this.toolStripMenuItem_onnxTemperature, this.toolStripMenuItem_onnxTopP, this.toolStripMenuItem_onnxTopK, this.toolStripMenuItem_onnxRepeatPenalty, this.toolStripComboBox_onnxExecutionProvider, this.toolStripMenuItem_onnxHideCmd });
+            this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = false;
+            this.toolStripMenuItem_loadOnnxGenaiServer.Name = "toolStripMenuItem_loadOnnxGenaiServer";
+            this.toolStripMenuItem_loadOnnxGenaiServer.Size = new Size(274, 22);
+            this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server (checking...)";
+            this.toolStripMenuItem_loadOnnxGenaiServer.Click += this.toolStripMenuItem_loadOnnxGenaiServer_Click;
+            // 
+            // ONNX option submenus
+            // 
+            this.toolStripMenuItem_onnxModelRootDir.DropDownItems.Add(this.toolStripTextBox_onnxModelRootDir);
+            this.toolStripMenuItem_onnxModelRootDir.Name = "toolStripMenuItem_onnxModelRootDir";
+            this.toolStripMenuItem_onnxModelRootDir.Size = new Size(274, 22);
+            this.toolStripMenuItem_onnxModelRootDir.Text = "Model Root Directory";
+            this.toolStripMenuItem_onnxContextLength.DropDownItems.Add(this.toolStripTextBox_onnxContextLength);
+            this.toolStripMenuItem_onnxContextLength.Name = "toolStripMenuItem_onnxContextLength";
+            this.toolStripMenuItem_onnxContextLength.Size = new Size(274, 22);
+            this.toolStripMenuItem_onnxContextLength.Text = "Context Length";
+            this.toolStripMenuItem_onnxMaxTokens.DropDownItems.Add(this.toolStripTextBox_onnxMaxTokens);
+            this.toolStripMenuItem_onnxMaxTokens.Name = "toolStripMenuItem_onnxMaxTokens";
+            this.toolStripMenuItem_onnxMaxTokens.Size = new Size(274, 22);
+            this.toolStripMenuItem_onnxMaxTokens.Text = "Max Tokens";
+            this.toolStripMenuItem_onnxTemperature.DropDownItems.Add(this.toolStripTextBox_onnxTemperature);
+            this.toolStripMenuItem_onnxTemperature.Name = "toolStripMenuItem_onnxTemperature";
+            this.toolStripMenuItem_onnxTemperature.Size = new Size(274, 22);
+            this.toolStripMenuItem_onnxTemperature.Text = "Temperature";
+            this.toolStripMenuItem_onnxTopP.DropDownItems.Add(this.toolStripTextBox_onnxTopP);
+            this.toolStripMenuItem_onnxTopP.Name = "toolStripMenuItem_onnxTopP";
+            this.toolStripMenuItem_onnxTopP.Size = new Size(274, 22);
+            this.toolStripMenuItem_onnxTopP.Text = "Top P";
+            this.toolStripMenuItem_onnxTopK.DropDownItems.Add(this.toolStripTextBox_onnxTopK);
+            this.toolStripMenuItem_onnxTopK.Name = "toolStripMenuItem_onnxTopK";
+            this.toolStripMenuItem_onnxTopK.Size = new Size(274, 22);
+            this.toolStripMenuItem_onnxTopK.Text = "Top K";
+            this.toolStripMenuItem_onnxRepeatPenalty.DropDownItems.Add(this.toolStripTextBox_onnxRepeatPenalty);
+            this.toolStripMenuItem_onnxRepeatPenalty.Name = "toolStripMenuItem_onnxRepeatPenalty";
+            this.toolStripMenuItem_onnxRepeatPenalty.Size = new Size(274, 22);
+            this.toolStripMenuItem_onnxRepeatPenalty.Text = "Repeat Penalty";
+            // toolStripTextBox_onnxModelRootDir
+            // 
+            this.toolStripTextBox_onnxModelRootDir.Name = "toolStripTextBox_onnxModelRootDir";
+            this.toolStripTextBox_onnxModelRootDir.Size = new Size(280, 23);
+            this.toolStripTextBox_onnxModelRootDir.Text = "D:\\Models\\ONNX";
+            this.toolStripTextBox_onnxModelRootDir.KeyDown += this.toolStripTextBox_onnxModelRootDir_KeyDown;
+            // 
+            // toolStripComboBox_onnxModels
+            // 
+            this.toolStripComboBox_onnxModels.Name = "toolStripComboBox_onnxModels";
+            this.toolStripComboBox_onnxModels.Size = new Size(280, 23);
+            this.toolStripComboBox_onnxModels.Text = "Select an ONNX model";
+            this.toolStripComboBox_onnxModels.SelectedIndexChanged += this.toolStripComboBox_onnxModels_SelectedIndexChanged;
+            // 
+            // toolStripTextBox_onnxContextLength
+            // 
+            this.toolStripTextBox_onnxContextLength.Name = "toolStripTextBox_onnxContextLength";
+            this.toolStripTextBox_onnxContextLength.Size = new Size(100, 23);
+            this.toolStripTextBox_onnxContextLength.Text = "4096";
+            this.toolStripTextBox_onnxContextLength.KeyDown += this.toolStripTextBox_onnxContextLength_KeyDown;
+            // 
+            // toolStripTextBox_onnxMaxTokens
+            // 
+            this.toolStripTextBox_onnxMaxTokens.Name = "toolStripTextBox_onnxMaxTokens";
+            this.toolStripTextBox_onnxMaxTokens.Size = new Size(100, 23);
+            this.toolStripTextBox_onnxMaxTokens.Text = "1024";
+            this.toolStripTextBox_onnxMaxTokens.KeyDown += this.toolStripTextBox_onnxMaxTokens_KeyDown;
+            // 
+            // toolStripTextBox_onnxTemperature
+            // 
+            this.toolStripTextBox_onnxTemperature.Name = "toolStripTextBox_onnxTemperature";
+            this.toolStripTextBox_onnxTemperature.Size = new Size(100, 23);
+            this.toolStripTextBox_onnxTemperature.Text = "0.8";
+            this.toolStripTextBox_onnxTemperature.KeyDown += this.toolStripTextBox_onnxTemperature_KeyDown;
+            // 
+            // toolStripTextBox_onnxTopP
+            // 
+            this.toolStripTextBox_onnxTopP.Name = "toolStripTextBox_onnxTopP";
+            this.toolStripTextBox_onnxTopP.Size = new Size(100, 23);
+            this.toolStripTextBox_onnxTopP.Text = "0.9";
+            this.toolStripTextBox_onnxTopP.KeyDown += this.toolStripTextBox_onnxTopP_KeyDown;
+            // 
+            // toolStripTextBox_onnxTopK
+            // 
+            this.toolStripTextBox_onnxTopK.Name = "toolStripTextBox_onnxTopK";
+            this.toolStripTextBox_onnxTopK.Size = new Size(100, 23);
+            this.toolStripTextBox_onnxTopK.Text = "40";
+            this.toolStripTextBox_onnxTopK.KeyDown += this.toolStripTextBox_onnxTopK_KeyDown;
+            // 
+            // toolStripTextBox_onnxRepeatPenalty
+            // 
+            this.toolStripTextBox_onnxRepeatPenalty.Name = "toolStripTextBox_onnxRepeatPenalty";
+            this.toolStripTextBox_onnxRepeatPenalty.Size = new Size(100, 23);
+            this.toolStripTextBox_onnxRepeatPenalty.Text = "1.1";
+            this.toolStripTextBox_onnxRepeatPenalty.KeyDown += this.toolStripTextBox_onnxRepeatPenalty_KeyDown;
+            // 
+            // toolStripComboBox_onnxExecutionProvider
+            // 
+            this.toolStripComboBox_onnxExecutionProvider.Name = "toolStripComboBox_onnxExecutionProvider";
+            this.toolStripComboBox_onnxExecutionProvider.Size = new Size(120, 23);
+            this.toolStripComboBox_onnxExecutionProvider.Items.AddRange(new object[] { "-Provider-", "Dml", "Cuda", "CPU" });
+            this.toolStripComboBox_onnxExecutionProvider.SelectedIndexChanged += this.toolStripComboBox_onnxExecutionProvider_SelectedIndexChanged;
+            // 
+            // toolStripMenuItem_onnxHideCmd
+            // 
+            this.toolStripMenuItem_onnxHideCmd.CheckOnClick = true;
+            this.toolStripMenuItem_onnxHideCmd.Name = "toolStripMenuItem_onnxHideCmd";
+            this.toolStripMenuItem_onnxHideCmd.Size = new Size(274, 22);
+            this.toolStripMenuItem_onnxHideCmd.Text = "Hide Console";
+            this.toolStripMenuItem_onnxHideCmd.CheckedChanged += this.toolStripMenuItem_onnxHideCmd_CheckedChanged;
+            // 
+            // toolStripComboBox_modelLoadBats
+            // 
             // toolStripComboBox_modelLoadBats
             // 
             this.toolStripComboBox_modelLoadBats.Name = "toolStripComboBox_modelLoadBats";
@@ -1250,6 +1380,24 @@
         private ToolStripMenuItem toolStripMenuItem_thinking;
         private ToolStripMenuItem toolStripMenuItem_execModelLoadBat;
         private ToolStripComboBox toolStripComboBox_modelLoadBats;
+        private ToolStripMenuItem toolStripMenuItem_loadOnnxGenaiServer;
+        private ToolStripMenuItem toolStripMenuItem_onnxModelRootDir;
+        private ToolStripMenuItem toolStripMenuItem_onnxContextLength;
+        private ToolStripMenuItem toolStripMenuItem_onnxMaxTokens;
+        private ToolStripMenuItem toolStripMenuItem_onnxTemperature;
+        private ToolStripMenuItem toolStripMenuItem_onnxTopP;
+        private ToolStripMenuItem toolStripMenuItem_onnxTopK;
+        private ToolStripMenuItem toolStripMenuItem_onnxRepeatPenalty;
+        private ToolStripTextBox toolStripTextBox_onnxModelRootDir;
+        private ToolStripComboBox toolStripComboBox_onnxModels;
+        private ToolStripTextBox toolStripTextBox_onnxContextLength;
+        private ToolStripTextBox toolStripTextBox_onnxMaxTokens;
+        private ToolStripTextBox toolStripTextBox_onnxTemperature;
+        private ToolStripTextBox toolStripTextBox_onnxTopP;
+        private ToolStripTextBox toolStripTextBox_onnxTopK;
+        private ToolStripTextBox toolStripTextBox_onnxRepeatPenalty;
+        private ToolStripComboBox toolStripComboBox_onnxExecutionProvider;
+        private ToolStripMenuItem toolStripMenuItem_onnxHideCmd;
         private ToolStripMenuItem toolStripMenuItem_openAiApi;
         private ToolStripTextBox toolStripTextBox_openAiApiUrl;
         private ToolStripSeparator toolStripSeparator4;
