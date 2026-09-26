@@ -182,6 +182,13 @@ class InferenceEngine:
             self.adapter,
         )
 
+    def reset_context(self, context: ContextState) -> None:
+        """
+        Reset a context: clear conversation, generated tokens, and inference state.
+        The model session, tokenizer, and adapter remain loaded (no model reload).
+        """
+        context.reset()
+
     def available_providers(self) -> tuple[str, ...]:
         import onnxruntime as ort
         return tuple(ort.get_available_providers())

@@ -35,13 +35,14 @@ class ContextSnapshotStore:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        cpu_state = adapter.state_to_cpu(context.model_state)
+        cpu_state = context.inference_state.to_cpu()
 
         metadata = {
             "token_ids": context.token_ids,
             "messages": context.messages,
             "generated_token_ids": context.generated_token_ids,
             "state_keys": list(cpu_state.keys()),
+            "is_partitioned": context.inference_state.is_partitioned,
         }
 
         np_payload: dict[str, Any] = {
@@ -76,5 +77,7 @@ class ContextSnapshotStore:
                 for value in metadata["generated_token_ids"]
             ],
         )
-        context.model_state = adapter.state_from_cpu(cpu_state)
+        # Restore state via InferenceState (uses adapter's device_id)
+        device_id = adapter._device_id
+        context.inference_state.from_cpu(cpu_state, device_id)
         return context

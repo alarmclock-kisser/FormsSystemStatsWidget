@@ -14,7 +14,7 @@ from .generation import (
     SamplingConfig,
     StopConfig,
 )
-from .context import Conversation, ContextSnapshotStore, ContextState
+from .context import Conversation, ContextSnapshotStore, ContextState, InferenceState
 from .runtime import CudaRuntimeConfig, SessionRuntimeConfig
 
 __all__ = [
@@ -33,6 +33,7 @@ __all__ = [
     "Conversation",
     "ContextSnapshotStore",
     "ContextState",
+    "InferenceState",
     "CudaRuntimeConfig",
     "SessionRuntimeConfig",
 ]
