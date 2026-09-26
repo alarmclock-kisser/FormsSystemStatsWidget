@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\FormsSystemStatsWidget.Core\FormsSystemStatsWidget.Core.csproj" />
+    <ProjectReference Include="..\FormsSystemStatsWidget.OnnxGenaiServer\FormsSystemStatsWidget.OnnxGenaiServer.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
@@ -49,5 +50,19 @@
     <Folder Include="Ressources\Logs\" />
     <Folder Include="Ressources\LlamaCppLoad_BATs\" />
   </ItemGroup>
+
+  <Target Name="CopyOnnxGenaiServerForWidgetBuild" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <OnnxGenaiServerBuildFiles Include="$(MSBuildProjectDirectory)\..\FormsSystemStatsWidget.OnnxGenaiServer\bin\$(Configuration)\net10.0\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(OnnxGenaiServerBuildFiles)" DestinationFiles="@(OnnxGenaiServerBuildFiles->'$(TargetDir)OnnxGenaiServer\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishOnnxGenaiServerForWidget" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">
+    <!-- OnnxGenaiServer ist net10.0 (Web-SDK) ohne -windows: kein RID-Publish,
+         stattdessen framework-dependent, damit project.assets.json nicht nach
+         einem win-x64-Ziel sucht, das es nie hatte. -->
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\FormsSystemStatsWidget.OnnxGenaiServer\FormsSystemStatsWidget.OnnxGenaiServer.csproj" Targets="Publish" Properties="Configuration=$(Configuration);SelfContained=false;PublishSingleFile=false;PublishDir=$(PublishDir)OnnxGenaiServer\" />
+  </Target>
 
 </Project>

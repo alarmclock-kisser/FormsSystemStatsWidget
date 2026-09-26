@@ -59,6 +59,8 @@ namespace FormsSystemStatsWidget.Forms
         private bool _explicitWidgetCloseRequested;
         private bool _onnxSettingsInitialized;
         private bool _refreshingOnnxModels;
+        private bool _onnxPythonEnvironmentCheckCompleted;
+        private bool _onnxPythonEnvironmentReady;
         private Process? _llamaServerProcess;
         private readonly HashSet<Keys> _processingKeys = [];
         private static readonly Regex TokensPerSecondRegex = MyRegex();
@@ -148,8 +150,8 @@ namespace FormsSystemStatsWidget.Forms
         }
 
         /// <summary>
-        /// Einmaliger Python-Env-Check am Widget-Startup. Bei Fehler wird der
-        /// ONNX-Loader-Contextmenu-Eintrag ausgegraut (disabled).
+        /// Einmaliger Python-Env-Check am Widget-Startup. Ein bereits laufender
+        /// Server bleibt unabhängig vom Ergebnis sofort beendbar.
         /// </summary>
         private async Task CheckOnnxPythonEnvironmentAtStartupAsync()
         {
@@ -160,17 +162,17 @@ namespace FormsSystemStatsWidget.Forms
                 // UI-Update auf dem UI-Thread
                 this.Invoke((System.Windows.Forms.MethodInvoker)delegate
                 {
+                    this._onnxPythonEnvironmentCheckCompleted = true;
+                    this._onnxPythonEnvironmentReady = success;
+                    this.UpdateOnnxGenaiServerMenuState();
+
                     if (success)
                     {
-                        this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = true;
-                        this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server";
                         Logger.Log("[ONNX] Python env check succeeded. ONNX loader entry enabled.");
                     }
                     else
                     {
-                        this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = false;
-                        this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server (Python Env Failed)";
-                        Logger.Log("[ONNX] Python env check failed. ONNX loader entry disabled.");
+                        Logger.Log("[ONNX] Python env check failed. Loading is disabled unless an ONNX server is already running; Kill remains available.");
                     }
                 });
             }
@@ -178,8 +180,9 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.Invoke((System.Windows.Forms.MethodInvoker)delegate
                 {
-                    this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = false;
-                    this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server (Python Env fehlgeschlagen)";
+                    this._onnxPythonEnvironmentCheckCompleted = true;
+                    this._onnxPythonEnvironmentReady = false;
+                    this.UpdateOnnxGenaiServerMenuState();
                     Logger.Log($"[ONNX] Python-Env-Check Exception: {ex.Message}. ONNX-Loader-Eintrag deaktiviert.");
                 });
             }
@@ -362,7 +365,11 @@ namespace FormsSystemStatsWidget.Forms
             string persistedEp = this._persistentSettings.OnnxExecutionProvider;
             int epIndex = this.toolStripComboBox_onnxExecutionProvider.Items.IndexOf(persistedEp);
             this.toolStripComboBox_onnxExecutionProvider.SelectedIndex = epIndex >= 0 ? epIndex : -1;
-            if (epIndex < 0) this.toolStripComboBox_onnxExecutionProvider.Text = string.Empty;
+            if (epIndex < 0)
+            {
+                this.toolStripComboBox_onnxExecutionProvider.Text = string.Empty;
+            }
+
             this.toolStripMenuItem_onnxHideCmd.Checked = this._persistentSettings.OnnxHideConsole;
 
             this.toolStripTextBox_opacity.Text = this._persistentSettings.WindowOpacity.ToString() + "%";
@@ -612,19 +619,41 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_execModelLoadBat.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.openDebugConsoleToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.toolStripMenuItem_loadOnnxGenaiServer.DropDown.Closing += this.KeepOnnxSubMenuOpenForInputInteractions;
+            this.toolStripMenuItem_onnxHideCmd.CheckedChanged += this.FlagOnnxHideConsoleToggled;
+        }
+
+        /// <summary>
+        /// Bei CheckOnClick läuft CheckedChanged vor dem internen Close –
+        /// hier die Flag setzen, damit das Submenü beim Klick auf "Hide Console" offen bleibt.
+        /// </summary>
+        private void FlagOnnxHideConsoleToggled(object? sender, EventArgs e)
+        {
+            this._keepOnnxSubMenuOpenAfterHideConsoleClick = true;
         }
 
         /// <summary>
         /// ONNX-Submenüs bleiben geöffnet, solange der User in einem Eingabefeld
-        /// (TextBox/ComboBox) interagiert. Ein Klick auf ein reines Menü-Item
-        /// (z.B. "Hide Console") schließt das Menü weiterhin normal.
+        /// (TextBox/ComboBox) interagiert oder auf "Hide Console" klickt.
         /// </summary>
         private void KeepOnnxSubMenuOpenForInputInteractions(object? sender, ToolStripDropDownClosingEventArgs e)
         {
-            if (e.CloseReason != ToolStripDropDownCloseReason.ItemClicked) return;
+            if (e.CloseReason != ToolStripDropDownCloseReason.ItemClicked)
+            {
+                return;
+            }
+
+            if (this._keepOnnxSubMenuOpenAfterHideConsoleClick)
+            {
+                this._keepOnnxSubMenuOpenAfterHideConsoleClick = false;
+                e.Cancel = true;
+                return;
+            }
 
             Control? active = this.ActiveControl;
-            if (active is null) return;
+            if (active is null)
+            {
+                return;
+            }
 
             bool isOnnxInput =
                 ReferenceEquals(active, this.toolStripTextBox_onnxModelRootDir) ||
@@ -637,7 +666,10 @@ namespace FormsSystemStatsWidget.Forms
                 ReferenceEquals(active, this.toolStripTextBox_onnxRepeatPenalty) ||
                 ReferenceEquals(active, this.toolStripComboBox_onnxExecutionProvider);
 
-            if (isOnnxInput) e.Cancel = true;
+            if (isOnnxInput)
+            {
+                e.Cancel = true;
+            }
         }
 
         private void KeepSelectedSubMenuOpenForItemClicks(object? sender, ToolStripDropDownClosingEventArgs e)
@@ -1161,6 +1193,35 @@ namespace FormsSystemStatsWidget.Forms
         }
 
 
+        private void UpdateOnnxGenaiServerMenuState()
+        {
+            List<Process> processes = WidgetStatics.GetOnnxGenaiServerProcesses();
+            int processCount = processes.Count;
+            foreach (Process process in processes)
+            {
+                process.Dispose();
+            }
+
+            bool serverRunning = processCount > 0;
+            this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = serverRunning
+                || (this._onnxPythonEnvironmentCheckCompleted && this._onnxPythonEnvironmentReady);
+            this.toolStripMenuItem_loadOnnxGenaiServer.Text = serverRunning
+                ? $"Kill ONNX Server ({processCount})"
+                : !this._onnxPythonEnvironmentCheckCompleted
+                    ? "🔮 Load ONNX-Genai Server (checking...)"
+                    : this._onnxPythonEnvironmentReady
+                        ? "🔮 Load ONNX-Genai Server"
+                        : "🔮 Load ONNX-Genai Server (Python Env Failed)";
+            this.toolStripMenuItem_loadOnnxGenaiServer.ForeColor = serverRunning
+                ? Color.Red
+                : SystemColors.ControlText;
+
+            foreach (ToolStripItem item in this.toolStripMenuItem_loadOnnxGenaiServer.DropDownItems)
+            {
+                item.Visible = !serverRunning;
+            }
+        }
+
         // Init / Update / Fill ctxmenu items etc.
         private void contextMenuStrip_widget_Opening(object sender, System.ComponentModel.CancelEventArgs e)
         {
@@ -1213,30 +1274,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;
             }
 
-            // ONNX-GenAI Server process management
-            var onnxGenaiProcesses = WidgetStatics.GetOnnxGenaiServerProcesses();
-            if (onnxGenaiProcesses.Count > 0)
-            {
-                this.toolStripMenuItem_loadOnnxGenaiServer.Text = $"Kill ONNX-GenAI Server ({onnxGenaiProcesses.Count})";
-                this.toolStripMenuItem_loadOnnxGenaiServer.ForeColor = Color.Red;
-
-                foreach (ToolStripItem item in this.toolStripMenuItem_loadOnnxGenaiServer.DropDownItems)
-                {
-                    item.Visible = false;
-                }
-
-            }
-            else
-            {
-                this.toolStripMenuItem_loadOnnxGenaiServer.Text = "🔮 Load ONNX-Genai Server";
-                this.toolStripMenuItem_loadOnnxGenaiServer.ForeColor = SystemColors.ControlText;
-
-                foreach (ToolStripItem item in this.toolStripMenuItem_loadOnnxGenaiServer.DropDownItems)
-                {
-                    item.Visible = true;
-                }
-
-            }
+            this.UpdateOnnxGenaiServerMenuState();
 
 
             // Get & fill all .BAT files from EXE directory \ llama.cpp_load_BATs \ 

@@ -274,7 +274,10 @@ public static class EnvironmentDiscovery
             };
 
             using var process = Process.Start(psi);
-            if (process is null) return string.Empty;
+            if (process is null)
+            {
+                return string.Empty;
+            }
 
             var output = process.StandardOutput.ReadToEnd();
             process.WaitForExit(10000);

@@ -19,7 +19,9 @@ internal sealed class EngineProcessRegistry
     {
         var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(configuredPath) && string.IsNullOrWhiteSpace(localApplicationData))
+        {
             throw new InvalidOperationException("LocalApplicationData is unavailable for the ONNX process registry.");
+        }
 
         _registryPath = string.IsNullOrWhiteSpace(configuredPath)
             ? Path.Combine(localApplicationData, "FormsSystemStatsWidget", "onnx-engine", "engine-processes.json")
@@ -50,7 +52,9 @@ internal sealed class EngineProcessRegistry
             }
 
             if (!ownsMutex)
+            {
                 throw new TimeoutException($"Timed out waiting for ONNX process registry lock {_mutexName}.");
+            }
 
             var entries = ReadEntries();
             var result = operation(entries);
@@ -60,7 +64,9 @@ internal sealed class EngineProcessRegistry
         finally
         {
             if (ownsMutex)
+            {
                 mutex.ReleaseMutex();
+            }
         }
     }
 
@@ -79,7 +85,10 @@ internal sealed class EngineProcessRegistry
         {
             var entry = entries.FirstOrDefault(candidate => candidate.InstanceId == instanceId.ToString("D"));
             if (entry is not null)
+            {
                 update(entry);
+            }
+
             return true;
         });
     }
@@ -87,14 +96,19 @@ internal sealed class EngineProcessRegistry
     private List<EngineProcessEntry> ReadEntries()
     {
         if (!File.Exists(_registryPath))
+        {
             return [];
+        }
 
         try
         {
             using var stream = File.OpenRead(_registryPath);
             var document = JsonSerializer.Deserialize<EngineProcessRegistryDocument>(stream, SerializerOptions);
             if (document is null || document.Version != 1 || document.Processes is null)
+            {
                 throw new JsonException("Unsupported or incomplete registry document.");
+            }
+
             return document.Processes;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
@@ -140,7 +154,9 @@ internal sealed class EngineProcessRegistry
         finally
         {
             if (File.Exists(temporaryPath))
+            {
                 File.Delete(temporaryPath);
+            }
         }
     }
 }

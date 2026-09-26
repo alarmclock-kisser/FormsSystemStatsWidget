@@ -86,6 +86,7 @@ namespace FormsSystemStatsWidget.Forms
 
         public string OnnxModelRootDirectory { get; set; } = @"D:\Models\ONNX";
         public string OnnxModel { get; set; } = string.Empty;
+        public string OnnxModelLayout { get; set; } = "Auto";
         public int OnnxContextLength { get; set; } = 4096;
         public int OnnxMaxTokens { get; set; } = 1024;
         public double OnnxTemperature { get; set; } = 0.8;

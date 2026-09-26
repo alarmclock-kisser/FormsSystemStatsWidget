@@ -27,6 +27,11 @@ public sealed class OnnxGenaiServerOptions
     public string DefaultModel { get; set; } = string.Empty;
 
     /// <summary>
+    /// ONNX package layout: Auto (prefer discovered partitions), Main, or Partitioned.
+    /// </summary>
+    public string ModelLayout { get; set; } = "Auto";
+
+    /// <summary>
     /// ONNX Runtime Execution Provider. Für CUDA-int4-Quantisierung: "Dml" (DirectML) oder "Cuda".
     /// </summary>
     public string ExecutionProvider { get; set; } = "Dml";

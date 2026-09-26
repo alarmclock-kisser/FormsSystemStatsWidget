@@ -47,12 +47,14 @@ class InferenceEngine:
         trust_remote_code: bool = False,
         allow_cpu_fallback: bool = False,
         preload_cuda_dll_dependencies: bool = True,
+        model_layout: str = "auto",
     ) -> None:
         self._model_path = Path(model_path)
         self._cuda = cuda or CudaRuntimeConfig()
         self._session_config = session
         self._allow_cpu_fallback = allow_cpu_fallback
         self._preload_cuda_dll_dependencies = preload_cuda_dll_dependencies
+        self._model_layout = model_layout
         self._session_manager = self._new_session_manager(self._cuda)
         self._stage1_session_manager: OrtSessionManager | None = None
         self._trust_remote_code = trust_remote_code
@@ -99,7 +101,7 @@ class InferenceEngine:
         if self._package is not None:
             return
 
-        package = ModelPackageLoader().load(self._model_path)
+        package = ModelPackageLoader().load(self._model_path, layout=self._model_layout)
         if package.stage0_path is not None or package.stage1_path is not None:
             if package.stage0_path is None or package.stage1_path is None:
                 raise ModelValidationError("Both partitioned ONNX stages are required.")

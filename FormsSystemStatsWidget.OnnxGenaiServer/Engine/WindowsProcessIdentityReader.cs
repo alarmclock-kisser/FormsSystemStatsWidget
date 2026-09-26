@@ -52,17 +52,23 @@ internal static class WindowsProcessIdentityReader
     {
         identity = null;
         if (!OperatingSystem.IsWindows())
+        {
             return false;
+        }
 
         IntPtr handle = IntPtr.Zero;
         try
         {
             handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, (uint)process.Id);
             if (handle == IntPtr.Zero || !IsWow64Process(handle, out var isWow64))
+            {
                 return false;
+            }
 
             if (!Environment.Is64BitProcess || isWow64)
+            {
                 return false;
+            }
 
             var status = NtQueryInformationProcess(
                 handle,
@@ -71,20 +77,26 @@ internal static class WindowsProcessIdentityReader
                 Marshal.SizeOf<ProcessBasicInformation>(),
                 out _);
             if (status != 0 || basicInformation.PebBaseAddress == IntPtr.Zero)
+            {
                 return false;
+            }
 
             var processParametersAddress = ReadPointer(
                 handle,
                 IntPtr.Add(basicInformation.PebBaseAddress, PebProcessParametersOffset64));
             if (processParametersAddress == IntPtr.Zero)
+            {
                 return false;
+            }
 
             var commandLineAddress = IntPtr.Add(
                 processParametersAddress,
                 ProcessParametersCommandLineOffset64);
             var unicodeString = ReadStructure<UnicodeString>(handle, commandLineAddress);
             if (unicodeString.Buffer == IntPtr.Zero || unicodeString.Length == 0)
+            {
                 return false;
+            }
 
             var commandLineBuffer = Marshal.AllocHGlobal(unicodeString.Length);
             try
@@ -103,7 +115,9 @@ internal static class WindowsProcessIdentityReader
                 var commandLine = Marshal.PtrToStringUni(commandLineBuffer, unicodeString.Length / 2);
                 var executablePath = process.MainModule?.FileName;
                 if (string.IsNullOrWhiteSpace(commandLine) || string.IsNullOrWhiteSpace(executablePath))
+                {
                     return false;
+                }
 
                 identity = new WindowsProcessIdentity(
                     process.Id,
@@ -128,7 +142,9 @@ internal static class WindowsProcessIdentityReader
         finally
         {
             if (handle != IntPtr.Zero)
+            {
                 CloseHandle(handle);
+            }
         }
     }
 
@@ -137,7 +153,9 @@ internal static class WindowsProcessIdentityReader
         arguments = [];
         var values = CommandLineToArgvW(commandLine, out var count);
         if (values == IntPtr.Zero)
+        {
             return false;
+        }
 
         try
         {

@@ -45,7 +45,13 @@ class ModelPackageLoader:
         "processor_config.json",
     )
 
-    def load(self, path: str | Path) -> ModelPackage:
+    def load(self, path: str | Path, *, layout: str = "auto") -> ModelPackage:
+        normalized_layout = layout.strip().casefold()
+        if normalized_layout not in {"auto", "main", "partitioned"}:
+            raise ModelValidationError(
+                f"Unsupported model layout {layout!r}; expected auto, main, or partitioned."
+            )
+
         root = Path(path).resolve()
 
         if root.is_file() and root.suffix.lower() == ".onnx":
@@ -54,8 +60,8 @@ class ModelPackageLoader:
         if not root.is_dir():
             raise FileNotFoundError(f"Model package directory not found: {root}")
 
-        model_path = self._find_model(root)
-        stage0_path, stage1_path = self._find_partitioned_models(root)
+        model_path = self._find_model(root, allow_nested=normalized_layout != "main")
+        stage0_path, stage1_path = self._find_partitioned_models(root, normalized_layout)
         json_data = self._load_json_files(root)
 
         chat_template, extra_chat_templates = self._load_chat_templates(root)
@@ -81,14 +87,17 @@ class ModelPackageLoader:
         )
 
     @staticmethod
-    def _find_partitioned_models(root: Path) -> tuple[Path | None, Path | None]:
+    def _find_partitioned_models(root: Path, layout: str) -> tuple[Path | None, Path | None]:
+        if layout == "main":
+            return None, None
+
         partition_root = root / "partitioned"
         stage0_path = partition_root / "model.stage0.onnx"
         stage1_path = partition_root / "model.stage1.onnx"
         has_stage0 = stage0_path.is_file()
         has_stage1 = stage1_path.is_file()
 
-        if not has_stage0 and not has_stage1:
+        if not has_stage0 and not has_stage1 and layout == "auto":
             return None, None
         if not has_stage0 or not has_stage1:
             raise ModelValidationError(
@@ -97,13 +106,13 @@ class ModelPackageLoader:
         return stage0_path, stage1_path
 
     @staticmethod
-    def _find_model(root: Path) -> Path:
+    def _find_model(root: Path, *, allow_nested: bool = True) -> Path:
         preferred = root / "model.onnx"
         if preferred.is_file():
             return preferred
 
         candidates = sorted(root.glob("*.onnx"))
-        if not candidates:
+        if not candidates and allow_nested:
             candidates = sorted(root.rglob("*.onnx"))
 
         if not candidates:

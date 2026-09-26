@@ -540,7 +540,11 @@ public static class OnnxValidator
             var b = data[pos];
             result |= (b & 0x7F) << shift;
             length++;
-            if ((b & 0x80) == 0) break;
+            if ((b & 0x80) == 0)
+            {
+                break;
+            }
+
             shift += 7;
             pos++;
         }
@@ -557,7 +561,11 @@ public static class OnnxValidator
             var b = data[pos];
             result |= (long)(b & 0x7F) << shift;
             length++;
-            if ((b & 0x80) == 0) break;
+            if ((b & 0x80) == 0)
+            {
+                break;
+            }
+
             shift += 7;
             pos++;
         }

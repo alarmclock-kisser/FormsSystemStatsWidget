@@ -11,13 +11,21 @@ namespace FormsSystemStatsWidget.Forms
 {
     public partial class WindowWidget
     {
+        private const string MainModelLayout = "Main";
+        private const string PartitionedModelLayout = "Partitioned";
         private Process? _onnxGenaiServerProcess;
+        private bool _keepOnnxSubMenuOpenAfterHideConsoleClick;
+
+        private sealed record OnnxModelChoice(string ModelId, string Layout, string DisplayName)
+        {
+            public override string ToString() => this.DisplayName;
+        }
 
         // ------------------------------------------------------------------
         // Contextmenu: "Load ONNX-Genai Server"
         // ------------------------------------------------------------------
 
-        private async void toolStripMenuItem_loadOnnxGenaiServer_Click(object? sender, EventArgs e)
+        private void toolStripMenuItem_loadOnnxGenaiServer_Click(object? sender, EventArgs e)
         {
             if (WidgetStatics.GetOnnxGenaiServerProcesses().Count > 0)
             {
@@ -26,7 +34,8 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             string modelRootDir = this.toolStripTextBox_onnxModelRootDir.Text.Trim();
-            string? selectedModel = this.toolStripComboBox_onnxModels.SelectedItem as string ?? this.toolStripComboBox_onnxModels.Text.Trim();
+            OnnxModelChoice? selectedChoice = this.toolStripComboBox_onnxModels.SelectedItem as OnnxModelChoice;
+            string selectedModel = selectedChoice?.ModelId ?? this.toolStripComboBox_onnxModels.Text.Trim();
 
             if (string.IsNullOrEmpty(modelRootDir) || !Directory.Exists(modelRootDir))
             {
@@ -47,11 +56,22 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
-            string? onnxPath = Directory.EnumerateFiles(modelRootPath, "*.onnx", SearchOption.TopDirectoryOnly)
-                .FirstOrDefault(f => !f.EndsWith(".onnx.data", StringComparison.OrdinalIgnoreCase));
-            if (onnxPath is null)
+            bool hasRootOnnx = Directory.EnumerateFiles(modelRootPath, "*.onnx", SearchOption.TopDirectoryOnly)
+                .Any(f => !f.EndsWith(".onnx.data", StringComparison.OrdinalIgnoreCase));
+            bool hasPartitionedStages = HasPartitionedOnnxStages(modelRootPath);
+            string modelLayout = selectedChoice?.Layout ?? this._persistentSettings.OnnxModelLayout;
+            if (modelLayout == "Auto")
             {
-                _ = MessageBox.Show(this, $"No .onnx file found in:\n{modelRootPath}", "No ONNX File", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                modelLayout = hasPartitionedStages ? "Partitioned" : "Main";
+            }
+            if (modelLayout == "Main" && !hasRootOnnx)
+            {
+                _ = MessageBox.Show(this, $"No main ONNX model found directly in:\n{modelRootPath}", "Main Model Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            if (modelLayout == "Partitioned" && !hasPartitionedStages)
+            {
+                _ = MessageBox.Show(this, $"Both partitioned stages were not found in:\n{Path.Combine(modelRootPath, "partitioned")}", "Partitioned Model Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -66,50 +86,57 @@ namespace FormsSystemStatsWidget.Forms
             {
                 executionProvider = "Dml";
             }
+            if (modelLayout == "Partitioned")
+            {
+                executionProvider = "Cuda";
+            }
             bool hideCmd = this.toolStripMenuItem_onnxHideCmd.Checked;
 
-            string pythonScript = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Scripts", "run_onnx_genai_server.py");
-            if (!File.Exists(pythonScript))
+            string serverDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "OnnxGenaiServer");
+            string serverExecutable = Path.Combine(serverDirectory, "FormsSystemStatsWidget.OnnxGenaiServer.exe");
+            string serverDll = Path.Combine(serverDirectory, "FormsSystemStatsWidget.OnnxGenaiServer.dll");
+            var startInfo = new ProcessStartInfo
             {
-                pythonScript = string.Empty;
+                WorkingDirectory = serverDirectory
+            };
+            if (File.Exists(serverExecutable))
+            {
+                startInfo.FileName = serverExecutable;
             }
-
-            string fullCommand;
-            if (!string.IsNullOrEmpty(pythonScript))
+            else if (File.Exists(serverDll))
             {
-                fullCommand = $"python \"{pythonScript}\" " +
-                    $"--model \"{onnxPath}\" " +
-                    $"--context-length {contextLength} " +
-                    $"--max-tokens {maxTokens} " +
-                    $"--temperature {temperature.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
-                    $"--top-p {topP.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
-                    $"--top-k {topK} " +
-                    $"--repeat-penalty {repeatPenalty.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
-                    $"--execution-provider {executionProvider}";
+                startInfo.FileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+                startInfo.ArgumentList.Add(serverDll);
             }
             else
             {
-                fullCommand = $"dotnet run --project \"{Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "FormsSystemStatsWidget.OnnxGenaiServer", "FormsSystemStatsWidget.OnnxGenaiServer.csproj")}\" " +
-                    $"--OnnxGenaiServer:DefaultModel={selectedModel} " +
-                    $"--OnnxGenaiServer:ModelRootDirectory={modelRootDir} " +
-                    $"--OnnxGenaiServer:ContextLength={contextLength} " +
-                    $"--OnnxGenaiServer:MaxTokens={maxTokens} " +
-                    $"--OnnxGenaiServer:Temperature={temperature.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
-                    $"--OnnxGenaiServer:TopP={topP.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
-                    $"--OnnxGenaiServer:TopK={topK} " +
-                    $"--OnnxGenaiServer:RepeatPenalty={repeatPenalty.ToString(System.Globalization.CultureInfo.InvariantCulture)} " +
-                    $"--OnnxGenaiServer:ExecutionProvider={executionProvider}";
+                _ = MessageBox.Show(this, $"ONNX GenAI server runtime was not found:\n{serverDirectory}\n\nPublish the Forms app with its bundled ONNX server.", "Server Runtime Missing", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:DefaultModel={selectedModel}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:ModelLayout={modelLayout}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:ModelRootDirectory={modelRootDir}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:ContextLength={contextLength}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:MaxTokens={maxTokens}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:Temperature={temperature.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:TopP={topP.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:TopK={topK}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:RepeatPenalty={repeatPenalty.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            startInfo.ArgumentList.Add($"--OnnxGenaiServer:ExecutionProvider={executionProvider}");
+
             DialogResult result = MessageBox.Show(this,
-                $"The following command will be executed to start the ONNX-Genai Server:\n\n{fullCommand}\n\nDo you want to proceed?",
+                $"Model package:\n{modelRootPath}\n\nLayout: {(modelLayout == "Partitioned" ? "partitioned; Stage 0 + Stage 1 on CUDA" : "main ONNX weights")}\nAPI server: {startInfo.FileName}\n\nStart the ONNX GenAI server?",
                 "Confirm ONNX-Genai Server Start", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-            if (result != DialogResult.Yes) return;
+            if (result != DialogResult.Yes)
+            {
+                return;
+            }
 
             try
             {
                 this._debugConsoleForm?.ClearLogs();
-                this.StartOnnxGenaiServerProcess(fullCommand, hideCmd);
+                this.StartOnnxGenaiServerProcess(startInfo, hideCmd);
             }
             catch (Exception ex)
             {
@@ -132,7 +159,7 @@ namespace FormsSystemStatsWidget.Forms
             var startInfo = new ProcessStartInfo
             {
                 FileName = "python",
-                Arguments = $"\"{scriptPath}\" --install --elevated",
+                Arguments = $"\"{scriptPath}\" --install",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -145,13 +172,27 @@ namespace FormsSystemStatsWidget.Forms
 
             process.OutputDataReceived += (_, e) =>
             {
-                if (e.Data == null) return;
-                lock (outputLock) output.AppendLine(e.Data);
+                if (e.Data == null)
+                {
+                    return;
+                }
+
+                lock (outputLock)
+                {
+                    output.AppendLine(e.Data);
+                }
             };
             process.ErrorDataReceived += (_, e) =>
             {
-                if (e.Data == null) return;
-                lock (outputLock) output.AppendLine(e.Data);
+                if (e.Data == null)
+                {
+                    return;
+                }
+
+                lock (outputLock)
+                {
+                    output.AppendLine(e.Data);
+                }
             };
 
             process.Start();
@@ -161,7 +202,10 @@ namespace FormsSystemStatsWidget.Forms
 
             int exitCode = process.ExitCode;
             string outputText;
-            lock (outputLock) outputText = output.ToString();
+            lock (outputLock)
+            {
+                outputText = output.ToString();
+            }
 
             Logger.Log($"[ONNX Python Env] Exit code: {exitCode}");
             Logger.Log(outputText);
@@ -283,46 +327,23 @@ namespace FormsSystemStatsWidget.Forms
         // ONNX-Genai-Server-Prozess starten
         // ------------------------------------------------------------------
 
-        private void StartOnnxGenaiServerProcess(string fullCommand, bool hideCmd)
+        private void StartOnnxGenaiServerProcess(ProcessStartInfo startInfo, bool hideCmd)
         {
-            if (string.IsNullOrWhiteSpace(fullCommand))
-                throw new InvalidOperationException("ONNX-Genai Server command is empty.");
+            if (string.IsNullOrWhiteSpace(startInfo.FileName))
+            {
+                throw new InvalidOperationException("ONNX-Genai Server executable is empty.");
+            }
 
             this.StopTrackedOnnxGenaiServerProcess();
 
             var cur = this.Cursor;
             this.Cursor = Cursors.WaitCursor;
 
-            string trimmed = fullCommand.Trim();
-            string executableName;
-            string arguments;
-
-            if (trimmed.StartsWith("python ", StringComparison.OrdinalIgnoreCase))
-            {
-                executableName = "python";
-                arguments = trimmed.Substring("python ".Length);
-            }
-            else if (trimmed.StartsWith("dotnet ", StringComparison.OrdinalIgnoreCase))
-            {
-                executableName = "dotnet";
-                arguments = trimmed.Substring("dotnet ".Length);
-            }
-            else
-            {
-                executableName = trimmed.Split(' ')[0];
-                arguments = trimmed.Substring(executableName.Length + 1);
-            }
-
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = executableName,
-                Arguments = arguments,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden
-            };
+            startInfo.UseShellExecute = false;
+            startInfo.RedirectStandardOutput = true;
+            startInfo.RedirectStandardError = true;
+            startInfo.CreateNoWindow = true;
+            startInfo.WindowStyle = ProcessWindowStyle.Hidden;
 
             this._onnxGenaiServerProcess = new Process
             {
@@ -334,32 +355,43 @@ namespace FormsSystemStatsWidget.Forms
             this._onnxGenaiServerProcess.ErrorDataReceived += this.HandleOnnxGenaiServerOutputDataReceived;
 
             if (!this._onnxGenaiServerProcess.Start())
+            {
                 throw new InvalidOperationException("ONNX-Genai Server process could not be started.");
+            }
 
             this.OpenDebugConsoleIfRequested(hideCmd);
             this._onnxGenaiServerProcess.BeginOutputReadLine();
             this._onnxGenaiServerProcess.BeginErrorReadLine();
 
             this.Cursor = cur;
-            Logger.Log($"[ONNX-Genai Server] Started: {executableName} {arguments}");
+            string arguments = string.Join(" ", startInfo.ArgumentList.Select(QuoteCommandArgument));
+            Logger.Log($"[ONNX-Genai Server] Started: {startInfo.FileName} {arguments}");
         }
+
+        private static string QuoteCommandArgument(string argument) =>
+            argument.Any(char.IsWhiteSpace) ? $"\"{argument}\"" : argument;
 
         private void HandleOnnxGenaiServerOutputDataReceived(object sender, DataReceivedEventArgs e)
         {
             string? line = e.Data;
-            if (string.IsNullOrWhiteSpace(line)) return;
-            if (!this.toolStripMenuItem_onnxHideCmd.Checked)
+            if (string.IsNullOrWhiteSpace(line))
             {
-                Logger.Log(line);
+                return;
             }
+
+            Logger.Log(line);
         }
 
         private void StopTrackedOnnxGenaiServerProcess()
         {
-            if (this._onnxGenaiServerProcess == null) return;
+            if (this._onnxGenaiServerProcess == null)
+            {
+                return;
+            }
+
             try { this._onnxGenaiServerProcess.OutputDataReceived -= this.HandleOnnxGenaiServerOutputDataReceived; } catch { }
             try { this._onnxGenaiServerProcess.ErrorDataReceived -= this.HandleOnnxGenaiServerOutputDataReceived; } catch { }
-            try { if (!this._onnxGenaiServerProcess.HasExited) this._onnxGenaiServerProcess.Kill(true); } catch { }
+            try { if (!this._onnxGenaiServerProcess.HasExited) { this._onnxGenaiServerProcess.Kill(true); } } catch { }
             try { this._onnxGenaiServerProcess.Dispose(); } catch { }
             this._onnxGenaiServerProcess = null;
         }
@@ -370,7 +402,10 @@ namespace FormsSystemStatsWidget.Forms
 
         private void toolStripTextBox_onnxModelRootDir_KeyDown(object sender, System.Windows.Forms.KeyEventArgs e)
         {
-            if (e.KeyCode != System.Windows.Forms.Keys.Enter) return;
+            if (e.KeyCode != System.Windows.Forms.Keys.Enter)
+            {
+                return;
+            }
 
             string modelRootDir = this.toolStripTextBox_onnxModelRootDir.Text.Trim();
             if (!Directory.Exists(modelRootDir))
@@ -387,20 +422,41 @@ namespace FormsSystemStatsWidget.Forms
 
         private void toolStripComboBox_onnxModels_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (!this._onnxSettingsInitialized || this._refreshingOnnxModels) return;
-            if (this.TryPersistOnnxSettings(out _)) this.SavePersistentSettings();
+            if (!this._onnxSettingsInitialized || this._refreshingOnnxModels)
+            {
+                return;
+            }
+
+            if (this.TryPersistOnnxSettings(out _))
+            {
+                this.SavePersistentSettings();
+            }
         }
 
         private void toolStripComboBox_onnxExecutionProvider_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (!this._onnxSettingsInitialized) return;
-            if (this.TryPersistOnnxSettings(out _)) this.SavePersistentSettings();
+            if (!this._onnxSettingsInitialized)
+            {
+                return;
+            }
+
+            if (this.TryPersistOnnxSettings(out _))
+            {
+                this.SavePersistentSettings();
+            }
         }
 
         private void toolStripMenuItem_onnxHideCmd_CheckedChanged(object? sender, EventArgs e)
         {
-            if (!this._onnxSettingsInitialized) return;
-            if (this.TryPersistOnnxSettings(out _)) this.SavePersistentSettings();
+            if (!this._onnxSettingsInitialized)
+            {
+                return;
+            }
+
+            if (this.TryPersistOnnxSettings(out _))
+            {
+                this.SavePersistentSettings();
+            }
         }
 
         private void PopulateOnnxModelsList()
@@ -413,27 +469,68 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripComboBox_onnxModels.Items.Clear();
                 this.toolStripComboBox_onnxModels.Text = "No ONNX models found";
 
-                if (string.IsNullOrEmpty(modelRootDir) || !Directory.Exists(modelRootDir)) return;
+                if (string.IsNullOrEmpty(modelRootDir) || !Directory.Exists(modelRootDir))
+                {
+                    return;
+                }
 
                 foreach (var subDir in Directory.EnumerateDirectories(modelRootDir))
                 {
                     string id = Path.GetFileName(subDir);
-                    bool hasOnnx = Directory.EnumerateFiles(subDir, "*.onnx", SearchOption.TopDirectoryOnly)
+                    bool hasRootOnnx = Directory.EnumerateFiles(subDir, "*.onnx", SearchOption.TopDirectoryOnly)
                         .Any(f => !f.EndsWith(".onnx.data", StringComparison.OrdinalIgnoreCase));
+                    bool hasPartitionedStages = HasPartitionedOnnxStages(subDir);
                     bool hasJson = Directory.EnumerateFiles(subDir, "*.json", SearchOption.TopDirectoryOnly).Any();
-                    if (hasOnnx && hasJson) this.toolStripComboBox_onnxModels.Items.Add(id);
+                    if ((hasRootOnnx || hasPartitionedStages) && hasJson)
+                    {
+                        if (hasPartitionedStages)
+                        {
+                            this.toolStripComboBox_onnxModels.Items.Add(new OnnxModelChoice(id, PartitionedModelLayout, $"{id} (Partitioned, 2 stages)"));
+                        }
+                        if (hasRootOnnx)
+                        {
+                            this.toolStripComboBox_onnxModels.Items.Add(new OnnxModelChoice(id, MainModelLayout, $"{id} (Main weights)"));
+                        }
+                    }
                 }
 
                 if (this.toolStripComboBox_onnxModels.Items.Count > 0)
                 {
-                    int preferredIndex = this.toolStripComboBox_onnxModels.Items.IndexOf(preferredModel);
-                    this.toolStripComboBox_onnxModels.SelectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
+                    int preferredIndex = -1;
+                    int preferredModelIndex = -1;
+                    for (int index = 0; index < this.toolStripComboBox_onnxModels.Items.Count; index++)
+                    {
+                        if (this.toolStripComboBox_onnxModels.Items[index] is not OnnxModelChoice choice
+                            || !string.Equals(choice.ModelId, preferredModel, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        if (preferredModelIndex < 0)
+                        {
+                            preferredModelIndex = index;
+                        }
+
+                        if (string.Equals(choice.Layout, this._persistentSettings.OnnxModelLayout, StringComparison.OrdinalIgnoreCase))
+                        {
+                            preferredIndex = index;
+                            break;
+                        }
+                    }
+                    this.toolStripComboBox_onnxModels.SelectedIndex = preferredIndex >= 0 ? preferredIndex : preferredModelIndex >= 0 ? preferredModelIndex : 0;
                 }
             }
             finally
             {
                 this._refreshingOnnxModels = false;
             }
+        }
+
+        private static bool HasPartitionedOnnxStages(string modelRootPath)
+        {
+            string partitionDirectory = Path.Combine(modelRootPath, "partitioned");
+            return File.Exists(Path.Combine(partitionDirectory, "model.stage0.onnx"))
+                && File.Exists(Path.Combine(partitionDirectory, "model.stage1.onnx"));
         }
 
         private void toolStripTextBox_onnxContextLength_KeyDown(object sender, System.Windows.Forms.KeyEventArgs e) => this.PersistOnnxSettingsOnEnter(e);
@@ -445,7 +542,11 @@ namespace FormsSystemStatsWidget.Forms
 
         private void PersistOnnxSettingsOnEnter(System.Windows.Forms.KeyEventArgs e)
         {
-            if (e.KeyCode != System.Windows.Forms.Keys.Enter) return;
+            if (e.KeyCode != System.Windows.Forms.Keys.Enter)
+            {
+                return;
+            }
+
             e.SuppressKeyPress = true;
 
             if (!this.TryPersistOnnxSettings(out string error))
@@ -466,22 +567,43 @@ namespace FormsSystemStatsWidget.Forms
             int topK = 0;
             double repeatPenalty = 0;
             if (!int.TryParse(this.toolStripTextBox_onnxContextLength.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int contextLength) || contextLength <= 0)
+            {
                 error = "Context Length must be a positive whole number.";
+            }
             else if (!int.TryParse(this.toolStripTextBox_onnxMaxTokens.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out maxTokens) || maxTokens <= 0)
+            {
                 error = "Max Tokens must be a positive whole number.";
+            }
             else if (!double.TryParse(this.toolStripTextBox_onnxTemperature.Text.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out temperature) || !double.IsFinite(temperature) || temperature < 0)
+            {
                 error = "Temperature must be a number greater than or equal to 0.";
+            }
             else if (!double.TryParse(this.toolStripTextBox_onnxTopP.Text.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out topP) || !double.IsFinite(topP) || topP < 0 || topP > 1)
+            {
                 error = "Top P must be between 0 and 1.";
+            }
             else if (!int.TryParse(this.toolStripTextBox_onnxTopK.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out topK) || topK < 0)
+            {
                 error = "Top K must be a non-negative whole number.";
+            }
             else if (!double.TryParse(this.toolStripTextBox_onnxRepeatPenalty.Text.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out repeatPenalty) || !double.IsFinite(repeatPenalty) || repeatPenalty <= 0)
+            {
                 error = "Repeat Penalty must be greater than 0.";
+            }
 
-            if (error.Length > 0) return false;
+            if (error.Length > 0)
+            {
+                return false;
+            }
 
             this._persistentSettings.OnnxModelRootDirectory = this.toolStripTextBox_onnxModelRootDir.Text.Trim();
-            this._persistentSettings.OnnxModel = this.toolStripComboBox_onnxModels.SelectedItem as string ?? this.toolStripComboBox_onnxModels.Text.Trim();
+            OnnxModelChoice? selectedChoice = this.toolStripComboBox_onnxModels.SelectedItem as OnnxModelChoice;
+            this._persistentSettings.OnnxModel = selectedChoice?.ModelId ?? this.toolStripComboBox_onnxModels.Text.Trim();
+            if (selectedChoice is not null)
+            {
+                this._persistentSettings.OnnxModelLayout = selectedChoice.Layout;
+            }
+
             this._persistentSettings.OnnxContextLength = contextLength;
             this._persistentSettings.OnnxMaxTokens = maxTokens;
             this._persistentSettings.OnnxTemperature = temperature;
@@ -571,7 +693,11 @@ namespace FormsSystemStatsWidget.Forms
 
         public void AppendLine(string? line)
         {
-            if (line == null) return;
+            if (line == null)
+            {
+                return;
+            }
+
             _logBox.AppendText(line + Environment.NewLine);
             _logBox.ScrollToCaret();
 

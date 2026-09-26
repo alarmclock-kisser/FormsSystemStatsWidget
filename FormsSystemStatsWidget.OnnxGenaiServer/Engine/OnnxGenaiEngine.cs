@@ -49,10 +49,22 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
             var id = Path.GetFileName(subDir);
             var onnxFiles = Directory.EnumerateFiles(subDir, "*.onnx", SearchOption.TopDirectoryOnly)
                 .Where(f => !f.EndsWith(".onnx.data", StringComparison.OrdinalIgnoreCase)).ToList();
-            if (onnxFiles.Count == 0) continue;
+            var partitionDirectory = Path.Combine(subDir, "partitioned");
+            var stage0Path = Path.Combine(partitionDirectory, "model.stage0.onnx");
+            var stage1Path = Path.Combine(partitionDirectory, "model.stage1.onnx");
+            bool hasPartitionedStages = File.Exists(stage0Path) && File.Exists(stage1Path);
+            if (onnxFiles.Count == 0 && !hasPartitionedStages)
+            {
+                continue;
+            }
+
             var jsonFiles = Directory.EnumerateFiles(subDir, "*.json", SearchOption.TopDirectoryOnly).ToList();
-            if (jsonFiles.Count == 0) continue;
-            result.Add(new ModelEntry(id, subDir, onnxFiles[0], jsonFiles));
+            if (jsonFiles.Count == 0)
+            {
+                continue;
+            }
+
+            result.Add(new ModelEntry(id, subDir, onnxFiles.FirstOrDefault() ?? stage0Path, jsonFiles));
         }
         return result;
     }
@@ -86,6 +98,14 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
             var model = models.FirstOrDefault(m => m.Id.Equals(_options.DefaultModel, StringComparison.OrdinalIgnoreCase)) ?? models[0];
             _loadedModelId = model.Id;
 
+            var modelLayout = _options.ModelLayout.Trim();
+            if (!modelLayout.Equals("Auto", StringComparison.OrdinalIgnoreCase)
+                && !modelLayout.Equals("Main", StringComparison.OrdinalIgnoreCase)
+                && !modelLayout.Equals("Partitioned", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Unsupported model layout '{_options.ModelLayout}'. Use Auto, Main, or Partitioned.");
+            }
+
             // R3: Stage Loading Orchestrierung — Partition-Discovery + Validation
             var cudaOpts = new CudaOptions
             {
@@ -93,7 +113,13 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
                 Stage0Device = 0,
                 Stage1Device = 1
             };
-            var partition = ModelPartitioner.Discover(model.RootDir, cudaOpts, _logger);
+            var partition = modelLayout.Equals("Main", StringComparison.OrdinalIgnoreCase)
+                ? new ModelPartitioner.PartitionDiscoveryResult()
+                : ModelPartitioner.Discover(model.RootDir, cudaOpts, _logger);
+            if (modelLayout.Equals("Partitioned", StringComparison.OrdinalIgnoreCase) && !partition.IsPartitioned)
+            {
+                throw new InvalidOperationException($"Model '{model.Id}' was selected as partitioned but has no complete partition pair.");
+            }
             if (partition.IsPartitioned)
             {
                 var validation = PartitionValidator.ValidatePartition(model.RootDir, partition, _logger);
@@ -125,7 +151,7 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
                 _pythonServerBaseUrl = _pythonSupervisor.BaseUrl;
                 _logger.LogInformation("Lade Modell in Python-Engine: {Path}", model.RootDir);
                 _pythonSupervisor.SetModelState("Loading", model.RootDir);
-                var loaded = await _pythonIpc.LoadModelAsync(model.RootDir);
+                var loaded = await _pythonIpc.LoadModelAsync(model.RootDir, modelLayout);
                 _pythonSupervisor.SetModelState(loaded ? "Loaded" : "Unloaded", model.RootDir);
                 if (!loaded)
                 {

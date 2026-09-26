@@ -72,7 +72,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
                 () => _registry.ExecuteLocked(entries => ReconcileAndStart(entries, ct)),
                 ct);
             if (ready)
+            {
                 StartHealthMonitor();
+            }
+
             return ready;
         }
         finally
@@ -84,11 +87,20 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
     private bool ReconcileAndStart(List<EngineProcessEntry> entries, CancellationToken ct)
     {
         if (_options.SingleEngineOnly && !ReconcileExistingProcesses(entries))
+        {
             return false;
+        }
+
         if (!_options.SingleEngineOnly)
+        {
             RemoveStaleEntries(entries);
+        }
+
         if (ct.IsCancellationRequested)
+        {
             return false;
+        }
+
         return StartOwnedProcess(entries, ct);
     }
 
@@ -109,7 +121,9 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
                     continue;
                 }
                 if (identity.ProcessStartTimeUtc != entry.ProcessStartTimeUtc)
+                {
                     entries.Remove(entry);
+                }
             }
         }
     }
@@ -162,7 +176,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
                     "[ONNX-LIFECYCLE] Found existing engine process PID {Pid}. Port: {Port}. State: {State}.",
                     entry.Pid, entry.Port, entry.State);
                 if (!StopVerifiedProcess(process, entry))
+                {
                     return false;
+                }
+
                 entries.Remove(entry);
             }
         }
@@ -172,7 +189,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
             using (process)
             {
                 if (process.Id == Environment.ProcessId || visitedPids.Contains(process.Id))
+                {
                     continue;
+                }
+
                 if (!WindowsProcessIdentityReader.TryRead(process, out var identity)
                     || identity is null
                     || !IsConfiguredPythonExecutable(identity.ExecutablePath)
@@ -228,10 +248,23 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
             RedirectStandardError = true,
             RedirectStandardInput = true,
             CreateNoWindow = true,
-            WorkingDirectory = Environment.CurrentDirectory
+            WorkingDirectory = AppContext.BaseDirectory
         };
         foreach (var argument in arguments)
+        {
             psi.ArgumentList.Add(argument);
+        }
+
+        string pythonEnginePath = Path.Combine(AppContext.BaseDirectory, "PyDualOnnxInferenceEngine");
+        if (Directory.Exists(pythonEnginePath))
+        {
+            string? inheritedPythonPath = psi.Environment.TryGetValue("PYTHONPATH", out var existingPythonPath)
+                ? existingPythonPath
+                : null;
+            psi.Environment["PYTHONPATH"] = string.IsNullOrWhiteSpace(inheritedPythonPath)
+                ? pythonEnginePath
+                : pythonEnginePath + Path.PathSeparator + inheritedPythonPath;
+        }
         psi.Environment["ONNX_ENGINE_INSTANCE_ID"] = instanceId;
         psi.Environment["ONNX_ENGINE_IDLE_SHUTDOWN_ENABLED"] = _options.IdleAutoShutdownEnabled ? "true" : "false";
         psi.Environment["ONNX_ENGINE_IDLE_SHUTDOWN_SECONDS"] = Math.Max(1, _options.IdleAutoShutdownSeconds)
@@ -290,7 +323,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
 
         var entry = CreateEntry(identity, arguments, _port, instanceId);
         if (!identityVerified)
+        {
             entry.State = "Unknown";
+        }
+
         _ownedEntry = entry;
         entries.Add(entry);
 
@@ -300,7 +336,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
             LastError = "Startup timeout or instance identity mismatch";
             StopVerifiedProcess(process, entry);
             if (process.HasExited)
+            {
                 entries.Remove(entry);
+            }
+
             return false;
         }
 
@@ -337,13 +376,17 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
     private void OnErrorDataReceived(object sender, DataReceivedEventArgs e)
     {
         if (e.Data is not null)
+        {
             _logger.LogDebug("[Python-stderr] {Line}", e.Data);
+        }
     }
 
     private void OnOutputDataReceived(object sender, DataReceivedEventArgs e)
     {
         if (e.Data is not null)
+        {
             _logger.LogDebug("[Python-stdout] {Line}", e.Data);
+        }
     }
 
     /// <summary>
@@ -352,10 +395,14 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
     public async Task<bool> CheckAndRestartAsync(CancellationToken ct = default)
     {
         if (_shuttingDown || _disposed)
+        {
             return false;
+        }
 
         if (IsRunning)
+        {
             return true;
+        }
 
         if (_restartCount >= _maxRestarts)
         {
@@ -383,7 +430,9 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
             var process = _process;
             var entry = _ownedEntry;
             if (process is null || entry is null)
+            {
                 return;
+            }
 
             var stopped = HasExited(process) || StopVerifiedProcess(process, entry);
             if (stopped)
@@ -416,7 +465,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
     public void SetModelState(string state, string? modelPath = null)
     {
         if (_instanceId == Guid.Empty)
+        {
             return;
+        }
+
         try
         {
             _registry.Update(_instanceId, entry =>
@@ -436,7 +488,9 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
     private bool StopVerifiedProcess(Process process, EngineProcessEntry entry)
     {
         if (HasExited(process))
+        {
             return true;
+        }
 
         var healthConfirmed = TryReadHealth(entry.Port, out var health)
             && health is not null
@@ -453,7 +507,9 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
                 using var response = client.PostAsync($"http://127.0.0.1:{entry.Port}/shutdown", new StringContent(string.Empty))
                     .GetAwaiter().GetResult();
                 if (!response.IsSuccessStatusCode)
+                {
                     _logger.LogWarning("[ONNX-LIFECYCLE] Graceful shutdown for PID {Pid} returned HTTP {Status}.", entry.Pid, (int)response.StatusCode);
+                }
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {
@@ -474,7 +530,9 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
         }
 
         if (HasExited(process))
+        {
             return true;
+        }
 
         if (!MatchesEntry(process, entry))
         {
@@ -565,12 +623,18 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
         for (var index = 0; index < arguments.Length - 1; index++)
         {
             if (arguments[index] == "-m")
+            {
                 module = arguments[index + 1];
+            }
             else if (arguments[index] == "--port"
                 && int.TryParse(arguments[index + 1], out var parsedPort))
+            {
                 port = parsedPort;
+            }
             else if (arguments[index] == "--instance-id")
+            {
                 commandLineInstanceId = arguments[index + 1];
+            }
         }
 
         return string.Equals(module, _engineModulePath, StringComparison.Ordinal)
@@ -652,7 +716,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
             using var response = client.GetAsync($"http://127.0.0.1:{port}/health").GetAwaiter().GetResult();
             if (!response.IsSuccessStatusCode)
+            {
                 return false;
+            }
+
             using var document = JsonDocument.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
             var root = document.RootElement;
             var state = root.TryGetProperty("state", out var stateValue)
@@ -684,7 +751,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
     private static bool HealthBelongsToEntry(PythonEngineHealth health, EngineProcessEntry entry)
     {
         if (health.ProcessId.HasValue && health.ProcessId.Value != entry.Pid)
+        {
             return false;
+        }
+
         if (entry.CommandLineInstanceId is not null
             && !string.Equals(health.InstanceId, entry.CommandLineInstanceId, StringComparison.Ordinal))
         {
@@ -697,9 +767,13 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
     private void RefreshEntryFromHealth(EngineProcessEntry entry)
     {
         if (TryReadHealth(entry.Port, out var health) && health is not null && HealthBelongsToEntry(health, entry))
+        {
             ApplyHealth(entry, health);
+        }
         else
+        {
             entry.State = "Unknown";
+        }
     }
 
     private static void ApplyHealth(EngineProcessEntry entry, PythonEngineHealth health)
@@ -726,7 +800,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
                 var process = _process;
                 var entry = _ownedEntry;
                 if (process is null || entry is null)
+                {
                     return;
+                }
+
                 if (HasExited(process))
                 {
                     _registry.Remove(_instanceId);
@@ -757,7 +834,10 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
         _healthMonitorCancellation = null;
         _healthMonitorTask = null;
         if (cancellation is null)
+        {
             return;
+        }
+
         cancellation.Cancel();
         if (task is not null)
         {
@@ -828,7 +908,11 @@ public sealed class PythonProcessSupervisor : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            return;
+        }
+
         _disposed = true;
         await StopAsync();
         _lock.Dispose();

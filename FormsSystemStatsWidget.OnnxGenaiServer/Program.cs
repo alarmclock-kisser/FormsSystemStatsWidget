@@ -59,7 +59,10 @@ startupLogger.LogInformation("===========================================");
 
 var serverOptions = builder.Configuration.GetSection(OnnxGenaiServerOptions.SectionName).Get<OnnxGenaiServerOptions>() ?? new OnnxGenaiServerOptions();
 if (serverOptions.ListenUrls.Length == 0)
+{
     serverOptions.ListenUrls = ["http://localhost:8080"];
+}
+
 builder.WebHost.UseUrls(serverOptions.ListenUrls);
 
 var app = builder.Build();
@@ -77,13 +80,26 @@ var cudaOpts = app.Services.GetRequiredService<CudaOptions>();
 var serverOpts = app.Services.GetRequiredService<OnnxGenaiServerOptions>();
 var engine = new OnnxGenaiEngine(serverOpts, app.Services.GetRequiredService<ILogger<OnnxGenaiEngine>>());
 
-// Initialize engine (model discovery + loading)
+string[] apiBaseUrls = serverOptions.ListenUrls.Select(url => url.TrimEnd('/')).ToArray();
+foreach (string apiBaseUrl in apiBaseUrls)
+{
+    app.Logger.LogInformation("API endpoints (available after model initialization): {BaseUrl}/ready, {BaseUrl}/health, {BaseUrl}/status, {BaseUrl}/v1/models",
+        apiBaseUrl, apiBaseUrl, apiBaseUrl, apiBaseUrl);
+    app.Logger.LogInformation("OpenAI-compatible chat endpoint: POST {Url}", $"{apiBaseUrl}/v1/chat/completions");
+}
+
+app.Logger.LogInformation("Initialisiere Modell {Model} mit Layout {Layout}; große ONNX-Modelle können einige Minuten laden.",
+    serverOpts.DefaultModel, serverOpts.ModelLayout);
 await engine.InitializeAsync();
 
 if (!engine.IsReady)
 {
     app.Logger.LogWarning("ONNX GenAI Engine nicht bereit - Server startet, aber Routen liefern 503 bis Modell geladen ist.");
     app.Logger.LogError(engine.LastError);
+}
+else
+{
+    app.Logger.LogInformation("Modell vollständig geladen: {Model}. API ist bereit.", engine.LoadedModelId);
 }
 
 // Map health endpoint

@@ -320,9 +320,13 @@ def load() -> Response:
 
     data = request.get_json(silent=True) or {}
     model_path = data.get("model_path", "")
+    model_layout = data.get("model_layout", "auto")
     if not model_path:
         _lifecycle.end_operation("Loading", loaded=_engine is not None)
         return _error_response("MODEL_NOT_FOUND", "model_path is required", 400)
+    if not isinstance(model_layout, str) or model_layout.strip().casefold() not in {"auto", "main", "partitioned"}:
+        _lifecycle.end_operation("Loading", loaded=_engine is not None)
+        return _error_response("INVALID_MODEL_LAYOUT", "model_layout must be auto, main, or partitioned", 400)
 
     try:
         with _engine_lock:
@@ -331,7 +335,7 @@ def load() -> Response:
 
             candidate: InferenceEngine | None = None
             try:
-                candidate = InferenceEngine(model_path)
+                candidate = InferenceEngine(model_path, model_layout=model_layout)
                 candidate.load()
                 _engine = candidate
                 candidate = None

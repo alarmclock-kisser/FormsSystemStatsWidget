@@ -349,6 +349,7 @@ namespace FormsSystemStatsWidget.Forms
                             || commandLine.Contains("FormsSystemStatsWidget.OnnxGenaiServer.dll", StringComparison.OrdinalIgnoreCase);
 
                         if (string.Equals(processName, "onnx-genai-server.exe", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(processName, "FormsSystemStatsWidget.OnnxGenaiServer.exe", StringComparison.OrdinalIgnoreCase)
                             || (isOnnxRunner && (string.Equals(processName, "python.exe", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(processName, "pythonw.exe", StringComparison.OrdinalIgnoreCase)
                                 || string.Equals(processName, "dotnet.exe", StringComparison.OrdinalIgnoreCase))))

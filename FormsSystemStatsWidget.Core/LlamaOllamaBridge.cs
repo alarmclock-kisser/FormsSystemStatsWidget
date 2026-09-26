@@ -206,7 +206,9 @@ namespace FormsSystemStatsWidget.Core
                             {
                                 string? tagStr = tag?.ToString();
                                 if (!string.IsNullOrWhiteSpace(tagStr))
+                                {
                                     _modelTags.Add(tagStr);
+                                }
                             }
                         }
                         if (_modelTags.Count == 0 && metaNode is JsonObject metaObj2 && metaObj2["general"]?["tags"] is JsonArray ggufTags)
@@ -215,7 +217,9 @@ namespace FormsSystemStatsWidget.Core
                             {
                                 string? tagStr = tag?.ToString();
                                 if (!string.IsNullOrWhiteSpace(tagStr))
+                                {
                                     _modelTags.Add(tagStr);
+                                }
                             }
                         }
 

@@ -23,11 +23,11 @@ public sealed class PythonIpcClient : IAsyncDisposable
     /// <summary>
     /// Lädt das Modell in der Python-Engine.
     /// </summary>
-    public async Task<bool> LoadModelAsync(string modelPath, CancellationToken ct = default)
+    public async Task<bool> LoadModelAsync(string modelPath, string modelLayout = "Auto", CancellationToken ct = default)
     {
         try
         {
-            var payload = new { model_path = modelPath };
+            var payload = new { model_path = modelPath, model_layout = modelLayout.ToLowerInvariant() };
             var json = JsonSerializer.Serialize(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var response = await _httpClient.PostAsync($"{_baseUrl}/load", content, ct);
@@ -202,9 +202,16 @@ public sealed class PythonIpcClient : IAsyncDisposable
                     while ((line = await reader.ReadLineAsync(ct)) != null)
                     {
                         if (ct.IsCancellationRequested) { lastFinishReason = "cancelled"; break; }
-                        if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
+                        if (!line.StartsWith("data: ", StringComparison.Ordinal))
+                        {
+                            continue;
+                        }
+
                         var data = line["data: ".Length..].Trim();
-                        if (data == "[DONE]") break;
+                        if (data == "[DONE]")
+                        {
+                            break;
+                        }
 
                         string? chunkText = null;
                         string? chunkFinishReason = null;
@@ -235,7 +242,10 @@ public sealed class PythonIpcClient : IAsyncDisposable
                         }
                         catch (JsonException) { continue; }
 
-                        if (chunkText is not null) sb.Append(chunkText);
+                        if (chunkText is not null)
+                        {
+                            sb.Append(chunkText);
+                        }
 
                         if (chunkFinishReason is not null)
                         {

@@ -64,6 +64,27 @@ class ModelPackagePartitionTests(unittest.TestCase):
         self.assertEqual(package.stage1_path, stage1_path)
         self.assertEqual(package.model_path, root / "model.onnx")
 
+    def test_loader_can_select_main_weights_when_partitioned_pair_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _write_partition(root)
+
+            package = ModelPackageLoader().load(root, layout="main")
+
+        self.assertFalse(package.is_partitioned)
+        self.assertEqual(package.model_path, root / "model.onnx")
+
+    def test_loader_can_select_partitioned_pair_when_main_weights_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage0_path, stage1_path = _write_partition(root)
+
+            package = ModelPackageLoader().load(root, layout="partitioned")
+
+        self.assertTrue(package.is_partitioned)
+        self.assertEqual(package.stage0_path, stage0_path)
+        self.assertEqual(package.stage1_path, stage1_path)
+
     def test_loader_rejects_incomplete_partition_pair(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             _write_partition(Path(directory), include_stage1=False)

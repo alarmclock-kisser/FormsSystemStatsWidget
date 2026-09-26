@@ -225,9 +225,17 @@ public static class OpenAiApiHandler
         }
 
         var inputs = new List<string>();
-        if (request.Input.ValueKind == JsonValueKind.String) inputs.Add(request.Input.GetString()!);
+        if (request.Input.ValueKind == JsonValueKind.String)
+        {
+            inputs.Add(request.Input.GetString()!);
+        }
         else if (request.Input.ValueKind == JsonValueKind.Array)
-            foreach (var item in request.Input.EnumerateArray()) inputs.Add(item.GetString() ?? string.Empty);
+        {
+            foreach (var item in request.Input.EnumerateArray())
+            {
+                inputs.Add(item.GetString() ?? string.Empty);
+            }
+        }
 
         if (inputs.Count == 0)
         {

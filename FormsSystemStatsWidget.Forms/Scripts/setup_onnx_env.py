@@ -6,19 +6,17 @@ Checks the available Python version, installs missing packages
 for ONNX model conversion and inference.
 
 Usage:
-    python setup_onnx_env.py [--install] [--user] [--python PATH] [--elevated]
+    python setup_onnx_env.py [--install] [--user] [--python PATH]
 
     --install    Install missing packages (default: check only)
     --user       User-wide installation (pip install --user)
     --python     Path to a specific Python interpreter
-    --elevated   Re-run this script with UAC elevation (admin) if needed
 """
 
 import sys
 import subprocess
 import shutil
 import os
-import ctypes
 import argparse
 from importlib import import_module
 
@@ -50,14 +48,6 @@ MIN_PYTHON_VERSION = (3, 10)
 MAX_PYTHON_VERSION = (3, 14)
 
 
-def is_admin() -> bool:
-    """Check if the current process is running with admin privileges."""
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin() != 0
-    except Exception:
-        return False
-
-
 def is_system_python_install() -> bool:
     """Check if Python is installed in a system location (e.g. C:\\PythonXXX)."""
     exe = sys.executable.lower()
@@ -65,35 +55,6 @@ def is_system_python_install() -> bool:
     if exe.startswith("c:\\python") or "program files" in exe:
         return True
     return False
-
-
-def run_elevated(args: list[str]) -> int:
-    """Re-run this script with UAC elevation (admin privileges)."""
-    print("\n  [INFO] Re-running with elevated privileges (UAC prompt will appear)...")
-    print()
-    try:
-        # Use ShellExecute with "runas" verb to trigger UAC
-        result = ctypes.windll.shell32.ShellExecuteW(
-            None,           # hwnd
-            "runas",        # lpVerb - triggers UAC
-            sys.executable, # lpFile
-            " ".join(f'"{a}"' if " " in a else a for a in args),  # lpParams
-            None,           # lpDirectory
-            1              # nShowCmd - SW_SHOWNORMAL
-        )
-        # ShellExecuteW returns an atom; >32 means success
-        if int(result) > 32:
-            # Wait for the elevated process to finish
-            # ShellExecuteW doesn't give us a handle, so we just return
-            # The elevated process will print its own output to its own console.
-            print("  [OK] Elevated process launched. Check the new console window for results.")
-            return 0
-        else:
-            print(f"  [FAIL] UAC elevation failed (code: {result}). User may have cancelled.")
-            return 1
-    except Exception as ex:
-        print(f"  [FAIL] Could not launch elevated process: {ex}")
-        return 1
 
 
 def print_header(title: str) -> None:
@@ -112,7 +73,7 @@ def check_python_version() -> bool:
     if version < MIN_PYTHON_VERSION:
         print(f"  [FAIL] Python >= {MIN_PYTHON_VERSION[0]}.{MIN_PYTHON_VERSION[1]} required.")
         return False
-    if version > MAX_PYTHON_VERSION:
+    if version[:2] > MAX_PYTHON_VERSION:
         print(f"  [WARN] Python {version.major}.{version.minor} is newer than tested "
               f"({MAX_PYTHON_VERSION[0]}.{MAX_PYTHON_VERSION[1]}). May work, but not guaranteed.")
 
@@ -122,9 +83,8 @@ def check_python_version() -> bool:
 
 def check_package(package_name: str) -> tuple[bool, str]:
     """Checks if a package is importable or installed via pip. Returns (installed, version)."""
-    if package_name == "nvidia-ml-py":
-        # The deprecated pynvml distribution exposes the same import module.
-        # Check distribution metadata so it cannot satisfy this requirement.
+    if package_name in {"onnxruntime-gpu", "nvidia-ml-py"}:
+        # Both distributions expose an import name that another distribution may also provide.
         try:
             from importlib.metadata import version
             return True, version(package_name)
@@ -157,67 +117,6 @@ def check_package(package_name: str) -> tuple[bool, str]:
     return False, ""
 
 
-def remove_deprecated_pynvml() -> bool:
-    """Remove the deprecated distribution that shadows nvidia-ml-py's pynvml module."""
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-        version("pynvml")
-    except PackageNotFoundError:
-        return True
-    except Exception as ex:
-        print(f"  [WARN] Could not inspect deprecated pynvml package: {ex}")
-        return True
-
-    print("  [INFO] Removing deprecated pynvml distribution (nvidia-ml-py provides the same module).")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "uninstall", "--yes", "pynvml"],
-            capture_output=False, text=True
-        )
-        if result.returncode == 0:
-            print("  [OK] Deprecated pynvml distribution removed.")
-            return True
-        print(f"  [WARN] Could not remove deprecated pynvml (exit code {result.returncode}).")
-    except Exception as ex:
-        print(f"  [WARN] Could not remove deprecated pynvml: {ex}")
-    return False
-
-
-def remove_cpu_onnxruntime() -> bool:
-    """Remove the CPU distribution when the GPU distribution is also installed."""
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-        version("onnxruntime-gpu")
-    except PackageNotFoundError:
-        return True
-    except Exception as ex:
-        print(f"  [WARN] Could not inspect onnxruntime-gpu package: {ex}")
-        return True
-
-    try:
-        from importlib.metadata import PackageNotFoundError, version
-        version("onnxruntime")
-    except PackageNotFoundError:
-        return True
-    except Exception as ex:
-        print(f"  [WARN] Could not inspect CPU onnxruntime package: {ex}")
-        return True
-
-    print("  [INFO] Removing conflicting CPU-only onnxruntime distribution.")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "uninstall", "--yes", "onnxruntime"],
-            capture_output=False, text=True
-        )
-        if result.returncode == 0:
-            print("  [OK] Conflicting CPU-only onnxruntime distribution removed.")
-            return True
-        print(f"  [FAIL] Could not remove CPU-only onnxruntime (exit code {result.returncode}).")
-    except Exception as ex:
-        print(f"  [FAIL] Could not remove CPU-only onnxruntime: {ex}")
-    return False
-
-
 def check_all_packages() -> dict[str, tuple[bool, str]]:
     """Checkt alle erforderlichen Pakete."""
     print_header("Package Check")
@@ -231,13 +130,8 @@ def check_all_packages() -> dict[str, tuple[bool, str]]:
     return results
 
 
-def install_packages(user: bool = False, elevated: bool = False) -> bool:
-    """Installs all missing packages via pip.
-    
-    Strategy:
-    1. If system Python install and not admin → try --user first, then UAC elevation
-    2. If admin or user install → install directly
-    """
+def install_packages(user: bool = False) -> bool:
+    """Install missing packages without modifying a protected system Python install."""
     print_header("Installing Missing Packages")
 
     missing = [
@@ -251,59 +145,22 @@ def install_packages(user: bool = False, elevated: bool = False) -> bool:
 
     print(f"  Missing: {', '.join(missing)}")
 
-    system_install = is_system_python_install()
-    admin = is_admin()
+    cmd = [sys.executable, "-m", "pip", "install"]
+    if user or is_system_python_install():
+        cmd.append("--user")
+    cmd.extend(missing)
+    print(f"  Running: {' '.join(cmd)}")
+    print()
 
-    # Determine install strategy
-    if system_install and not admin:
-        # System Python, non-admin: try --user first
-        print("  [INFO] System Python detected, running without admin.")
-        print("  [INFO] Attempting user-level install first...")
-        cmd = [sys.executable, "-m", "pip", "install", "--user"]
-        cmd.extend(missing)
-        print(f"  Running: {' '.join(cmd)}")
-        print()
-
-        try:
-            result = subprocess.run(cmd, capture_output=False, text=True)
-            if result.returncode == 0:
-                print("\n  [OK] pip install completed (user-level).")
-                # Verify - if it works, we're done
-                if verify_after_install():
-                    return True
-                print("  [WARN] User-level install completed but verification failed.")
-                print("  [INFO] Package may be in system site-packages (read-only for this user).")
-                print("  [INFO] Attempting UAC elevation for system-wide install...")
-        except Exception as ex:
-            print(f"\n  [FAIL] Error running pip: {ex}")
-
-        # UAC elevation for system-wide install
-        if elevated:
-            args = [sys.executable, os.path.abspath(__file__), "--install"]
-            return run_elevated(args)
-        else:
-            print("  [INFO] Use --elevated flag to allow UAC prompt for system-wide install.")
-            return False
-    else:
-        # Admin or non-system Python: install directly
-        cmd = [sys.executable, "-m", "pip", "install"]
-        if user and not admin:
-            cmd.append("--user")
-        cmd.extend(missing)
-        print(f"  Running: {' '.join(cmd)}")
-        print()
-
-        try:
-            result = subprocess.run(cmd, capture_output=False, text=True)
-            if result.returncode == 0:
-                print("\n  [OK] pip install completed.")
-                return True
-            else:
-                print(f"\n  [FAIL] pip install exited with code {result.returncode}.")
-                return False
-        except Exception as ex:
-            print(f"\n  [FAIL] Error running pip: {ex}")
-            return False
+    try:
+        result = subprocess.run(cmd, capture_output=False, text=True)
+        if result.returncode == 0:
+            print("\n  [OK] pip install completed.")
+            return True
+        print(f"\n  [FAIL] pip install exited with code {result.returncode}.")
+    except Exception as ex:
+        print(f"\n  [FAIL] Error running pip: {ex}")
+    return False
 
 
 def has_nvidia_gpu() -> bool:
@@ -318,7 +175,7 @@ def has_nvidia_gpu() -> bool:
         return False
 
 
-def check_gpu_execution_provider() -> bool:
+def check_gpu_execution_provider(user: bool = False) -> bool:
     """Prüft, ob der CUDA-Execution-Provider in der installierten onnxruntime verfügbar ist.
 
     Bei NVIDIA GPU + fehlendem CUDA-Provider wird onnxruntime-gpu installiert
@@ -345,7 +202,10 @@ def check_gpu_execution_provider() -> bool:
         return True
 
     print("  [INFO] Installing onnxruntime-gpu (replaces CPU-only onnxruntime)...")
-    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "onnxruntime-gpu"]
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade"]
+    if user or is_system_python_install():
+        cmd.append("--user")
+    cmd.append("onnxruntime-gpu")
     print(f"  Running: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, capture_output=False, text=True)
@@ -356,21 +216,21 @@ def check_gpu_execution_provider() -> bool:
         print(f"  [FAIL] Error running pip: {ex}")
         return False
 
-    # Verifikation: CUDA-Provider muss jetzt verfügbar sein
-    try:
-        import importlib
-        import onnxruntime as ort
-        importlib.reload(ort)
-        available = ort.get_available_providers()
-        print(f"  Providers after install: {available}")
-        if "CUDAExecutionProvider" in available:
-            print("  [OK] CUDAExecutionProvider is now available.")
-            return True
-        print("  [FAIL] CUDAExecutionProvider still not available after install.")
+    # Check in a fresh interpreter so a previously imported CPU module cannot mask the user install.
+    provider_check = subprocess.run(
+        [sys.executable, "-c", "import onnxruntime as ort; print('\\n'.join(ort.get_available_providers()))"],
+        capture_output=True, text=True, timeout=60
+    )
+    if provider_check.returncode != 0:
+        print(f"  [FAIL] Could not verify CUDA provider after install: {provider_check.stderr.strip()}")
         return False
-    except Exception as ex:
-        print(f"  [FAIL] Could not verify CUDA provider after install: {ex}")
-        return False
+    available = provider_check.stdout.splitlines()
+    print(f"  Providers after install: {available}")
+    if "CUDAExecutionProvider" in available:
+        print("  [OK] CUDAExecutionProvider is now available.")
+        return True
+    print("  [FAIL] CUDAExecutionProvider still not available after install.")
+    return False
 
 
 def verify_after_install() -> bool:
@@ -395,8 +255,6 @@ def main() -> int:
                         help="Use pip install --user (user-wide, no admin needed)")
     parser.add_argument("--python", type=str, default=None,
                         help="Path to a specific Python interpreter")
-    parser.add_argument("--elevated", action="store_true",
-                        help="Allow UAC elevation prompt if system-wide install is needed")
     args = parser.parse_args()
 
     # Optional: specific Python interpreter
@@ -409,8 +267,6 @@ def main() -> int:
             cmd.append("--install")
         if args.user:
             cmd.append("--user")
-        if args.elevated:
-            cmd.append("--elevated")
         result = subprocess.run(cmd)
         return result.returncode
 
@@ -419,18 +275,6 @@ def main() -> int:
         print("\n  Please install Python >= 3.10 from https://www.python.org/downloads/")
         return 1
 
-    if args.install:
-        if not remove_cpu_onnxruntime():
-            if args.elevated and is_system_python_install() and not is_admin():
-                print("  [INFO] Retrying the ONNX Runtime cleanup with administrator privileges...")
-                elevated_args = [sys.executable, os.path.abspath(__file__), "--install"]
-                if args.user:
-                    elevated_args.append("--user")
-                return run_elevated(elevated_args)
-            print("  [FAIL] CUDA setup cannot continue while CPU and GPU ONNX Runtime packages conflict.")
-            return 1
-        remove_deprecated_pynvml()
-
     # 2. Package check
     results = check_all_packages()
     missing = [name for name, (installed, _) in results.items() if not installed]
@@ -438,7 +282,7 @@ def main() -> int:
     if not missing:
         print("\n  [OK] All required packages are installed.")
         # GPU-EP-Check auch bei vollständigem Env (onnxruntime-gpu kann fehlen)
-        if not check_gpu_execution_provider():
+        if not check_gpu_execution_provider(user=args.user):
             print("\n  [WARN] GPU execution provider setup did not complete successfully.")
             print("         The server will fall back to CPU. You can retry later.")
             return 1
@@ -453,26 +297,17 @@ def main() -> int:
         return 2
 
     # 3. Install
-    if not install_packages(user=args.user, elevated=args.elevated):
+    if not install_packages(user=args.user):
         return 1
 
     # 4. Verify
     if not verify_after_install():
-        # If system Python and not admin, auto-trigger UAC elevation
-        if is_system_python_install() and not is_admin():
-            print("\n  [INFO] Verification failed. Package likely needs system-wide install.")
-            print("  [INFO] Triggering UAC elevation for admin-level install...")
-            args_elevated = [sys.executable, os.path.abspath(__file__), "--install"]
-            elev_result = run_elevated(args_elevated)
-            if elev_result == 0:
-                # Re-verify after elevated install
-                import time
-                time.sleep(3)
-                if verify_after_install():
-                    print("\n  [OK] Environment is ready for ONNX model conversion and inference.")
-                    return 0
-            return 1
         print("\n  [WARN] Some packages could not be verified after install.")
+        return 1
+
+    if not check_gpu_execution_provider(user=args.user):
+        print("\n  [WARN] GPU execution provider setup did not complete successfully.")
+        print("         The server will fall back to CPU. You can retry later.")
         return 1
 
     print("\n  [OK] Environment is ready for ONNX model conversion and inference.")
