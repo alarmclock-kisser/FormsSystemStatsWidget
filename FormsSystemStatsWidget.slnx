@@ -1,4 +1,10 @@
 <Solution>
+  <Folder Name="/FormsSystemStatsWidget.OnnxGenaiServer/" />
+  <Folder Name="/FormsSystemStatsWidget.OnnxGenaiServer/src/" />
+  <Folder Name="/FormsSystemStatsWidget.OnnxGenaiServer/src/engine/" />
+  <Folder Name="/FormsSystemStatsWidget.OnnxGenaiServer/src/engine/QwenOnnxNative.csproj/">
+    <Project Path="FormsSystemStatsWidget.OnnxGenaiServer/src/engine/QwenOnnxNative.csproj/QwenOnnxNative.csproj" />
+  </Folder>
   <Project Path="FormsSystemStatsWidget.Core/FormsSystemStatsWidget.Core.csproj" />
   <Project Path="FormsSystemStatsWidget.Forms/FormsSystemStatsWidget.Forms.csproj" />
   <Project Path="FormsSystemStatsWidget.OnnxGenaiServer/FormsSystemStatsWidget.OnnxGenaiServer.csproj" />

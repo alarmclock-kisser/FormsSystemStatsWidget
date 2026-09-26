@@ -9,6 +9,8 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
     private readonly OnnxGenaiServerOptions _options;
     private readonly ILogger<OnnxGenaiEngine> _logger;
     private readonly HttpClient _httpClient;
+    private readonly PythonProcessSupervisor _pythonSupervisor;
+    private readonly PythonIpcClient _pythonIpc;
     private string? _loadedModelId;
     private string _pythonServerBaseUrl = string.Empty;
 
@@ -17,12 +19,28 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
     public string? LastError { get; private set; }
     public OnnxGenaiServerOptions Options => _options;
     public string? LoadedModelId => _loadedModelId;
+    public bool IsPythonEngineRunning => _pythonSupervisor.IsRunning;
+    public int PythonRestartCount => _pythonSupervisor.RestartCount;
 
     public OnnxGenaiEngine(OnnxGenaiServerOptions options, ILogger<OnnxGenaiEngine> logger)
     {
         _options = options;
         _logger = logger;
         _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+
+        // Python-Process-Supervision + IPC
+        var pythonExe = options.PythonExecutable ?? "python";
+        var engineModule = options.PythonEngineModule ?? "onnx_engine.server";
+        var port = options.PythonEnginePort ?? 8081;
+        _pythonSupervisor = new PythonProcessSupervisor(
+            _logger,
+            pythonExe,
+            engineModule,
+            port,
+            startupTimeoutMs: 30000,
+            maxRestarts: 3,
+            restartIntervalMs: 5000);
+        _pythonIpc = new PythonIpcClient(_logger, _pythonSupervisor.BaseUrl);
     }
 
     public sealed record ModelEntry(string Id, string RootDir, string OnnxPath, IReadOnlyList<string> JsonFiles);
@@ -77,7 +95,52 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
             }
             var model = models.FirstOrDefault(m => m.Id.Equals(_options.DefaultModel, StringComparison.OrdinalIgnoreCase)) ?? models[0];
             _loadedModelId = model.Id;
-            _pythonServerBaseUrl = _options.PythonServerUrl ?? "http://localhost:8080";
+
+            // R3: Stage Loading Orchestrierung — Partition-Discovery + Validation
+            var cudaOpts = new CudaOptions
+            {
+                Enabled = _options.ExecutionProvider.Equals("Cuda", StringComparison.OrdinalIgnoreCase),
+                Stage0Device = 0,
+                Stage1Device = 1
+            };
+            var partition = ModelPartitioner.Discover(model.RootDir, cudaOpts, _logger);
+            if (partition.IsPartitioned)
+            {
+                var validation = PartitionValidator.ValidatePartition(model.RootDir, partition, _logger);
+                if (!validation.IsValid)
+                {
+                    _logger.LogWarning("Partition-Validierung mit {Count} Errors: {Issues}",
+                        validation.Errors.Count, string.Join("; ", validation.Errors.Select(e => e.Message)));
+                }
+                _logger.LogInformation("Partition: Stage0={S0} (GPU{D0}), Stage1={S1} (GPU{D1}), {BT} Boundary-Tensoren",
+                    Path.GetFileName(partition.Stage0Model), partition.Stage0Device,
+                    Path.GetFileName(partition.Stage1Model), partition.Stage1Device,
+                    partition.BoundaryTensors.Count);
+            }
+            else
+            {
+                _logger.LogInformation("Modell {Id} ist nicht partitioniert — Single-Stage-Modus", model.Id);
+            }
+
+            // Phase 3b: Python-Process-Supervision + IPC
+            _logger.LogInformation("Starte Python-Engine-Prozess...");
+            var pythonReady = await _pythonSupervisor.StartAsync();
+            if (!pythonReady)
+            {
+                _logger.LogWarning("Python-Engine nicht gestartet. Fallback zu externem Python-Server.");
+                _pythonServerBaseUrl = _options.PythonServerUrl ?? "http://localhost:8080";
+            }
+            else
+            {
+                _pythonServerBaseUrl = _pythonSupervisor.BaseUrl;
+                _logger.LogInformation("Lade Modell in Python-Engine: {Path}", model.RootDir);
+                var loaded = await _pythonIpc.LoadModelAsync(model.RootDir);
+                if (!loaded)
+                {
+                    _logger.LogWarning("Modell konnte nicht in Python-Engine geladen werden");
+                }
+            }
+
             _logger.LogInformation("ONNX GenAI Engine initialisiert. Modell: {Id}, Python-Server: {Url}", model.Id, _pythonServerBaseUrl);
             IsReady = true;
         }
@@ -101,130 +164,31 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
             yield break;
         }
 
-        var requestBody = new
+        // Phase 3b: Forward request to Python-Engine via IPC
+        await foreach (var result in _pythonIpc.GenerateAsync(prompt, parameters, ct))
         {
-            model = _loadedModelId, prompt,
-            temperature = parameters.Temperature, top_p = parameters.TopP,
-            top_k = parameters.TopK, max_tokens = parameters.MaxNewTokens,
-            repeat_penalty = parameters.RepeatPenalty, stream = true
-        };
-        var json = JsonSerializer.Serialize(requestBody);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-        // HTTP-Aufruf: Fehlerbehandlung OHNE yield in catch
-        HttpResponseMessage? response = null;
-        bool httpError = false;
-        try
-        {
-            response = await _httpClient.PostAsync($"{_pythonServerBaseUrl}/v1/completions", content, ct);
-            response.EnsureSuccessStatusCode();
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "Python-ONNX-Server nicht erreichbar: {Url}", _pythonServerBaseUrl);
-            httpError = true;
-        }
-        catch (TaskCanceledException) when (ct.IsCancellationRequested)
-        {
-            httpError = true;
-        }
-
-        if (httpError)
-        {
-            yield return new GenerationResult(string.Empty, 0, 0, "error");
-            yield break;
-        }
-
-        // Stream lesen (response ist hier nicht null)
-        var resp = response!;
-        using (resp)
-        {
-            var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using (stream)
-            {
-                var reader = new StreamReader(stream);
-                using (reader)
-                {
-                    var sb = new StringBuilder();
-                    var promptTokens = 0;
-                    var completionTokens = 0;
-                    var lastFinishReason = "stop";
-
-                    string? line;
-                    while ((line = await reader.ReadLineAsync(ct)) != null)
-                    {
-                        if (ct.IsCancellationRequested) { lastFinishReason = "length"; break; }
-                        if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
-                        var data = line["data: ".Length..].Trim();
-                        if (data == "[DONE]") break;
-
-                        string? chunkText = null;
-                        string? chunkFinishReason = null;
-                        try
-                        {
-                            using var doc = JsonDocument.Parse(data);
-                            var root = doc.RootElement;
-                            if (root.TryGetProperty("usage", out var usage))
-                            {
-                                promptTokens = usage.TryGetProperty("prompt_tokens", out var pt) ? pt.GetInt32() : promptTokens;
-                                completionTokens = usage.TryGetProperty("completion_tokens", out var ct2) ? ct2.GetInt32() : completionTokens;
-                            }
-                            if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
-                            {
-                                var choice = choices[0];
-                                chunkText = choice.TryGetProperty("text", out var t) ? t.GetString() : null;
-                                chunkFinishReason = choice.TryGetProperty("finish_reason", out var fr) ? fr.GetString() : null;
-                            }
-                        }
-                        catch (JsonException) { continue; }
-
-                        if (chunkText is not null) sb.Append(chunkText);
-
-                        if (chunkFinishReason is not null)
-                        {
-                            lastFinishReason = chunkFinishReason;
-                            yield return new GenerationResult(sb.ToString(), promptTokens, completionTokens, chunkFinishReason);
-                        }
-                        else
-                        {
-                            yield return new GenerationResult(sb.ToString(), promptTokens, completionTokens, "ongoing");
-                        }
-                    }
-
-                    if (sb.Length > 0)
-                    {
-                        yield return new GenerationResult(sb.ToString(), promptTokens, completionTokens, lastFinishReason);
-                    }
-                }
-            }
+            yield return new GenerationResult(result.Text, result.PromptTokens, result.CompletionTokens, result.FinishReason);
         }
     }
 
-    public async Task<float[]?> GetEmbeddingAsync(string text, CancellationToken ct = default)
+    /// <summary>
+    /// Liefert ein Embedding für den gegebenen Text, oder null, wenn das geladene
+    /// Modell keine Embeddings unterstützt (z. B. Qwen3.8-27B).
+    /// </summary>
+    public Task<float[]?> GetEmbeddingAsync(string text, CancellationToken ct = default)
     {
-        if (!IsReady) return null;
-        var requestBody = new { model = _loadedModelId, input = text };
-        var json = JsonSerializer.Serialize(requestBody);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
-        try
-        {
-            using var response = await _httpClient.PostAsync($"{_pythonServerBaseUrl}/v1/embeddings", content, ct);
-            if (!response.IsSuccessStatusCode) return null;
-            var body = await response.Content.ReadAsStringAsync(ct);
-            using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.TryGetProperty("data", out var data) && data.GetArrayLength() > 0)
-            {
-                var embedding = data[0].GetProperty("embedding");
-                return embedding.EnumerateArray().Select(e => e.GetSingle()).ToArray();
-            }
-            return null;
-        }
-        catch { return null; }
+        // Qwen3.8-27B ist ein generatives Sprachmodell ohne Embedding-Head.
+        // Die OpenAI-API-Route /v1/embeddings gibt 501 zurück.
+        return Task.FromResult<float[]?>(null);
     }
 
     public async ValueTask DisposeAsync()
     {
+        _logger.LogInformation("Beende Python-Engine-Prozess...");
+        await _pythonSupervisor.DisposeAsync();
+        await _pythonIpc.DisposeAsync();
         _httpClient.Dispose();
+        _logger.LogInformation("ONNX GenAI Engine disposed");
         await Task.CompletedTask;
     }
 }
@@ -236,4 +200,32 @@ public sealed class GenerationParameters
     public int TopK { get; init; } = 40;
     public int MaxNewTokens { get; init; } = 1024;
     public float RepeatPenalty { get; init; } = 1.1f;
+}
+
+public sealed class EngineInfo
+{
+    public string EngineVersion { get; set; } = "1.0.0";
+    public bool IsReady { get; set; }
+    public string? LoadedModelId { get; set; }
+    public int Stage0Device { get; set; }
+    public int Stage1Device { get; set; }
+    public int[] AvailableCudaDevices { get; set; } = Array.Empty<int>();
+    public string ExecutionProvider { get; set; } = "Dml";
+}
+
+public sealed class EngineDiagnostics
+{
+    public string EngineVersion { get; set; } = "1.0.0";
+    public string RuntimeVersion { get; set; } = "";
+    public string OS { get; set; } = "";
+    public string CPU { get; set; } = "";
+    public long RAM { get; set; } = 0;
+    public string CUDAVersion { get; set; } = "";
+    public int CUDADeviceCount { get; set; } = 0;
+    public string ModelInfo { get; set; } = "";
+    public string PartitionInfo { get; set; } = "";
+    public string ProviderInfo { get; set; } = "";
+    public string MemoryInfo { get; set; } = "";
+    public string Warnings { get; set; } = "";
+    public Dictionary<string, object> CustomFields { get; set; } = new();
 }

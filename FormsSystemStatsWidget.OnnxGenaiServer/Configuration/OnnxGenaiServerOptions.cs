@@ -65,4 +65,21 @@ public sealed class OnnxGenaiServerOptions
     /// Standard: http://localhost:8080 (gleicher Port wie der C#-Server).
     /// </summary>
     public string? PythonServerUrl { get; set; }
+
+    // Phase 3b: Python-Process-Supervision + IPC
+
+    /// <summary>
+    /// Pfad zum Python-Executable (z. B. "python", "C:\Python311\python.exe", oder venv-Pfad).
+    /// </summary>
+    public string? PythonExecutable { get; set; }
+
+    /// <summary>
+    /// Python-Modul-Pfad für die Engine (z. B. "onnx_engine.server").
+    /// </summary>
+    public string? PythonEngineModule { get; set; }
+
+    /// <summary>
+    /// Port für die Python-Engine (IPC via HTTP).
+    /// </summary>
+    public int? PythonEnginePort { get; set; }
 }
