@@ -11,11 +11,16 @@ class SamplingConfig:
     temperature: float = 0.6
     top_k: int = 20
     top_p: float = 0.9
+    typical_p: float = 1.0
     min_p: float = 0.0
     repetition_penalty: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     seed: int | None = None
+
+    def __post_init__(self) -> None:
+        if not 0.0 < self.typical_p <= 1.0:
+            raise ValueError("typical_p must be greater than 0 and at most 1.")
 
 
 class Sampler:
@@ -58,6 +63,13 @@ class Sampler:
             )
 
         probabilities = self._softmax(candidate_logits)
+
+        if self._config.typical_p < 1.0:
+            probabilities, candidates = self._apply_typical_p(
+                probabilities,
+                candidates,
+                self._config.typical_p,
+            )
 
         if self._config.top_p < 1.0:
             order = np.argsort(probabilities)[::-1]
@@ -130,6 +142,23 @@ class Sampler:
             mask[np.argmax(probabilities)] = True
 
         return logits[mask], candidates[mask]
+
+    @staticmethod
+    def _apply_typical_p(
+        probabilities: np.ndarray,
+        candidates: np.ndarray,
+        typical_p: float,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        safe_probabilities = np.maximum(probabilities, np.finfo(np.float64).tiny)
+        entropy = -np.sum(probabilities * np.log(safe_probabilities))
+        surprise = -np.log(safe_probabilities)
+        order = np.argsort(np.abs(surprise - entropy), kind="stable")
+        cumulative = np.cumsum(probabilities[order])
+        cutoff = int(np.searchsorted(cumulative, typical_p, side="left"))
+        selected = order[: cutoff + 1]
+        selected_probabilities = probabilities[selected]
+        selected_probabilities = selected_probabilities / selected_probabilities.sum()
+        return selected_probabilities, candidates[selected]
 
     @staticmethod
     def _softmax(values: np.ndarray) -> np.ndarray:

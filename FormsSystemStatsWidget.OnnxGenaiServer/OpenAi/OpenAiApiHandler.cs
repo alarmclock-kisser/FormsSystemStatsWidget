@@ -31,7 +31,7 @@ public static class OpenAiApiHandler
         }
 
         var prompt = BuildChatPrompt(request);
-        var parameters = BuildParameters(request.Temperature, request.TopP, request.TopK, request.EffectiveMaxTokens, request.RepeatPenalty, engine);
+        var parameters = BuildParameters(request.Temperature, request.TopP, request.TypicalP, request.TopK, request.EffectiveMaxTokens, request.RepeatPenalty, engine);
         var modelId = request.Model ?? engine.LoadedModelId ?? "fssw-onnx-genai";
         var id = $"chatcmpl-{Guid.NewGuid():N}"[..29];
         var created = (long)(DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
@@ -119,7 +119,7 @@ public static class OpenAiApiHandler
             return;
         }
 
-        var parameters = BuildParameters(request.Temperature, request.TopP, null, request.MaxTokens, request.RepeatPenalty, engine);
+        var parameters = BuildParameters(request.Temperature, request.TopP, request.TypicalP, null, request.MaxTokens, request.RepeatPenalty, engine);
         var modelId = request.Model ?? engine.LoadedModelId ?? "fssw-onnx-genai";
         var id = $"cmpl-{Guid.NewGuid():N}"[..29];
         var created = (long)(DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
@@ -253,13 +253,14 @@ public static class OpenAiApiHandler
     }
 
     private static GenerationParameters BuildParameters(
-        float? temperature, float? topP, int? topK, int? maxTokens, float? repeatPenalty, OnnxGenaiEngine engine)
+        float? temperature, float? topP, float? typicalP, int? topK, int? maxTokens, float? repeatPenalty, OnnxGenaiEngine engine)
     {
         var opts = engine.Options;
         return new GenerationParameters
         {
             Temperature = temperature ?? opts.Temperature,
             TopP = topP ?? opts.TopP,
+            TypicalP = typicalP ?? 1.0f,
             TopK = topK ?? opts.TopK,
             MaxNewTokens = maxTokens ?? opts.MaxTokens,
             RepeatPenalty = repeatPenalty ?? opts.RepeatPenalty

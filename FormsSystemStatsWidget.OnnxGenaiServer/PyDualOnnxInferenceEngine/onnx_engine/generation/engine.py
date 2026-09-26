@@ -9,6 +9,7 @@ import numpy as np
 from ..context.state import ContextState
 from ..errors import GenerationError
 from ..model.adapter import CausalOnnxAdapter
+from ..model.dual_stage_adapter import DualStageOnnxAdapter
 from ..tokenization.tokenizer import TokenizerService
 from .sampling import Sampler
 from .stopping import StopController
@@ -37,7 +38,7 @@ class GenerationEngine:
     def __init__(
         self,
         tokenizer: TokenizerService,
-        adapter: CausalOnnxAdapter,
+        adapter: CausalOnnxAdapter | DualStageOnnxAdapter,
     ) -> None:
         self._tokenizer = tokenizer
         self._adapter = adapter
@@ -70,12 +71,23 @@ class GenerationEngine:
         generation: GenerationContext,
     ) -> np.ndarray:
         encoded = self._tokenizer.encode_text(generation.prompt_text)
-        result = self._adapter.prefill(
-            encoded.input_ids,
-            state=generation.state.model_state or None,
-        )
+        inference_state = generation.state.inference_state
+        if isinstance(self._adapter, DualStageOnnxAdapter):
+            result = self._adapter.prefill(
+                encoded.input_ids,
+                stage0_state=inference_state.stage0_state or None,
+                stage1_state=inference_state.stage1_state or None,
+            )
+            inference_state.stage0_state = result.stage0_state
+            inference_state.stage1_state = result.stage1_state
+            inference_state.is_partitioned = True
+        else:
+            result = self._adapter.prefill(
+                encoded.input_ids,
+                state=inference_state.state or None,
+            )
+            inference_state.state = result.state
 
-        generation.state.model_state = result.state
         generation.state.token_ids = [
             int(value)
             for value in encoded.input_ids[0]
@@ -117,13 +129,25 @@ class GenerationEngine:
             if finished:
                 break
 
-            result = self._adapter.decode(
-                token_id,
-                position=generation.state.position - 1,
-                state=generation.state.model_state,
-            )
-
-            generation.state.model_state = result.state
+            position = generation.state.position - 1
+            inference_state = generation.state.inference_state
+            if isinstance(self._adapter, DualStageOnnxAdapter):
+                result = self._adapter.decode(
+                    token_id,
+                    position=position,
+                    stage0_state=inference_state.stage0_state,
+                    stage1_state=inference_state.stage1_state,
+                )
+                inference_state.stage0_state = result.stage0_state
+                inference_state.stage1_state = result.stage1_state
+                inference_state.is_partitioned = True
+            else:
+                result = self._adapter.decode(
+                    token_id,
+                    position=position,
+                    state=inference_state.state,
+                )
+                inference_state.state = result.state
             logits = self._select_last_logits(result.logits)
 
     async def generate_async(

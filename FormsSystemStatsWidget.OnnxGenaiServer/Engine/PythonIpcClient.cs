@@ -30,8 +30,16 @@ public sealed class PythonIpcClient : IAsyncDisposable
             var payload = new { model_path = modelPath };
             var json = JsonSerializer.Serialize(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
-            var response = await _httpClient.PostAsync($"{_baseUrl}/load", content, ct);
-            response.EnsureSuccessStatusCode();
+            using var response = await _httpClient.PostAsync($"{_baseUrl}/load", content, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogError(
+                    "Python-Engine Load fehlgeschlagen (HTTP {StatusCode}): {ResponseBody}",
+                    (int)response.StatusCode,
+                    errorContent);
+                return false;
+            }
             _logger.LogInformation("Modell geladen: {Path}", modelPath);
             return true;
         }
@@ -90,6 +98,7 @@ public sealed class PythonIpcClient : IAsyncDisposable
             prompt,
             temperature = parameters.Temperature,
             top_p = parameters.TopP,
+            typical_p = parameters.TypicalP,
             top_k = parameters.TopK,
             max_tokens = parameters.MaxNewTokens,
             repeat_penalty = parameters.RepeatPenalty,
@@ -103,7 +112,14 @@ public sealed class PythonIpcClient : IAsyncDisposable
         bool cancelled = false;
         try
         {
-            response = await _httpClient.PostAsync($"{_baseUrl}/generate", content, ct);
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/generate")
+            {
+                Content = content
+            };
+            response = await _httpClient.SendAsync(
+                httpRequest,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
             response.EnsureSuccessStatusCode();
         }
         catch (HttpRequestException ex)
@@ -139,6 +155,7 @@ public sealed class PythonIpcClient : IAsyncDisposable
                     var promptTokens = 0;
                     var completionTokens = 0;
                     var lastFinishReason = "stop";
+                    var finishReported = false;
 
                     string? line;
                     while ((line = await reader.ReadLineAsync(ct)) != null)
@@ -162,7 +179,16 @@ public sealed class PythonIpcClient : IAsyncDisposable
                             if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
                             {
                                 var choice = choices[0];
-                                chunkText = choice.TryGetProperty("text", out var t) ? t.GetString() : null;
+                                if (choice.TryGetProperty("text", out var textElement))
+                                {
+                                    chunkText = textElement.GetString();
+                                }
+                                else if (choice.TryGetProperty("delta", out var delta)
+                                    && delta.ValueKind == JsonValueKind.Object
+                                    && delta.TryGetProperty("content", out var contentElement))
+                                {
+                                    chunkText = contentElement.GetString();
+                                }
                                 chunkFinishReason = choice.TryGetProperty("finish_reason", out var fr) ? fr.GetString() : null;
                             }
                         }
@@ -173,6 +199,7 @@ public sealed class PythonIpcClient : IAsyncDisposable
                         if (chunkFinishReason is not null)
                         {
                             lastFinishReason = chunkFinishReason;
+                            finishReported = true;
                             yield return new PythonGenerationResult(sb.ToString(), promptTokens, completionTokens, chunkFinishReason);
                         }
                         else
@@ -181,7 +208,7 @@ public sealed class PythonIpcClient : IAsyncDisposable
                         }
                     }
 
-                    if (sb.Length > 0)
+                    if (sb.Length > 0 && !finishReported)
                     {
                         yield return new PythonGenerationResult(sb.ToString(), promptTokens, completionTokens, lastFinishReason);
                     }

@@ -18,6 +18,12 @@ class ModelPackage:
     model_io: dict[str, Any] | None
     tokenizer_path: Path | None
     generation_config: dict[str, Any]
+    stage0_path: Path | None = None
+    stage1_path: Path | None = None
+
+    @property
+    def is_partitioned(self) -> bool:
+        return self.stage0_path is not None and self.stage1_path is not None
 
     def get_json(self, name: str) -> dict[str, Any]:
         return self.json_data.get(name, {})
@@ -49,6 +55,7 @@ class ModelPackageLoader:
             raise FileNotFoundError(f"Model package directory not found: {root}")
 
         model_path = self._find_model(root)
+        stage0_path, stage1_path = self._find_partitioned_models(root)
         json_data = self._load_json_files(root)
 
         chat_template, extra_chat_templates = self._load_chat_templates(root)
@@ -69,7 +76,25 @@ class ModelPackageLoader:
             model_io=model_io,
             tokenizer_path=tokenizer_path,
             generation_config=json_data.get("generation_config", {}),
+            stage0_path=stage0_path,
+            stage1_path=stage1_path,
         )
+
+    @staticmethod
+    def _find_partitioned_models(root: Path) -> tuple[Path | None, Path | None]:
+        partition_root = root / "partitioned"
+        stage0_path = partition_root / "model.stage0.onnx"
+        stage1_path = partition_root / "model.stage1.onnx"
+        has_stage0 = stage0_path.is_file()
+        has_stage1 = stage1_path.is_file()
+
+        if not has_stage0 and not has_stage1:
+            return None, None
+        if not has_stage0 or not has_stage1:
+            raise ModelValidationError(
+                f"Partitioned model must contain both {stage0_path.name} and {stage1_path.name}."
+            )
+        return stage0_path, stage1_path
 
     @staticmethod
     def _find_model(root: Path) -> Path:

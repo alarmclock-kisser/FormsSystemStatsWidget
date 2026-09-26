@@ -18,6 +18,7 @@ builder.Services.Configure<RuntimeOptions>(builder.Configuration.GetSection("Run
 builder.Services.Configure<CudaOptions>(builder.Configuration.GetSection("Cuda"));
 builder.Services.Configure<GenerationDefaults>(builder.Configuration.GetSection("Generation"));
 builder.Services.Configure<DiagnosticsOptions>(builder.Configuration.GetSection("Diagnostics"));
+builder.Services.Configure<OnnxGenaiServerOptions>(builder.Configuration.GetSection(OnnxGenaiServerOptions.SectionName));
 
 // Register singleton options
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<EngineOptions>>().Value);
@@ -25,6 +26,7 @@ builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<RuntimeOption
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<CudaOptions>>().Value);
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<GenerationDefaults>>().Value);
 builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<DiagnosticsOptions>>().Value);
+builder.Services.AddSingleton(sp => sp.GetRequiredService<IOptions<OnnxGenaiServerOptions>>().Value);
 
 // Configure logging with structured fields
 builder.Logging.ClearProviders();
@@ -55,7 +57,9 @@ startupLogger.LogInformation("Cuda Options: Enabled={Enabled}, Stage0Device={Sta
     cudaOptions.Enabled, cudaOptions.Stage0Device, cudaOptions.Stage1Device);
 startupLogger.LogInformation("===========================================");
 
-var serverOptions = builder.Configuration.Get<OnnxGenaiServerOptions>() ?? new OnnxGenaiServerOptions();
+var serverOptions = builder.Configuration.GetSection(OnnxGenaiServerOptions.SectionName).Get<OnnxGenaiServerOptions>() ?? new OnnxGenaiServerOptions();
+if (serverOptions.ListenUrls.Length == 0)
+    serverOptions.ListenUrls = ["http://localhost:8080"];
 builder.WebHost.UseUrls(serverOptions.ListenUrls);
 
 var app = builder.Build();

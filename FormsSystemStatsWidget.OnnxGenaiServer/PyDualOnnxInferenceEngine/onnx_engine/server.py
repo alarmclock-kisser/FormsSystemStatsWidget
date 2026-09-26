@@ -62,6 +62,7 @@ def _parse_generation_request(data: dict[str, Any]) -> GenerationRequest:
         temperature=float(data.get("temperature", 0.6)),
         top_k=int(data.get("top_k", 20)),
         top_p=float(data.get("top_p", 0.9)),
+        typical_p=float(data.get("typical_p", 1.0)),
         repetition_penalty=float(data.get("repeat_penalty", 1.0)),
     )
 

@@ -16,6 +16,7 @@ class CudaRuntimeConfig:
     enable_cuda_graph: bool = False
     use_tf32: bool = True
     extra_options: dict[str, Any] = field(default_factory=dict)
+    stage1_device_id: int = 1
 
     def provider_options(self) -> dict[str, Any]:
         options: dict[str, Any] = {

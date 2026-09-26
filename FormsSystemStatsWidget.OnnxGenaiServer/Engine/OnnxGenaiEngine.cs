@@ -138,6 +138,8 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
                 if (!loaded)
                 {
                     _logger.LogWarning("Modell konnte nicht in Python-Engine geladen werden");
+                    LastError = $"Python engine failed to load model: {model.RootDir}";
+                    return;
                 }
             }
 
@@ -197,6 +199,7 @@ public sealed class GenerationParameters
 {
     public float Temperature { get; init; } = 0.8f;
     public float TopP { get; init; } = 0.9f;
+    public float TypicalP { get; init; } = 1.0f;
     public int TopK { get; init; } = 40;
     public int MaxNewTokens { get; init; } = 1024;
     public float RepeatPenalty { get; init; } = 1.1f;

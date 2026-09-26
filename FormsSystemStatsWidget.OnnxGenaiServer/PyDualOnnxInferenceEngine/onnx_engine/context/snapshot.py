@@ -9,6 +9,7 @@ import numpy as np
 
 from .state import ContextState
 from ..model.adapter import CausalOnnxAdapter
+from ..model.dual_stage_adapter import DualStageOnnxAdapter
 
 
 @dataclass(slots=True, frozen=True)
@@ -30,7 +31,7 @@ class ContextSnapshotStore:
         self,
         path: str | Path,
         context: ContextState,
-        adapter: CausalOnnxAdapter,
+        adapter: CausalOnnxAdapter | DualStageOnnxAdapter,
     ) -> None:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)

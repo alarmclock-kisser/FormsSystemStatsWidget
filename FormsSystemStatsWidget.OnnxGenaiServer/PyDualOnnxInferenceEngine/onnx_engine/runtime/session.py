@@ -84,7 +84,8 @@ class OrtSessionManager:
         if self._config.inter_op_num_threads > 0:
             options.inter_op_num_threads = self._config.inter_op_num_threads
 
-        options.disable_prepacking = self._config.disable_prepacking
+        if self._config.disable_prepacking:
+            options.add_session_config_entry("session.disable_prepacking", "1")
 
         provider = (
             "CUDAExecutionProvider",

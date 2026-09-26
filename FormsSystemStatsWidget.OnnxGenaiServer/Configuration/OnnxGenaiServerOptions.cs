@@ -11,7 +11,7 @@ public sealed class OnnxGenaiServerOptions
     /// <summary>
     /// Kestrel-Listen-URLs, z. B. "http://localhost:8080".
     /// </summary>
-    public string[] ListenUrls { get; set; } = ["http://localhost:8080"];
+    public string[] ListenUrls { get; set; } = [];
 
     /// <summary>
     /// Root-Ordner für alle ONNX-Modelle. Jede Subdirectory (1 Ebene, nicht rekursiv) ist

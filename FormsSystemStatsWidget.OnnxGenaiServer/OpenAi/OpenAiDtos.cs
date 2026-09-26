@@ -24,6 +24,9 @@ public sealed class ChatCompletionRequest
     [JsonPropertyName("top_p")]
     public float? TopP { get; set; }
 
+    [JsonPropertyName("typical_p")]
+    public float? TypicalP { get; set; }
+
     [JsonPropertyName("top_k")]
     public int? TopK { get; set; }
 
@@ -154,6 +157,9 @@ public sealed class CompletionRequest
 
     [JsonPropertyName("top_p")]
     public float? TopP { get; set; }
+
+    [JsonPropertyName("typical_p")]
+    public float? TypicalP { get; set; }
 
     [JsonPropertyName("max_tokens")]
     public int? MaxTokens { get; set; }
