@@ -39,6 +39,9 @@ public sealed class ChatCompletionRequest
     [JsonPropertyName("stream")]
     public bool Stream { get; set; }
 
+    [JsonPropertyName("enable_thinking")]
+    public bool? EnableThinking { get; set; }
+
     [JsonPropertyName("stop")]
     public JsonElement? Stop { get; set; }
 
@@ -53,6 +56,9 @@ public sealed class ChatCompletionRequest
 
     [JsonPropertyName("repeat_penalty")]
     public float? RepeatPenalty { get; set; }
+
+    [JsonPropertyName("min_p")]
+    public float? MinP { get; set; }
 
     /// <summary> Effektive max_tokens (max_completion_tokens hat Vorrang). </summary>
     public int? EffectiveMaxTokens => MaxCompletionTokens ?? MaxTokens;
@@ -175,6 +181,18 @@ public sealed class CompletionRequest
 
     [JsonPropertyName("repeat_penalty")]
     public float? RepeatPenalty { get; set; }
+
+    [JsonPropertyName("min_p")]
+    public float? MinP { get; set; }
+
+    [JsonPropertyName("presence_penalty")]
+    public float? PresencePenalty { get; set; }
+
+    [JsonPropertyName("frequency_penalty")]
+    public float? FrequencyPenalty { get; set; }
+
+    [JsonPropertyName("seed")]
+    public int? Seed { get; set; }
 }
 
 public sealed class CompletionResponse

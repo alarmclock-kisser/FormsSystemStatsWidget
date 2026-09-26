@@ -24,14 +24,28 @@ public static class OpenAiApiHandler
         try { request = await ctx.Request.ReadFromJsonAsync<ChatCompletionRequest>(ct); }
         catch (Exception ex) { await WriteJsonAsync(ctx, new ErrorResponse { Error = new ErrorBody { Message = $"Invalid JSON: {ex.Message}" } }, 400); return; }
 
-        if (request is null || request.Messages.Count == 0)
+        if (request is null || request.Messages is null || request.Messages.Count == 0)
         {
             await WriteJsonAsync(ctx, new ErrorResponse { Error = new ErrorBody { Message = "messages is required" } }, 400);
             return;
         }
 
-        var prompt = BuildChatPrompt(request);
-        var parameters = BuildParameters(request.Temperature, request.TopP, request.TypicalP, request.TopK, request.EffectiveMaxTokens, request.RepeatPenalty, engine);
+        if (request.Messages.Any(message =>
+            message is null
+            || string.IsNullOrWhiteSpace(message.Role)
+            || message.Content is null))
+        {
+            await WriteJsonAsync(ctx, new ErrorResponse { Error = new ErrorBody { Message = "Each message requires a role and string content" } }, 400);
+            return;
+        }
+
+        var messages = request.Messages
+            .Select(message => new PythonChatMessage(message.Role, message.Content, message.Name))
+            .ToArray();
+        var parameters = BuildParameters(
+            request.Temperature, request.TopP, request.TypicalP, request.TopK,
+            request.EffectiveMaxTokens, request.RepeatPenalty, request.MinP,
+            request.PresencePenalty, request.FrequencyPenalty, request.Seed, engine);
         var modelId = request.Model ?? engine.LoadedModelId ?? "fssw-onnx-genai";
         var id = $"chatcmpl-{Guid.NewGuid():N}"[..29];
         var created = (long)(DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
@@ -45,7 +59,7 @@ public static class OpenAiApiHandler
             var streamPromptTokens = 0;
             var streamCompletionTokens = 0;
 
-            await foreach (var result in engine.GenerateAsync(prompt, parameters, ct))
+            await foreach (var result in engine.GenerateChatAsync(messages, parameters, request.EnableThinking ?? false, ct))
             {
                 if (result.FinishReason == "error") { await WriteSseErrorAsync(stream, "Generation failed"); return; }
                 if (result.FinishReason == "ongoing")
@@ -79,7 +93,7 @@ public static class OpenAiApiHandler
         var nonStreamPromptTokens = 0;
         var nonStreamCompletionTokens = 0;
         var finishReason = "stop";
-        await foreach (var result in engine.GenerateAsync(prompt, parameters, ct))
+        await foreach (var result in engine.GenerateChatAsync(messages, parameters, request.EnableThinking ?? false, ct))
         {
             if (result.FinishReason == "error")
             {
@@ -119,7 +133,10 @@ public static class OpenAiApiHandler
             return;
         }
 
-        var parameters = BuildParameters(request.Temperature, request.TopP, request.TypicalP, null, request.MaxTokens, request.RepeatPenalty, engine);
+        var parameters = BuildParameters(
+            request.Temperature, request.TopP, request.TypicalP, null,
+            request.MaxTokens, request.RepeatPenalty, request.MinP,
+            request.PresencePenalty, request.FrequencyPenalty, request.Seed, engine);
         var modelId = request.Model ?? engine.LoadedModelId ?? "fssw-onnx-genai";
         var id = $"cmpl-{Guid.NewGuid():N}"[..29];
         var created = (long)(DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
@@ -245,15 +262,10 @@ public static class OpenAiApiHandler
     // Helpers
     // ------------------------------------------------------------------
 
-    private static string BuildChatPrompt(ChatCompletionRequest request)
-    {
-        var sb = new StringBuilder();
-        foreach (var msg in request.Messages) sb.AppendLine($"[{msg.Role}]: {msg.Content}");
-        return sb.ToString();
-    }
-
     private static GenerationParameters BuildParameters(
-        float? temperature, float? topP, float? typicalP, int? topK, int? maxTokens, float? repeatPenalty, OnnxGenaiEngine engine)
+        float? temperature, float? topP, float? typicalP, int? topK, int? maxTokens,
+        float? repeatPenalty, float? minP, float? presencePenalty, float? frequencyPenalty,
+        int? seed, OnnxGenaiEngine engine)
     {
         var opts = engine.Options;
         return new GenerationParameters
@@ -263,7 +275,11 @@ public static class OpenAiApiHandler
             TypicalP = typicalP ?? 1.0f,
             TopK = topK ?? opts.TopK,
             MaxNewTokens = maxTokens ?? opts.MaxTokens,
-            RepeatPenalty = repeatPenalty ?? opts.RepeatPenalty
+            RepeatPenalty = repeatPenalty ?? opts.RepeatPenalty,
+            MinP = minP ?? 0.0f,
+            PresencePenalty = presencePenalty ?? 0.0f,
+            FrequencyPenalty = frequencyPenalty ?? 0.0f,
+            Seed = seed
         };
     }
 

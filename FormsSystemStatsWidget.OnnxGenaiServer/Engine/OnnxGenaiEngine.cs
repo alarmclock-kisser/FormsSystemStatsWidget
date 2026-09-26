@@ -29,17 +29,7 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
         _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
 
         // Python-Process-Supervision + IPC
-        var pythonExe = options.PythonExecutable ?? "python";
-        var engineModule = options.PythonEngineModule ?? "onnx_engine.server";
-        var port = options.PythonEnginePort ?? 8081;
-        _pythonSupervisor = new PythonProcessSupervisor(
-            _logger,
-            pythonExe,
-            engineModule,
-            port,
-            startupTimeoutMs: 30000,
-            maxRestarts: 3,
-            restartIntervalMs: 5000);
+        _pythonSupervisor = new PythonProcessSupervisor(_logger, options);
         _pythonIpc = new PythonIpcClient(_logger, _pythonSupervisor.BaseUrl);
     }
 
@@ -134,7 +124,9 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
             {
                 _pythonServerBaseUrl = _pythonSupervisor.BaseUrl;
                 _logger.LogInformation("Lade Modell in Python-Engine: {Path}", model.RootDir);
+                _pythonSupervisor.SetModelState("Loading", model.RootDir);
                 var loaded = await _pythonIpc.LoadModelAsync(model.RootDir);
+                _pythonSupervisor.SetModelState(loaded ? "Loaded" : "Unloaded", model.RootDir);
                 if (!loaded)
                 {
                     _logger.LogWarning("Modell konnte nicht in Python-Engine geladen werden");
@@ -173,6 +165,24 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
         }
     }
 
+    public async IAsyncEnumerable<GenerationResult> GenerateChatAsync(
+        IReadOnlyList<PythonChatMessage> messages,
+        GenerationParameters parameters,
+        bool enableThinking = false,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (!IsReady)
+        {
+            yield return new GenerationResult(string.Empty, 0, 0, "error");
+            yield break;
+        }
+
+        await foreach (var result in _pythonIpc.GenerateChatAsync(messages, parameters, enableThinking, ct))
+        {
+            yield return new GenerationResult(result.Text, result.PromptTokens, result.CompletionTokens, result.FinishReason);
+        }
+    }
+
     /// <summary>
     /// Liefert ein Embedding für den gegebenen Text, oder null, wenn das geladene
     /// Modell keine Embeddings unterstützt (z. B. Qwen3.8-27B).
@@ -203,6 +213,10 @@ public sealed class GenerationParameters
     public int TopK { get; init; } = 40;
     public int MaxNewTokens { get; init; } = 1024;
     public float RepeatPenalty { get; init; } = 1.1f;
+    public float MinP { get; init; }
+    public float PresencePenalty { get; init; }
+    public float FrequencyPenalty { get; init; }
+    public int? Seed { get; init; }
 }
 
 public sealed class EngineInfo

@@ -4,7 +4,7 @@ namespace FormsSystemStatsWidget.OnnxGenaiServer.Engine;
 
 /// <summary>
 /// Modell-Partitionierung Mode A — PrePartitioned (R55).
-/// Detectet stage0.onnx + stage1.onnx im Modell-Verzeichnis,
+/// Detectet stage0.onnx + stage1.onnx im Modell-Verzeichnis oder partitioned/,
 /// liest Partition-Config aus config.json, bestimmt Device-Assignment.
 /// </summary>
 public static class ModelPartitioner
@@ -31,8 +31,13 @@ public static class ModelPartitioner
     public static PartitionDiscoveryResult Discover(string modelDirectory, CudaOptions? cudaOptions = null, ILogger? logger = null)
     {
         var issues = new List<ValidationIssue>();
-        var stage0Model = FindStageFile(modelDirectory, "stage0", issues);
-        var stage1Model = FindStageFile(modelDirectory, "stage1", issues);
+        var partitionDirectory = Path.Combine(modelDirectory, "partitioned");
+        var stageDirectory = File.Exists(Path.Combine(partitionDirectory, "model.stage0.onnx"))
+            || File.Exists(Path.Combine(partitionDirectory, "model.stage1.onnx"))
+            ? partitionDirectory
+            : modelDirectory;
+        var stage0Model = FindStageFile(stageDirectory, "stage0", issues);
+        var stage1Model = FindStageFile(stageDirectory, "stage1", issues);
 
         if (stage0Model is null || stage1Model is null)
         {

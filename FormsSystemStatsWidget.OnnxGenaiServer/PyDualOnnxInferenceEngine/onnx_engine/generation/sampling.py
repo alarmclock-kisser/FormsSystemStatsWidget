@@ -19,6 +19,8 @@ class SamplingConfig:
     seed: int | None = None
 
     def __post_init__(self) -> None:
+        if not 0.0 <= self.min_p <= 1.0:
+            raise ValueError("min_p must be between 0 and 1.")
         if not 0.0 < self.typical_p <= 1.0:
             raise ValueError("typical_p must be greater than 0 and at most 1.")
 

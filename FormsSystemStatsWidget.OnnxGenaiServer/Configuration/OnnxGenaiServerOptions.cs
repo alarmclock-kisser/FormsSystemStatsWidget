@@ -82,4 +82,16 @@ public sealed class OnnxGenaiServerOptions
     /// Port für die Python-Engine (IPC via HTTP).
     /// </summary>
     public int? PythonEnginePort { get; set; }
+
+    public bool SingleEngineOnly { get; set; } = true;
+    public bool IdleAutoShutdownEnabled { get; set; } = true;
+    public int IdleAutoShutdownSeconds { get; set; } = 120;
+    public int GracefulShutdownTimeoutSeconds { get; set; } = 5;
+    public int ForceKillTimeoutSeconds { get; set; } = 3;
+    public int RegistryLockTimeoutSeconds { get; set; } = 10;
+    public int HealthCheckIntervalSeconds { get; set; } = 15;
+    public int StartupTimeoutSeconds { get; set; } = 30;
+    public int MaxPythonRestarts { get; set; } = 3;
+    public int PythonRestartIntervalSeconds { get; set; } = 5;
+    public string? EngineProcessRegistryPath { get; set; }
 }

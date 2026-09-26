@@ -238,17 +238,15 @@ class InferenceEngine:
             path,
             context,
             self.adapter,
+            model_id=str(self.package.root),
         )
 
     def load_context(self, path: str | Path) -> ContextState:
         self.load()
-        if isinstance(self.adapter, DualStageOnnxAdapter):
-            raise EngineStateError(
-                "Partitioned context restore is not available until stage-aware snapshot restore is implemented."
-            )
         return self._snapshot_store.load(
             path,
             self.adapter,
+            model_id=str(self.package.root),
         )
 
     def reset_context(self, context: ContextState) -> None:

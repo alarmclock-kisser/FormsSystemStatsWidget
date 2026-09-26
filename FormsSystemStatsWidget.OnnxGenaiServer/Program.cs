@@ -195,6 +195,11 @@ app.MapGet("/metrics", () =>
 });
 
 app.Logger.LogInformation("FSSW ONNX GenAI Server laeuft auf: {Urls}", string.Join(", ", serverOptions.ListenUrls));
-app.Lifetime.ApplicationStopping.Register(() => _ = engine.DisposeAsync());
-
-await app.RunAsync();
+try
+{
+    await app.RunAsync();
+}
+finally
+{
+    await engine.DisposeAsync();
+}

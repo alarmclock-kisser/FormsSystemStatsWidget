@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -103,7 +104,15 @@ class GenerationEngine:
         logits = self.prefill(generation)
 
         sampler = Sampler(request.sampling)
-        stopper = StopController(request.stopping)
+        stop_config = request.stopping
+        eos_token_id = self._tokenizer.eos_token_id
+        if eos_token_id is not None:
+            stop_config = replace(
+                stop_config,
+                eos_token_ids=stop_config.eos_token_ids | {eos_token_id},
+            )
+        stopper = StopController(stop_config)
+        control_stop_ids = stop_config.eos_token_ids | stop_config.stop_token_ids
 
         for step in range(request.stopping.max_new_tokens):
             token_id = sampler.sample(
@@ -116,6 +125,8 @@ class GenerationEngine:
             generation.generated_count = step + 1
 
             stop = stopper.push(token_id, token_text)
+            if token_id in control_stop_ids:
+                token_text = ""
             finished = stop or stopper.reached_limit(generation.generated_count)
 
             yield GenerationChunk(

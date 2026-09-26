@@ -7,10 +7,116 @@ They verify the state container, reset semantics, and lifecycle invariants.
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import numpy as np
 
 from onnx_engine.context import ContextState, InferenceState
+from onnx_engine.context.snapshot import ContextSnapshotStore
 from onnx_engine.context.conversation import Conversation
+from onnx_engine.errors import ModelValidationError
+from onnx_engine.model.adapter import CausalOnnxAdapter
+from onnx_engine.model.dual_stage_adapter import DualStageOnnxAdapter
+from onnx_engine.model.io_spec import (
+    DualStageIoSpec,
+    ModelIoSpec,
+    StageIoSpec,
+    StateBinding,
+)
+
+
+class FakeOrtValue:
+    def __init__(self, array: np.ndarray, device_id: int) -> None:
+        self.array = np.asarray(array).copy()
+        self.device_id = device_id
+
+    def numpy(self) -> np.ndarray:
+        return self.array.copy()
+
+    @classmethod
+    def ortvalue_from_numpy(
+        cls,
+        array: np.ndarray,
+        device_type: str,
+        device_id: int,
+    ) -> "FakeOrtValue":
+        if device_type != "cuda":
+            raise ValueError("Expected CUDA restore.")
+        return cls(array, device_id)
+
+
+def _state_binding(name: str) -> StateBinding:
+    return StateBinding(
+        input_name=f"input.{name}",
+        output_name=f"output.{name}",
+        state_name=name,
+    )
+
+
+def _dual_snapshot_adapter(
+    stage0_device_id: int = 0,
+    stage1_device_id: int = 1,
+) -> DualStageOnnxAdapter:
+    adapter = object.__new__(DualStageOnnxAdapter)
+    adapter._stage0_device_id = stage0_device_id
+    adapter._stage1_device_id = stage1_device_id
+    stage0_bindings = (
+        _state_binding("kv.0.key"),
+        _state_binding("conv.0"),
+        _state_binding("recurrent.0"),
+    )
+    stage1_bindings = (
+        _state_binding("kv.1.key"),
+        _state_binding("conv.1"),
+        _state_binding("recurrent.1"),
+    )
+    adapter._io_spec = DualStageIoSpec(
+        stage0=StageIoSpec(
+            boundary_outputs=("boundary.hidden",),
+            kv_bindings=(stage0_bindings[0],),
+            conv_bindings=(stage0_bindings[1],),
+            recurrent_bindings=(stage0_bindings[2],),
+        ),
+        stage1=StageIoSpec(
+            boundary_inputs=("boundary.hidden",),
+            kv_bindings=(stage1_bindings[0],),
+            conv_bindings=(stage1_bindings[1],),
+            recurrent_bindings=(stage1_bindings[2],),
+        ),
+    )
+    node_args = lambda bindings: {
+        binding.input_name: SimpleNamespace(
+            shape=[1, 2, 3],
+            type="tensor(float16)",
+        )
+        for binding in bindings
+    }
+    adapter._stage0_input_info = node_args(stage0_bindings)
+    adapter._stage1_input_info = node_args(stage1_bindings)
+    return adapter
+
+
+def _single_snapshot_adapter(device_id: int = 0) -> CausalOnnxAdapter:
+    adapter = object.__new__(CausalOnnxAdapter)
+    binding = _state_binding("stage0.legacy-looking-name")
+    adapter._device_id = device_id
+    adapter._io_spec = ModelIoSpec(
+        input_ids="input_ids",
+        logits_output="logits",
+        past_inputs=(binding,),
+    )
+    adapter._input_info = {
+        binding.input_name: SimpleNamespace(
+            shape=[1, 2, 3],
+            type="tensor(float16)",
+        )
+    }
+    return adapter
 
 
 class TestInferenceState(unittest.TestCase):
@@ -55,6 +161,159 @@ class TestInferenceState(unittest.TestCase):
         state.is_partitioned = True
         self.assertFalse(state.is_empty)
         self.assertTrue(state.is_partitioned)
+
+
+class TestContextSnapshotStore(unittest.TestCase):
+    def test_dual_snapshot_round_trip_preserves_names_devices_and_state_kinds(self) -> None:
+        adapter = _dual_snapshot_adapter()
+        context = ContextState(
+            token_ids=[10, 11],
+            messages=[{"role": "user", "content": "hello"}],
+            generated_token_ids=[11],
+        )
+        context.inference_state.is_partitioned = True
+        for index, binding in enumerate(adapter.io_spec.stage0.all_state_bindings):
+            context.inference_state.stage0_state[binding.state_name] = FakeOrtValue(
+                np.full((1, 2, 3), index + 1, dtype=np.float16), 0
+            )
+        for index, binding in enumerate(adapter.io_spec.stage1.all_state_bindings):
+            context.inference_state.stage1_state[binding.state_name] = FakeOrtValue(
+                np.full((1, 2, 3), index + 4, dtype=np.float16), 1
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dual-context.npz"
+            store = ContextSnapshotStore()
+            store.save(path, context, adapter, model_id="qwen-test")
+
+            with np.load(path, allow_pickle=False) as archive:
+                metadata = json.loads(str(archive["__metadata__"].item()))
+                state_arrays = [
+                    name for name in archive.files if name.startswith("__state__")
+                ]
+            self.assertEqual(len(state_arrays), 6)
+            self.assertFalse(any("boundary.hidden" in name for name in state_arrays))
+            self.assertEqual(
+                metadata["contract"]["devices"],
+                {"stage0_state": 0, "stage1_state": 1},
+            )
+
+            with patch(
+                "onnx_engine.context.inference_state.ort",
+                SimpleNamespace(OrtValue=FakeOrtValue),
+            ):
+                restored = store.load(path, adapter, model_id="qwen-test")
+
+        self.assertEqual(restored.token_ids, [10, 11])
+        self.assertEqual(restored.messages, context.messages)
+        self.assertEqual(restored.generated_token_ids, [11])
+        self.assertTrue(restored.inference_state.is_partitioned)
+        self.assertEqual(
+            set(restored.inference_state.stage0_state),
+            set(context.inference_state.stage0_state),
+        )
+        self.assertEqual(
+            set(restored.inference_state.stage1_state),
+            set(context.inference_state.stage1_state),
+        )
+        for name, value in restored.inference_state.stage0_state.items():
+            self.assertEqual(value.device_id, 0)
+            np.testing.assert_array_equal(
+                value.array,
+                context.inference_state.stage0_state[name].array,
+            )
+        for name, value in restored.inference_state.stage1_state.items():
+            self.assertEqual(value.device_id, 1)
+            np.testing.assert_array_equal(
+                value.array,
+                context.inference_state.stage1_state[name].array,
+            )
+
+    def test_empty_dual_context_can_be_snapshotted_before_prefill(self) -> None:
+        adapter = _dual_snapshot_adapter()
+        context = ContextState()
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "empty-context.npz"
+            store = ContextSnapshotStore()
+            store.save(path, context, adapter, model_id="qwen-test")
+            with patch(
+                "onnx_engine.context.inference_state.ort",
+                SimpleNamespace(OrtValue=FakeOrtValue),
+            ):
+                restored = store.load(path, adapter, model_id="qwen-test")
+
+        self.assertTrue(restored.inference_state.is_partitioned)
+        self.assertTrue(restored.inference_state.is_empty)
+
+    def test_single_snapshot_preserves_state_and_device(self) -> None:
+        adapter = _single_snapshot_adapter(device_id=2)
+        context = ContextState()
+        context.inference_state.state["stage0.legacy-looking-name"] = FakeOrtValue(
+            np.ones((1, 2, 3), dtype=np.float16), 2
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "single-context.npz"
+            store = ContextSnapshotStore()
+            store.save(path, context, adapter, model_id="single-test")
+            with patch(
+                "onnx_engine.context.inference_state.ort",
+                SimpleNamespace(OrtValue=FakeOrtValue),
+            ):
+                restored = store.load(path, adapter, model_id="single-test")
+
+        self.assertFalse(restored.inference_state.is_partitioned)
+        self.assertIn("stage0.legacy-looking-name", restored.inference_state.state)
+        self.assertEqual(
+            restored.inference_state.state["stage0.legacy-looking-name"].device_id,
+            2,
+        )
+
+    def test_incompatible_or_partial_snapshot_is_rejected(self) -> None:
+        adapter = _dual_snapshot_adapter()
+        context = ContextState()
+        context.inference_state.is_partitioned = True
+        for binding in adapter.io_spec.stage0.all_state_bindings:
+            context.inference_state.stage0_state[binding.state_name] = FakeOrtValue(
+                np.ones((1, 2, 3), dtype=np.float16), 0
+            )
+        for binding in adapter.io_spec.stage1.all_state_bindings:
+            context.inference_state.stage1_state[binding.state_name] = FakeOrtValue(
+                np.ones((1, 2, 3), dtype=np.float16), 1
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dual-context.npz"
+            store = ContextSnapshotStore()
+            store.save(path, context, adapter, model_id="qwen-test")
+            with self.assertRaises(ModelValidationError):
+                store.load(path, adapter, model_id="different-model")
+
+            partial = ContextState()
+            partial.inference_state.is_partitioned = True
+            partial.inference_state.stage0_state = dict(
+                context.inference_state.stage0_state
+            )
+            partial.inference_state.stage0_state.pop(
+                next(iter(partial.inference_state.stage0_state))
+            )
+            partial.inference_state.stage1_state = dict(
+                context.inference_state.stage1_state
+            )
+            with self.assertRaises(ModelValidationError):
+                store.save(path, partial, adapter, model_id="qwen-test")
+
+            with np.load(path, allow_pickle=False) as archive:
+                payload = {name: archive[name] for name in archive.files}
+            state_array = next(
+                name for name in payload if name.startswith("__state__stage0_state__")
+            )
+            payload[state_array] = np.ones((1, 2, 2), dtype=np.float16)
+            malformed_path = Path(directory) / "malformed-context.npz"
+            np.savez_compressed(malformed_path, **payload)
+            with self.assertRaises(ModelValidationError):
+                store.load(malformed_path, adapter, model_id="qwen-test")
 
 
 class TestContextState(unittest.TestCase):

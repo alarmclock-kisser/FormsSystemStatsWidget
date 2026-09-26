@@ -88,10 +88,10 @@ public sealed class PythonIpcClient : IAsyncDisposable
     /// <summary>
     /// Startet eine Generation und streamt die Ergebnisse.
     /// </summary>
-    public async IAsyncEnumerable<PythonGenerationResult> GenerateAsync(
+    public IAsyncEnumerable<PythonGenerationResult> GenerateAsync(
         string prompt,
         GenerationParameters parameters,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        CancellationToken ct = default)
     {
         var payload = new
         {
@@ -102,8 +102,49 @@ public sealed class PythonIpcClient : IAsyncDisposable
             top_k = parameters.TopK,
             max_tokens = parameters.MaxNewTokens,
             repeat_penalty = parameters.RepeatPenalty,
+            min_p = parameters.MinP,
+            presence_penalty = parameters.PresencePenalty,
+            frequency_penalty = parameters.FrequencyPenalty,
+            seed = parameters.Seed,
             stream = true
         };
+        return GenerateCoreAsync(payload, ct);
+    }
+
+    public IAsyncEnumerable<PythonGenerationResult> GenerateChatAsync(
+        IReadOnlyList<PythonChatMessage> messages,
+        GenerationParameters parameters,
+        bool enableThinking = false,
+        CancellationToken ct = default)
+    {
+        var payload = new
+        {
+            messages = messages.Select(message => new
+            {
+                role = message.Role,
+                content = message.Content,
+                name = message.Name
+            }),
+            enable_thinking = enableThinking,
+            temperature = parameters.Temperature,
+            top_p = parameters.TopP,
+            typical_p = parameters.TypicalP,
+            top_k = parameters.TopK,
+            max_tokens = parameters.MaxNewTokens,
+            repeat_penalty = parameters.RepeatPenalty,
+            min_p = parameters.MinP,
+            presence_penalty = parameters.PresencePenalty,
+            frequency_penalty = parameters.FrequencyPenalty,
+            seed = parameters.Seed,
+            stream = true
+        };
+        return GenerateCoreAsync(payload, ct);
+    }
+
+    private async IAsyncEnumerable<PythonGenerationResult> GenerateCoreAsync(
+        object payload,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
         var json = JsonSerializer.Serialize(payload);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -228,3 +269,5 @@ public sealed class PythonIpcClient : IAsyncDisposable
 /// Ergebnis einer Python-Generation.
 /// </summary>
 public sealed record PythonGenerationResult(string Text, int PromptTokens, int CompletionTokens, string FinishReason);
+
+public sealed record PythonChatMessage(string Role, string? Content, string? Name);

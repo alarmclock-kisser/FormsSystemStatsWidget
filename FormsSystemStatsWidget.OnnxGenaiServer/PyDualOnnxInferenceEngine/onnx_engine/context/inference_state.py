@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -63,6 +64,73 @@ class InferenceState:
         for name, value in self.stage1_state.items():
             result[f"stage1.{name}"] = value.numpy()
         return result
+
+    def to_cpu_snapshot(self) -> dict[str, dict[str, Any]]:
+        """Copy each state namespace separately for an explicit snapshot."""
+        return {
+            "state": {name: value.numpy() for name, value in self.state.items()},
+            "stage0_state": {
+                name: value.numpy() for name, value in self.stage0_state.items()
+            },
+            "stage1_state": {
+                name: value.numpy() for name, value in self.stage1_state.items()
+            },
+        }
+
+    def restore_from_cpu_snapshot(
+        self,
+        states: Mapping[str, Mapping[str, Any]],
+        device_ids: Mapping[str, int],
+        *,
+        is_partitioned: bool,
+    ) -> None:
+        """Restore named state dictionaries onto their assigned CUDA devices."""
+        import numpy as np
+
+        sections = {"state", "stage0_state", "stage1_state"}
+        if set(states) != sections:
+            raise ValueError("Snapshot must contain all three state sections.")
+
+        if is_partitioned:
+            if states["state"]:
+                raise ValueError("Partitioned snapshot contains single-model state.")
+            required_devices = {"stage0_state", "stage1_state"}
+        else:
+            if states["stage0_state"] or states["stage1_state"]:
+                raise ValueError("Single-model snapshot contains partitioned state.")
+            required_devices = {"state"}
+
+        if set(device_ids) != required_devices:
+            raise ValueError("Snapshot device mapping does not match its state layout.")
+        if any(
+            isinstance(device_id, bool)
+            or not isinstance(device_id, int)
+            or device_id < 0
+            for device_id in device_ids.values()
+        ):
+            raise ValueError("Snapshot device IDs must be non-negative integers.")
+
+        restored: dict[str, dict[str, ort.OrtValue]] = {
+            section: {} for section in sections
+        }
+        for section in sections:
+            device_id = device_ids.get(section)
+            if device_id is None:
+                continue
+            for name, value in states[section].items():
+                if not isinstance(name, str) or not name:
+                    raise ValueError("Snapshot state names must be non-empty strings.")
+                array = np.asarray(value)
+                if array.dtype.hasobject:
+                    raise ValueError(f"Snapshot state '{name}' has an invalid object dtype.")
+                restored[section][name] = ort.OrtValue.ortvalue_from_numpy(
+                    np.ascontiguousarray(array), "cuda", device_id
+                )
+
+        self.state = restored["state"]
+        self.stage0_state = restored["stage0_state"]
+        self.stage1_state = restored["stage1_state"]
+        self.is_partitioned = is_partitioned
 
     def from_cpu(
         self,

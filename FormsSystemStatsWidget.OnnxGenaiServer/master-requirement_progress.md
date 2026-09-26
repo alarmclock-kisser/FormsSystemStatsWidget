@@ -76,7 +76,16 @@
 
 *Liste der Themen/Requirements, die in der aktuellen Session bearbeitet wurden. Der nächste Agent prüft diese zuerst, um den Kontext zu verstehen.*
 
-**Session 2026-09-26 (Agent: GitHub Copilot - C# API/IPC end-to-end):**
+**Session 2026-09-26 (Agent: GitHub Copilot - Lifecycle + Sampling API):**
+
+1. **Prozess-Lifecycle real verifiziert** — C#-Dummy-Host registrierte PID/Instance-ID, stoppte den Worker graceful über `/shutdown` und entfernte den Registry-Eintrag ohne Force-Kill. Startup-Reconciliation entfernte einen stale PID-Eintrag.
+2. **Reales Qwen unload-to-idle verifiziert** — `/load` und `/unload` lieferten HTTP 200; derselbe Worker-PID blieb zunächst `Unloaded` erreichbar. Nach dem Idle-Timeout waren PID und Listener weg. Der Exit-Code wurde nicht erfasst.
+3. **Sampling-Parameter ergänzt** — `min_p`, `presence_penalty`, `frequency_penalty` und `seed` laufen von Chat-/Completion-DTOs über C#-IPC bis `SamplingConfig`; `min_p` wird validiert.
+4. **Validierung** — Python-Suite vor den letzten Python-Patches: 60 passed, 1 skipped. Danach fokussiert: 2 Sampling-Tests und 1 EOS-Regressionstest bestanden; Pylance-Syntaxprüfung sauber. Server-Build erfolgreich; CS8602 und ASP0000 bestehen weiterhin.
+5. **Realer strukturierter Qwen-Chat nach EOS-Fix** — C# `/v1/chat/completions` lieferte exakt `4`, `completion_tokens=2`, `finish_reason=stop`; keine Kontrolltokens im Inhalt. Host graceful beendet, Registry leer.
+6. **Partition-Discovery korrigiert** — C# erkennt jetzt auch `partitioned/model.stage0.onnx` und `partitioned/model.stage1.onnx`, passend zum Python-Loader; Server-Build erfolgreich.
+
+**Vorherige Session 2026-09-26 (Agent: GitHub Copilot - C# API/IPC end-to-end):**
 
 1. **Real supervised model load verified** — C# host on port 8280 started its Python child on isolated port 8082 and loaded `Qwen3.8-27B-onnx-int4`. The C# health endpoint reported `engineReady=true`.
 2. **C# API to Python IPC to Qwen streaming verified** — `POST /v1/chat/completions` returned HTTP 200 and live OpenAI-style SSE from the real model.
@@ -185,13 +194,13 @@
 | Phase 1  | Infrastructure   | R1-R14, R41, R61, R78       | ✅ Completed                                                                  |
 | Phase 2  | Model Validation | R19-R24, R55-R58            | ✅ Completed                                                                  |
 | Phase 3  | Stage Loading    | R3, R55, R56, R57, R73, R74 | ✅ Completed (3a+3b+3c)                                                       |
-| Phase 4  | State            | R31, R32, R37               | 🔄 In Progress (4a+4b+4c abgeschlossen; 4d Dual-Device Snapshot/Restore offen) |
-| Phase 5  | Boundary         | R33, R34                    | ⬜                                                                            |
-| Phase 6  | Prefill          | R29, R39                    | ⬜                                                                            |
-| Phase 7  | Decode           | R30, R39                    | ⬜                                                                            |
-| Phase 8  | Sampling         | R27, R28                    | ⬜                                                                            |
-| Phase 9  | Tokenizer        | R25, R26                    | ⬜                                                                            |
-| Phase 10 | Chat Templates   | R25, R65                    | ⬜                                                                            |
+| Phase 4  | State            | R31, R32, R37               | ✅ Completed (4a-4d; dual-device snapshot/restore implementiert und getestet) |
+| Phase 5  | Boundary         | R33, R34                    | 🔄 In Progress (R33 verifiziert; R34 Memory-Tracking teilweise offen)         |
+| Phase 6  | Prefill          | R29, R39                    | ✅ Completed (Multi-token, persistenter State, realer Qwen-Lauf)              |
+| Phase 7  | Decode           | R30, R39                    | ✅ Completed (Single-token, persistenter State, realer Qwen-Lauf)             |
+| Phase 8  | Sampling         | R27, R28                    | 🔄 In Progress (greedy/top-k/top-p/min-p; weitere Parität offen)              |
+| Phase 9  | Tokenizer        | R25, R26                    | 🔄 In Progress (Python-Service vorhanden; API-Parität offen)                  |
+| Phase 10 | Chat Templates   | R25, R65                    | ✅ Completed (reales strukturiertes Qwen-Chat-E2E erfolgreich)                |
 | Phase 11 | OpenAI API       | R42-R49, R51-R53, R86-R87   | 🔄 In Progress                                                                |
 | Phase 12 | Streaming        | R44, R45, R85               | 🔄 In Progress                                                                |
 | Phase 13 | Benchmarking     | R38, R80, R83, R92          | ⬜                                                                            |
@@ -215,15 +224,15 @@
 
 | Category                           | Total | Completed | In Progress | Not Started | Done % |
 | ---------------------------------- | ----- | --------- | ----------- | ----------- | ------ |
-| **Engine**                   | 38    | 9         | 8           | 21          | 24%    |
+| **Engine**                   | 38    | 13        | 13          | 12          | 34%    |
 | **API**                      | 15    | 0         | 4           | 11          | 0%     |
 | **Diagnostics**              | 8     | 2         | 2           | 4           | 25%    |
 | **Testing**                  | 10    | 0         | 0           | 10          | 0%     |
-| **Phases**                   | 15    | 3         | 3           | 9           | 20%    |
+| **Phases**                   | 15    | 7         | 5           | 3           | 47%    |
 | **Definition of Done**       | 5     | 0         | 0           | 5           | 0%     |
 | **Initial Acceptance Test**  | 2     | 0         | 0           | 2           | 0%     |
 | **Final Architectural Goal** | 1     | 0         | 0           | 1           | 0%     |
-| **Overall**                  | 103   | 11        | 17          | 75          | 11%    |
+| **Overall**                  | 103   | 19        | 25          | 59          | 18%    |
 
 ---
 
@@ -261,16 +270,16 @@
 | R22 | ONNX Validation                  | In Progress | OnnxValidator with ValidateOnnx (Level 1-3), ValidateAllOnnxFiles, ComputeSha256. Level 1: filesystem (exists/readable/size>0, magic bytes, version). Level 2: external data (offsets, lengths, end offsets, overlap detection). Level 3: protobuf (nodes, initializers, graph inputs/outputs, opsets). Level 4 (ORT session) pending native engine. |
 | R23 | Binary Integrity Validation      | Completed   | BinaryIntegrityValidator with ComputeHashes, ValidateAgainstManifest, GenerateManifest. SHA-256 for .onnx, .data, .bin, .safetensors files. Optional checksums.sha256 manifest support.                                                                                                                                                              |
 | R24 | Model JSON Validation            | Completed   | JsonValidator with ValidateAll, ValidateConfigJson, ValidateTokenizerJson, ValidateGenerationConfigJson, ValidateTokenizerConfigJson, ValidateSpecialTokensJson. Detects malformed JSON, missing fields, incompatibilities (hidden_size/num_attention_heads divisibility, top_p range, etc.).                                                        |
-| R25 | Chat Template                    | Not Started | Support chat_template.jinja, model-provided templates                                                                                                                                                                                                                                                                                                |
-| R26 | Tokenizer                        | Not Started | ITokenizer interface, Encode/Decode/EncodeChat                                                                                                                                                                                                                                                                                                       |
-| R27 | Generation API                   | Not Started | All configurable parameters (temp, top_p, top_k, etc.)                                                                                                                                                                                                                                                                                               |
-| R28 | Sampling Architecture            | Not Started | ISampler with Greedy, Temperature, TopK, TopP, MinP, Composite                                                                                                                                                                                                                                                                                       |
-| R29 | Prefill                          | Not Started | Multi-token prefill, persistent state after prefill                                                                                                                                                                                                                                                                                                  |
-| R30 | Decode                           | Not Started | Single token, reuse KV state, no model reload                                                                                                                                                                                                                                                                                                        |
-| R31 | Persistent State                 | Completed   | `InferenceState` owns stage0/stage1 OrtValue dictionaries; `GenerationEngine` persists the outputs from prefill and decode. Real two-GPU generation verified state residency on both stages. CPU serialization is implemented; dual-device snapshot restore remains Phase 4d.                                                                 |
+| R25 | Chat Template                    | Completed   | Modell-lokales Jinja-Template wird angewendet; strukturierte Qwen-Nachricht mit `enable_thinking=false` real über C#-API beantwortet. |
+| R26 | Tokenizer                        | In Progress | Python `TokenizerService` unterstützt Encode/Decode/Chat-Template; separates C#-`ITokenizer` ist gemäß Python-Inference-Ownership nicht umgesetzt. |
+| R27 | Generation API                   | In Progress | Temperatur, Top-K/P, Typical-P, Min-P, Wiederholungs-/Presence-/Frequency-Penalty und Seed werden bis `SamplingConfig` weitergereicht; weitere Optionen offen. |
+| R28 | Sampling Architecture            | In Progress | Python-Sampler unterstützt Greedy, Temperature, Top-K/P, Typical-P, Min-P und Penalties; Composite-Sampler-Parität offen. |
+| R29 | Prefill                          | Completed   | Multi-token-Prefill und persistenter State; realer Qwen-Dual-GPU-Prefill zuvor verifiziert. |
+| R30 | Decode                           | Completed   | Single-token-Decode mit wiederverwendetem State ohne Modell-Reload; realer Qwen-Dual-GPU-Lauf zuvor verifiziert. |
+| R31 | Persistent State                 | Completed   | `InferenceState` owns both stage dictionaries; prefill/decode persist outputs. Dual-device snapshot/restore and a real snapshot roundtrip were completed and tested in Phase 4d. |
 | R32 | Empty KV State                   | Completed   | Empty KV sequence axis is 0; symbolic `kv_cache_dim` resolves from `genai_config.json` decoder head size. Mock shape tests and real Qwen3.8 prefill/decode on GPUs 0/1 passed, including KV growth.                                                                                                                                            |
-| R33 | Boundary Handling                | Not Started | Device-resident boundary, no CPU CopyOutputsToCpu()                                                                                                                                                                                                                                                                                                  |
-| R34 | GPU Memory                       | Not Started | VRAM total/used/free, stage/state/temporary memory tracking                                                                                                                                                                                                                                                                                          |
+| R33 | Boundary Handling                | Completed   | Dual-stage adapter passes boundary `OrtValue`s directly between stage bindings; no boundary CPU copy. Real two-GPU generation previously verified. |
+| R34 | GPU Memory                       | In Progress | C# diagnostics expose per-GPU VRAM total/used/free via `nvidia-smi`; stage/state/temporary allocation breakdown remains open best-effort work. |
 | R35 | Concurrency                      | Not Started | Single vs multiple concurrent generations, session isolation                                                                                                                                                                                                                                                                                         |
 | R36 | Session Abstraction              | Not Started | IInferenceSession with Id, SequenceLength, PrefillAsync, DecodeAsync, ResetAsync                                                                                                                                                                                                                                                                     |
 | R37 | Reset                            | In Progress | `InferenceEngine.reset_context()` clears conversation and all stage state while leaving loaded sessions untouched; container/reset semantics have unit coverage. Loaded-session reset lifecycle has not yet been asserted in the real-model acceptance path.                                                                                              |
@@ -286,7 +295,7 @@
 | R40 | Real-Time Statistics            | In Progress | DiagnosticsOptions with PerformanceLogging, GpuMonitoring, LogLevel configured. Actual performance statistics output pending native engine.                                                                                                           |
 | R41 | Metrics API                     | Completed   | GET /health, GET /status, GET /ready, GET /metrics all implemented. /status includes engine, runtime (.NET/OS/CPU/RAM/ORT), CUDA (devices, VRAM, driver), models. /ready returns 503 if not ready. /metrics includes timestamp, engine, cuda, models. |
 | R42 | OpenAI-Compatible API           | In Progress | GET /v1/models, POST /v1/chat/completions, POST /v1/completions and POST /v1/embeddings are routed. Real Qwen chat streaming was verified through C# -> Python IPC; broader compatibility checks remain.                                                                                           |
-| R43 | Chat Completions                | In Progress | OpenAI-style messages work end to end, but the test prompt was echoed rather than followed. Model-specific chat-template rendering and prompt correctness remain pending (R25).                                                                                                                     |
+| R43 | Chat Completions                | In Progress | Reale strukturierte Anfrage über C#→Python→Qwen: HTTP 200, Inhalt exakt `4`, zwei Completion-Tokens, `finish_reason=stop`. Weitere OpenAI-Kompatibilität bleibt offen. |
 | R44 | Streaming                       | In Progress | OpenAI-style SSE was live-tested through C# and Python IPC. Duplicate finalization in PythonIpcClient is fixed; verified one finish chunk and one [DONE]. Cancellation, error, and broader compatibility tests remain.                                                                               |
 | R45 | Non-Streaming Fallback          | In Progress | If stream=false, returns normal OpenAI-compatible completion response. Both modes use same engine.GenerateAsync.                                                                                                                                      |
 | R46 | Completions API                 | In Progress | POST /v1/completions with prompt, max_tokens, stream implemented in OpenAiApiHandler.HandleCompletionsAsync.                                                                                                                                          |
@@ -329,7 +338,7 @@
 | #   | Requirement             | Status      | Notes                                                                                       |
 | --- | ----------------------- | ----------- | ------------------------------------------------------------------------------------------- |
 | R64 | Image Input Abstraction | Not Started | IImageProcessor, ProcessAsync, core text engine must not depend on it                       |
-| R65 | Prompt Construction     | Not Started | Separate: API request → chat messages → chat template → tokenizer → token IDs → engine |
+| R65 | Prompt Construction     | Completed   | Reale Anfrage durchläuft API DTO → strukturierte Nachrichten → Modell-Chat-Template → Tokenizer → Dual-Stage-Inferenz. |
 | R66 | Context Management      | Not Started | Configurable maximum context, overflow policies (Error, TruncateOldest, SlidingWindow)      |
 | R67 | Stop Conditions         | Not Started | Stop strings, EOS token, custom stop token IDs, max tokens, cancellation                    |
 
@@ -420,13 +429,13 @@
 | Phase 1  | Infrastructure   | Completed      | .NET 10 solution ✅, configuration (5 sections) ✅, logging ✅, diagnostics options ✅, CUDA/ORT discovery ✅ (nvidia-smi, ORT version, .NET/OS/CPU/RAM). OpenAI API routes ✅, streaming ✅, model discovery ✅. /status, /ready, /metrics endpoints ✅.                                                                                                                                                                                   |
 | Phase 2  | Model Validation | Completed      | ModelManifest + ModelArtifact + ModelArchitectureInfo + TokenizerInfo + PartitionInfo + ValidationResult ✅. Model discovery ✅. JSON validation (R24) ✅. ONNX validation Level 1-3 (R22) ✅. SHA-256 integrity (R23) ✅.                                                                                                                                                                                                                  |
 | Phase 3  | Stage Loading    | ✅ Completed   | Phase 3a DONE: ModelPartitioner (R55), PartitionValidator (R57), DeviceTensor (R74), Orchestrierung in InitializeAsync (R3). Phase 3b DONE: PythonProcessSupervisor (R15, R16), PythonIpcClient (R15, R99), OnnxGenaiEngine erweitert (R3, R15). Phase 3c DONE: Python-Engine-Server (onnx_engine/server.py) — Flask HTTP/SSE-Transport.                                                                                                   |
-| Phase 4  | State            | 🔄 In Progress | Phase 4a DONE: statischer Dual-Stage I/O Contract. Phase 4b DONE: DualStageOnnxAdapter und Boundary-Handoff. Phase 4c DONE: GenerationEngine/InferenceEngine dual-stage orchestration, validated by 51 passed/1 skipped and real two-GPU prefill/decode. Phase 4d PENDING: dual-device snapshot/restore. R31/R32 completed; R37 in progress. |
-| Phase 5  | Boundary         | Not Started    | GPU0→GPU1 boundary device-resident, no CPU roundtrip                                                                                                                                                                                                                                                                                                                                                                                       |
-| Phase 6  | Prefill          | Not Started    | Multi-token prefill implementation                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Phase 7  | Decode           | Not Started    | Persistent single-token decode                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Phase 8  | Sampling         | Not Started    | Greedy, temperature, top-k, top-p, etc.                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Phase 9  | Tokenizer        | Not Started    | Model tokenizer implementation                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Phase 10 | Chat Templates   | Not Started    | Jinja/model-specific template support                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Phase 4  | State            | ✅ Completed   | 4a-4c dual-stage contract/orchestration and real prefill/decode; 4d dual-device snapshot/restore plus focused tests and real roundtrip completed. R37 reset remains tracked separately. |
+| Phase 5  | Boundary         | In Progress    | R33 device-resident `OrtValue` handoff verified; R34 exposes device totals/free/used but stage/state/temporary breakdown remains open. |
+| Phase 6  | Prefill          | ✅ Completed   | Multi-token prefill and persistent state; real Qwen GPU path previously passed. |
+| Phase 7  | Decode           | ✅ Completed   | Persistent single-token decode without model reload; real Qwen GPU path previously passed. |
+| Phase 8  | Sampling         | In Progress    | Greedy, temperature, top-k/p, typical-p, min-p, penalties and seed; remaining sampler parity is open. |
+| Phase 9  | Tokenizer        | In Progress    | Python tokenizer service supports encode/decode/chat template; broader interface/API parity remains. |
+| Phase 10 | Chat Templates   | Completed      | Model Jinja template and structured prompt path verified through the real C#→Python→Qwen request. |
 | Phase 11 | OpenAI API       | In Progress    | Routes are wired; real Qwen /v1/chat/completions verified through C# to Python IPC. Chat-template correctness and broader OpenAI compatibility remain.                                                                                                                                                                                                                          |
 | Phase 12 | Streaming        | In Progress    | Real SSE verified; duplicate final chunk fixed. Cancellation, error paths, and broader streaming checks remain.                                                                                                                                                                                                                                                                |
 | Phase 13 | Benchmarking     | Not Started    | Complete benchmark suite                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -437,14 +446,12 @@
 
 ## Next Actions
 
-1. **Phase 4d:** Dual-Device Snapshot/Restore für beide Stage-State-Dictionaries implementieren und testen.
-2. **Phase 5:** Boundary (R33/R34) vollständig gegen device-resident transfer und GPU memory tracking abgleichen; vorhandenen Handoff-Test nutzen.
-3. **Phase 6-8:** Prefill, Decode und Sampling requirements weiterverfolgen; dual-stage runtime path now exists.
-4. **Phase 9-10:** Tokenizer und Chat-Template-Verhalten vervollständigen; klären, warum der kurzen E2E-Testprompt gespiegelt wurde.
-5. **Phase 11-12:** Nicht-streamende Antworten sowie Streaming-Cancellation, Fehlerpfade und OpenAI-Kompatibilität gezielt ergänzen.
-6. **Phase 13-14:** Benchmarking und Stress Tests.
-7. **Phase 15:** Optimierung erst nach funktionaler Parität.
-8. **MTP:** Optional; DEFER bis normaler Generate-Pfad stabil ist.
+1. **R25/R43:** Nach dem EOS-Fix eine reale strukturierte Qwen-Chat-Anfrage einmal wiederholen und sauberen Inhalt bestätigen; keine weiteren Lifecycle-Smokes.
+2. **R34:** Stage-/State-/Temporary-Memory-Messung best-effort ergänzen, nur wo Runtime-APIs sie ohne CPU-Kopie erlauben.
+3. **R27/R28:** Sampling-Parameter validieren und verbleibende Composite-/Stop-Unterstützung schließen.
+4. **R26/R65:** Template-/Tokenizer-Parität anhand des realen Chat-Aufrufs vervollständigen.
+5. **R44/R45/R51-R53:** Streaming-Abbruch, Fehlerpfade und Non-Streaming/API-Kompatibilität gezielt abdecken.
+6. **Phasen 13-15:** Benchmarking und Stress-Tests vor Optimierung; MTP bleibt bis dahin deferred.
 
 ---
 
@@ -563,4 +570,4 @@
 *Tracking system initialized: 2026-09-25*
 *Last updated: 2026-09-26*
 *Progress file tracks 103 requirements against master-requirement_Onnx-Genai_Server.md*
-*Phase 1-3 completed. Phase 4a/4b/4c completed; Phase 4d (dual-device snapshot/restore) is next. Real Qwen3.8-27B `InferenceEngine` prefill/decode passed on CUDA devices 0/1. Phase 5 and later phases remain open.*
+*Stand 2026-09-26: Phase 4 (inkl. 4d) sowie Phasen 6-7 abgeschlossen. R33 abgeschlossen; R34, Sampling-Parität, Tokenizer/Chat-E2E und API-/Streaming-Randfälle bleiben offen. Reales Qwen unload-to-idle und Python-Prozessbereinigung wurden verifiziert.*
