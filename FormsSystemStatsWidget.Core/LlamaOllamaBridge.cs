@@ -473,7 +473,6 @@ namespace FormsSystemStatsWidget.Core
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
             LogMessageLayout(sanitizedBody);
-            Logger.Log(sanitizedBody);
             Logger.Log("========================================");
 
             if (GetGenerationStatsText)
@@ -493,10 +492,19 @@ namespace FormsSystemStatsWidget.Core
             response.SendChunked = true;
 
             using Stream upstreamStream = await upstreamRes.Content.ReadAsStreamAsync();
-            await LlamaStreamTransformer.TransformOpenAiStreamAsync(upstreamStream, response.OutputStream, _detectedModelName, GetGenerationStatsText);
+            LlamaStreamTransformer.OpenAiStreamTransformResult streamResult =
+                await LlamaStreamTransformer.TransformOpenAiStreamWithDiagnosticsAsync(upstreamStream, response.OutputStream, _detectedModelName, GetGenerationStatsText);
 
-            response.OutputStream.Close();
-            Logger.Log("[LlamaBridge] OpenAI direct stream successfully ended.");
+            if (streamResult.ClientDisconnected)
+            {
+                response.Abort();
+            }
+            else
+            {
+                response.OutputStream.Close();
+            }
+
+            Logger.Log($"[LlamaBridge] OpenAI direct stream ended: {streamResult.Status}.");
             return true;
         }
 
@@ -573,8 +581,18 @@ namespace FormsSystemStatsWidget.Core
             {
                 ["model"] = _detectedModelName,
                 ["messages"] = messagesArray,
-                ["stream"] = ollamaReq?["stream"] ?? true
+                ["stream"] = ollamaReq?["stream"]?.DeepClone() ?? JsonValue.Create(true)
             };
+            if (ollamaReq is JsonObject ollamaRequest)
+            {
+                foreach (string field in new[] { "tools", "tool_choice", "parallel_tool_calls" })
+                {
+                    if (ollamaRequest[field] is JsonNode value)
+                    {
+                        openAiReq[field] = value.DeepClone();
+                    }
+                }
+            }
 
             // Sanitize: ensures system message is first, trims context, normalizes tool history
             string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(
@@ -584,7 +602,7 @@ namespace FormsSystemStatsWidget.Core
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE (OLLAMA PATH)]");
-            Logger.Log(sanitizedBody);
+            LogMessageLayout(sanitizedBody);
             Logger.Log("========================================");
 
             using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
@@ -593,21 +611,32 @@ namespace FormsSystemStatsWidget.Core
             };
 
             using HttpResponseMessage upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
-            response.ContentType = "application/x-javascript; charset=utf-8";
+            response.ContentType = "application/x-ndjson; charset=utf-8";
             response.StatusCode = (int) upstreamRes.StatusCode;
             response.SendChunked = true;
 
+            LlamaStreamTransformer.OpenAiStreamTransformResult? streamResult = null;
             if (ollamaReq?["stream"]?.GetValue<bool>() == false)
             {
                 await WriteNonStreamingOllamaResponseAsync(response, upstreamRes);
             }
             else
             {
-                await WriteStreamingOllamaResponseAsync(response, upstreamRes);
+                streamResult = await WriteStreamingOllamaResponseAsync(response, upstreamRes);
             }
 
-            response.OutputStream.Close();
-            Logger.Log("[LlamaBridge] Ollama NDJSON stream successfully ended.");
+            if (streamResult?.ClientDisconnected == true)
+            {
+                response.Abort();
+            }
+            else
+            {
+                response.OutputStream.Close();
+            }
+
+            Logger.Log(streamResult == null
+                ? "[LlamaBridge] Ollama non-stream response ended."
+                : $"[LlamaBridge] Ollama stream ended: {streamResult.Status}.");
             return true;
         }
 
@@ -615,66 +644,69 @@ namespace FormsSystemStatsWidget.Core
         {
             string resContent = await upstreamRes.Content.ReadAsStringAsync();
             JsonNode? openAiRes = JsonNode.Parse(resContent);
-            string text = openAiRes?["choices"]?[0]?["message"]?["content"]?.ToString() ?? string.Empty;
+            JsonObject? choice = openAiRes?["choices"]?[0] as JsonObject;
+            JsonObject? openAiMessage = choice?["message"] as JsonObject;
+            var ollamaMessage = new JsonObject
+            {
+                ["role"] = "assistant",
+                ["content"] = openAiMessage?["content"]?.ToString() ?? string.Empty
+            };
+
+            if (openAiMessage?["tool_calls"] is JsonArray openAiCalls)
+            {
+                var ollamaCalls = new JsonArray();
+                foreach (JsonNode? call in openAiCalls)
+                {
+                    JsonObject? function = call?["function"] as JsonObject;
+                    ollamaCalls.Add(new JsonObject
+                    {
+                        ["function"] = new JsonObject
+                        {
+                            ["name"] = function?["name"]?.ToString() ?? throw new JsonException("A tool call has no function name."),
+                            ["arguments"] = ParseOllamaToolArguments(function?["arguments"])
+                        }
+                    });
+                }
+                ollamaMessage["tool_calls"] = ollamaCalls;
+            }
 
             var ollamaRes = new JsonObject
             {
                 ["model"] = _detectedModelName,
-                ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = text },
+                ["message"] = ollamaMessage,
                 ["done"] = true
             };
+            if (choice?["finish_reason"] != null)
+            {
+                ollamaRes["done_reason"] = choice["finish_reason"]!.ToString();
+            }
 
             byte[] buffer = Encoding.UTF8.GetBytes(ollamaRes.ToJsonString() + "\n");
             await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
         }
 
-        private static async Task WriteStreamingOllamaResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamRes)
+        private static JsonObject ParseOllamaToolArguments(JsonNode? arguments)
+        {
+            if (arguments == null)
+            {
+                return new JsonObject();
+            }
+            if (arguments is JsonObject argumentsObject)
+            {
+                return (JsonObject) argumentsObject.DeepClone();
+            }
+            if (arguments is JsonValue value && value.TryGetValue(out string? jsonArguments) && jsonArguments != null)
+            {
+                return JsonNode.Parse(jsonArguments)?.AsObject()
+                    ?? throw new JsonException("Tool-call arguments must be a JSON object.");
+            }
+            throw new JsonException("Tool-call arguments must be a JSON object.");
+        }
+
+        private static async Task<LlamaStreamTransformer.OpenAiStreamTransformResult> WriteStreamingOllamaResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamRes)
         {
             using Stream responseStream = await upstreamRes.Content.ReadAsStreamAsync();
-            using var streamReader = new StreamReader(responseStream);
-            using var writer = new StreamWriter(response.OutputStream, new UTF8Encoding(false));
-
-            string? line;
-            while ((line = await streamReader.ReadLineAsync()) != null)
-            {
-                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
-                {
-                    continue;
-                }
-
-                string data = line["data: ".Length..].Trim();
-                if (data == "[DONE]")
-                {
-                    break;
-                }
-
-                try
-                {
-                    JsonNode? openAiChunk = JsonNode.Parse(data);
-                    string contentChunk = openAiChunk?["choices"]?[0]?["delta"]?["content"]?.ToString() ?? string.Empty;
-                    if (string.IsNullOrEmpty(contentChunk))
-                    {
-                        continue;
-                    }
-
-                    var ollamaChunk = new JsonObject
-                    {
-                        ["model"] = _detectedModelName,
-                        ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = contentChunk },
-                        ["done"] = false
-                    };
-
-                    await writer.WriteLineAsync(ollamaChunk.ToJsonString());
-                    await writer.FlushAsync();
-                }
-                catch
-                {
-                }
-            }
-
-            var finalChunk = new JsonObject { ["model"] = _detectedModelName, ["done"] = true };
-            await writer.WriteLineAsync(finalChunk.ToJsonString());
-            await writer.FlushAsync();
+            return await LlamaStreamTransformer.TransformOpenAiStreamToOllamaAsync(responseStream, response.OutputStream, _detectedModelName);
         }
 
         private static async Task<bool> TryHandleApiTagsAsync(HttpListenerRequest request, HttpListenerResponse response)

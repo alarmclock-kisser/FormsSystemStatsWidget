@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -75,7 +76,7 @@ namespace FormsSystemStatsWidget.Core
 
                 if (node is not JsonObject root)
                 {
-                    Logger.Log($"[Sanitized Request] {node?.ToJsonString() ?? jsonInput}");
+                    Logger.Log($"[Sanitized Request] Ignored non-object JSON body (length={jsonInput.Length}).");
                     return node?.ToJsonString() ?? jsonInput;
                 }
 
@@ -117,7 +118,6 @@ namespace FormsSystemStatsWidget.Core
                 {
                     _ = message.Remove("audio");
                     _ = message.Remove("refusal");
-                    _ = message.Remove("reasoning_content");
                     NormalizeToolHistoryMessage(message, flattenToolHistory);
                 }
 
@@ -945,270 +945,469 @@ namespace FormsSystemStatsWidget.Core
 
 
 
-        public static async Task TransformOpenAiStreamAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false)
+        public enum OpenAiStreamCompletionStatus
         {
-            using var streamReader = new StreamReader(upstreamStream);
-            using var writer = new StreamWriter(downstreamStream, new UTF8Encoding(false)) { AutoFlush = true };
+            CompletedByLlm,
+            CompletedByToolCall,
+            CompletedByDone,
+            ClientDisconnected,
+            UpstreamError,
+            TransformationError
+        }
 
+        public sealed record OpenAiStreamTransformResult(
+            bool DoneReceived,
+            string? FinalFinishReason,
+            int ToolCallCount,
+            int GeneratedContentLength,
+            bool ClientDisconnected,
+            OpenAiStreamCompletionStatus Status);
+
+        public static Task TransformOpenAiStreamAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false)
+        {
+            return TransformOpenAiStreamWithDiagnosticsAsync(upstreamStream, downstreamStream, detectedModelName, getGenerationStatsText);
+        }
+
+        public static async Task<OpenAiStreamTransformResult> TransformOpenAiStreamWithDiagnosticsAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false)
+        {
+            const int traceLimit = 12;
+            using var streamReader = new StreamReader(upstreamStream);
+
+            var llamaServerTrace = new Queue<string>();
+            var copilotTrace = new Queue<string>();
+            var outputToolCallKeys = new HashSet<string>(StringComparer.Ordinal);
             bool isReceivingReasoning = false;
             bool inToolCall = false;
             bool toolCallTriggered = false;
-            string toolBuffer = "";
-            string responseTextBuffer = "";
-            string detectBuffer = "";
-            string? line;
+            bool doneReceived = false;
+            bool clientDisconnected = false;
+            bool upstreamError = false;
+            bool transformationError = false;
+            bool statsInjected = false;
+            int generatedContentLength = 0;
+            string? finalFinishReason = null;
+            string toolBuffer = string.Empty;
 
-            while ((line = await streamReader.ReadLineAsync()) != null)
+            void AddTrace(Queue<string> trace, string entry)
             {
-                // Für Debugzwecke
-                // Logger.Log($"[RAW CHUNK] {line}");
-
-                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
+                if (trace.Count == traceLimit)
                 {
-                    if (!toolCallTriggered)
-                    {
-                        try
-                        {
-                            await writer.WriteLineAsync(line);
-                            await writer.FlushAsync();
-                        }
-                        catch (IOException) { break; }
-                        catch (System.Net.HttpListenerException) { break; }
-                        catch { break; }
-                    }
-                    continue;
+                    _ = trace.Dequeue();
                 }
+                trace.Enqueue(entry);
+            }
 
-                var dataStr = line["data: ".Length..].Trim();
-                if (dataStr == "[DONE]")
-                {
-                    if (getGenerationStatsText)
-                    {
-                        int deltaTokens = LlamaOllamaBridge.s_startContextTokens - await LlamaServerStats.GetCurrentContextTokensAsync();
-                        TimeSpan deltaTime = DateTime.Now - LlamaOllamaBridge.s_generationStartUtc;
-                        float rate = (float)(deltaTokens / deltaTime.TotalSeconds);
-                        string modelName = File.Exists(detectedModelName) ? Path.GetFileNameWithoutExtension(detectedModelName) : detectedModelName;
-
-                        string statsText = $"\n\n[Generation Stats] Model: '{modelName}', Tokens: {deltaTokens:N0}, Time: {deltaTime.TotalSeconds:F3}s, Rate: {rate:F3} tokens/s";
-                        await writer.WriteLineAsync("data: " + statsText);
-                        await writer.FlushAsync();
-                    }
-                    else
-                    {
-                        try
-                        {
-                            await writer.WriteLineAsync(line);
-                            await writer.FlushAsync();
-                        }
-                        catch { }
-                        break;
-                    }
-                }
-
+            async Task EmitLineAsync(string outputLine)
+            {
                 try
                 {
-                    var chunk = JsonNode.Parse(dataStr);
-                    if (chunk?["choices"] is not JsonArray choicesArray || choicesArray.Count == 0)
+                    byte[] outputBytes = Encoding.UTF8.GetBytes(outputLine + "\r\n");
+                    await downstreamStream.WriteAsync(outputBytes);
+                    await downstreamStream.FlushAsync();
+                }
+                catch (IOException)
+                {
+                    clientDisconnected = true;
+                    throw new DownstreamDisconnectedException();
+                }
+                catch (System.Net.HttpListenerException)
+                {
+                    clientDisconnected = true;
+                    throw new DownstreamDisconnectedException();
+                }
+                catch (ObjectDisposedException)
+                {
+                    clientDisconnected = true;
+                    throw new DownstreamDisconnectedException();
+                }
+
+                if (outputLine.StartsWith("data: ", StringComparison.Ordinal))
+                {
+                    string data = outputLine["data: ".Length..].Trim();
+                    AddTrace(copilotTrace, SummarizeOpenAiSseData(data));
+                    if (data != "[DONE]")
                     {
-                        if (!toolCallTriggered && chunk?["content"] != null)
+                        TrackOpenAiOutput(data, outputToolCallKeys, ref generatedContentLength, ref finalFinishReason);
+                    }
+                }
+            }
+
+            async Task EmitChunkAsync(JsonObject chunk)
+            {
+                JsonObject? firstChoice = chunk["choices"] is JsonArray choices && choices.Count > 0
+                    ? choices[0] as JsonObject
+                    : null;
+                string? finishReason = firstChoice?["finish_reason"]?.ToString();
+                bool containsToolCalls = firstChoice?["delta"]?["tool_calls"] is JsonArray toolCalls && toolCalls.Count > 0;
+
+                if (getGenerationStatsText && !statsInjected &&
+                    !string.IsNullOrEmpty(finishReason) &&
+                    !string.Equals(finishReason, "tool_calls", StringComparison.Ordinal) &&
+                    !containsToolCalls)
+                {
+                    int deltaTokens = LlamaOllamaBridge.s_startContextTokens - await LlamaServerStats.GetCurrentContextTokensAsync();
+                    TimeSpan deltaTime = DateTime.Now - LlamaOllamaBridge.s_generationStartUtc;
+                    double rate = deltaTime.TotalSeconds > 0 ? deltaTokens / deltaTime.TotalSeconds : 0;
+                    string modelName = File.Exists(detectedModelName) ? Path.GetFileNameWithoutExtension(detectedModelName) : detectedModelName;
+                    string statsText = $"\n\n[Generation Stats] Model: '{modelName}', Tokens: {deltaTokens:N0}, Time: {deltaTime.TotalSeconds:F3}s, Rate: {rate:F3} tokens/s";
+
+                    JsonObject statsChunk = chunk.DeepClone().AsObject();
+                    JsonObject statsChoice = statsChunk["choices"]![0]!.AsObject();
+                    statsChoice["delta"] = new JsonObject { ["content"] = statsText };
+                    statsChoice["finish_reason"] = null;
+                    await EmitLineAsync("data: " + statsChunk.ToJsonString());
+                    statsInjected = true;
+                }
+
+                await EmitLineAsync("data: " + chunk.ToJsonString());
+            }
+
+            async Task EmitLegacyToolCallAsync(JsonObject chunk, JsonObject delta, JsonObject toolCall)
+            {
+                toolCallTriggered = true;
+                inToolCall = false;
+                _ = delta.Remove("content");
+                _ = delta.Remove("reasoning_content");
+                delta["tool_calls"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["index"] = 0,
+                        ["id"] = $"call_{Guid.NewGuid():N}",
+                        ["type"] = "function",
+                        ["function"] = new JsonObject
                         {
-                            await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                            await writer.FlushAsync();
+                            ["name"] = toolCall["name"]?.ToString() ?? "unknown_tool",
+                            ["arguments"] = toolCall["arguments"]?.ToString() ?? "{}"
+                        }
+                    }
+                };
+
+                await EmitChunkAsync(chunk);
+                var finishChunk = new JsonObject
+                {
+                    ["choices"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["delta"] = new JsonObject(),
+                            ["finish_reason"] = "tool_calls",
+                            ["index"] = 0
+                        }
+                    }
+                };
+                await EmitChunkAsync(finishChunk);
+                toolBuffer = string.Empty;
+            }
+
+            try
+            {
+                while (true)
+                {
+                    string? line;
+                    try
+                    {
+                        line = await streamReader.ReadLineAsync();
+                    }
+                    catch (IOException ex)
+                    {
+                        upstreamError = true;
+                        Logger.Log($"[OpenAI SSE] Upstream read failed ({ex.GetType().Name}).");
+                        break;
+                    }
+                    catch (ObjectDisposedException ex)
+                    {
+                        upstreamError = true;
+                        Logger.Log($"[OpenAI SSE] Upstream stream closed unexpectedly ({ex.GetType().Name}).");
+                        break;
+                    }
+                    catch (System.Net.Http.HttpRequestException ex)
+                    {
+                        upstreamError = true;
+                        Logger.Log($"[OpenAI SSE] Upstream request failed ({ex.GetType().Name}).");
+                        break;
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        upstreamError = true;
+                        Logger.Log($"[OpenAI SSE] Upstream read was canceled ({ex.GetType().Name}).");
+                        break;
+                    }
+
+                    if (line == null)
+                    {
+                        break;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: ", StringComparison.Ordinal))
+                    {
+                        if (!toolCallTriggered || string.IsNullOrWhiteSpace(line))
+                        {
+                            await EmitLineAsync(line);
                         }
                         continue;
                     }
 
-                    var choice = choicesArray[0]?.AsObject();
-                    var delta = choice?["delta"]?.AsObject();
+                    string data = line["data: ".Length..].Trim();
+                    AddTrace(llamaServerTrace, SummarizeOpenAiSseData(data));
+                    if (data == "[DONE]")
+                    {
+                        doneReceived = true;
+                        await EmitLineAsync(line);
+                        await EmitLineAsync(string.Empty);
+                        break;
+                    }
+
+                    JsonObject chunk;
+                    try
+                    {
+                        chunk = JsonNode.Parse(data)?.AsObject()
+                            ?? throw new JsonException("The upstream SSE data was not a JSON object.");
+                    }
+                    catch (JsonException ex)
+                    {
+                        transformationError = true;
+                        Logger.Log($"[OpenAI SSE] Invalid upstream JSON ({ex.GetType().Name}, {data.Length} chars).");
+                        break;
+                    }
+
+                    if (chunk["choices"] is not JsonArray choicesArray || choicesArray.Count == 0)
+                    {
+                        if (!toolCallTriggered)
+                        {
+                            await EmitChunkAsync(chunk);
+                        }
+                        continue;
+                    }
+
+                    if (choicesArray[0] is not JsonObject choice || choice["delta"] is not JsonObject delta)
+                    {
+                        if (!toolCallTriggered)
+                        {
+                            await EmitChunkAsync(chunk);
+                        }
+                        continue;
+                    }
 
                     if (toolCallTriggered)
                     {
                         continue;
                     }
 
-                    if (delta != null)
+                    bool hasNativeToolCalls = delta["tool_calls"] is JsonArray nativeToolCalls && nativeToolCalls.Count > 0;
+                    bool hasReasoning = delta["reasoning_content"] != null &&
+                                        !string.IsNullOrEmpty(delta["reasoning_content"]?.ToString());
+                    bool hasContent = delta["content"] != null &&
+                                      !string.IsNullOrEmpty(delta["content"]?.ToString());
+
+                    if (hasReasoning)
                     {
-                        bool hasReasoning = delta.ContainsKey("reasoning_content") &&
-                                          delta["reasoning_content"] != null &&
-                                          !string.IsNullOrEmpty(delta["reasoning_content"]?.ToString());
-                        bool hasContent = delta.ContainsKey("content") &&
-                                         delta["content"] != null &&
-                                         !string.IsNullOrEmpty(delta["content"]?.ToString());
-
-                        if (hasReasoning)
+                        string reasoning = delta["reasoning_content"]!.ToString().Replace("\n", "\n> ");
+                        _ = delta.Remove("reasoning_content");
+                        if (!isReceivingReasoning)
                         {
-                            string rContent = delta["reasoning_content"]!.ToString();
-                            _ = delta.Remove("reasoning_content");
+                            reasoning = "\n\n> 🧠 \n> " + reasoning;
+                            isReceivingReasoning = true;
+                        }
+                        delta["content"] = reasoning;
+                        hasContent = true;
+                    }
+                    else if (isReceivingReasoning && hasContent)
+                    {
+                        delta["content"] = "\n\n" + delta["content"]!.ToString();
+                        isReceivingReasoning = false;
+                    }
+                    else if (isReceivingReasoning && choice["finish_reason"] != null)
+                    {
+                        delta["content"] = (delta["content"]?.ToString() ?? string.Empty) + "\n\n";
+                        isReceivingReasoning = false;
+                    }
 
-                            rContent = rContent.Replace("\n", "\n> ");
+                    if (hasContent && !string.IsNullOrEmpty(delta["content"]?.ToString()))
+                    {
+                        string content = delta["content"]!.ToString();
+                        if (hasNativeToolCalls)
+                        {
+                            await EmitChunkAsync(chunk);
+                            continue;
+                        }
 
-                            if (!isReceivingReasoning)
+                        if (inToolCall)
+                        {
+                            toolBuffer += content;
+                            if (TryParseToolCall(toolBuffer, out JsonObject? parsedToolCall) && parsedToolCall != null)
                             {
-                                rContent = "\n\n> 🧠 \n> " + rContent;
-                                isReceivingReasoning = true;
-                            }
-
-                            delta["content"] = rContent;
-                            hasContent = true;
-                        }
-                        else if (isReceivingReasoning && hasContent)
-                        {
-                            string nContent = delta["content"]!.ToString();
-                            delta["content"] = "\n\n" + nContent;
-                            isReceivingReasoning = false;
-                        }
-                        else if (isReceivingReasoning && choice != null &&
-                                 choice.ContainsKey("finish_reason") &&
-                                 choice["finish_reason"]?.ToString() != null)
-                        {
-                            delta["content"] = (delta["content"]?.ToString() ?? "") + "\n\n";
-                            isReceivingReasoning = false;
-                        }
-
-                        if (hasContent)
-                        {
-                            var content = delta["content"]?.ToString();
-
-                            if (!string.IsNullOrEmpty(content))
-                            {
-                                responseTextBuffer += content;
-
-                                // Kritische Prüfung: Ist dies der Beginn eines Tool-Calls?
-                                detectBuffer += content;
-                                int toolStartIndex = FindToolCallStartIndex(detectBuffer);
-
-                                if (toolStartIndex >= 0)
-                                {
-                                    inToolCall = true;
-                                    toolBuffer = detectBuffer.Substring(toolStartIndex);
-
-                                    // Sende Text vor dem Tool-Call
-                                    string textBefore = detectBuffer.Substring(0, toolStartIndex);
-                                    if (!string.IsNullOrEmpty(textBefore))
-                                    {
-                                        delta["content"] = textBefore;
-                                        await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                                        await writer.FlushAsync();
-                                    }
-                                    detectBuffer = "";
-                                    continue;
-                                }
-
-                                // Verarbeite Tool-Call, wenn wir bereits darin sind
-                                if (inToolCall)
-                                {
-                                    toolBuffer += content;
-
-                                    // Versuche, den Tool-Call zu parsen
-                                    if (TryParseToolCall(toolBuffer, out JsonObject? toolCall))
-                                    {
-                                        inToolCall = false;
-                                        toolCallTriggered = true;
-
-                                        // Erstelle tool_calls Array im OpenAI-Format
-                                        var toolCallsArray = new JsonArray
-                                        {
-                                            new JsonObject
-                                            {
-                                                ["index"] = 0,
-                                                ["id"] = $"call_{Guid.NewGuid():N}",
-                                                ["type"] = "function",
-                                                ["function"] = new JsonObject
-                                                {
-                                                    ["name"] = toolCall?["name"]?.ToString() ?? "unknown_tool",
-                                                    ["arguments"] = toolCall?["arguments"]?.ToString() ?? "{}"
-                                                }
-                                            }
-                                        };
-
-                                        // Bereinige Delta
-                                        _ = delta.Remove("content");
-                                        _ = delta.Remove("reasoning_content");
-                                        delta["tool_calls"] = toolCallsArray;
-
-                                        // Sende Chunk mit tool_calls
-                                        await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                                        await writer.FlushAsync();
-
-                                        // Sende finish_reason = "tool_calls"
-                                        var finishChunk = new JsonObject
-                                        {
-                                            ["choices"] = new JsonArray
-                                            {
-                                                new JsonObject
-                                                {
-                                                    ["delta"] = new JsonObject(),
-                                                    ["finish_reason"] = "tool_calls",
-                                                    ["index"] = 0
-                                                }
-                                            }
-                                        };
-                                        await writer.WriteLineAsync("data: " + finishChunk.ToJsonString());
-                                        await writer.FlushAsync();
-
-                                        toolBuffer = "";
-                                        detectBuffer = "";
-                                        continue;
-                                    }
-
-                                    // Wenn es nach JSON aussieht, aber nicht vollständig ist, warte auf mehr Daten
-                                    if (toolBuffer.Contains('{') && !toolBuffer.Contains('}'))
-                                    {
-                                        continue;
-                                    }
-
-                                    // Kein Tool-Call erkannt - sende als normalen Text
-                                    inToolCall = false;
-                                    delta["content"] = toolBuffer;
-                                    await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                                    await writer.FlushAsync();
-                                    toolBuffer = "";
-                                    continue;
-                                }
-
-                                // Normale Textverarbeitung
-                                delta["content"] = detectBuffer;
-                                await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                                await writer.FlushAsync();
-                                detectBuffer = "";
+                                await EmitLegacyToolCallAsync(chunk, delta, parsedToolCall);
                                 continue;
                             }
+
+                            if (toolBuffer.Contains('{') && !toolBuffer.Contains('}'))
+                            {
+                                continue;
+                            }
+
+                            inToolCall = false;
+                            delta["content"] = toolBuffer;
+                            await EmitChunkAsync(chunk);
+                            toolBuffer = string.Empty;
+                            continue;
                         }
 
-                        if (!delta.ContainsKey("content") || string.IsNullOrEmpty(delta["content"]?.ToString()))
+                        int toolStartIndex = FindToolCallStartIndex(content);
+                        if (toolStartIndex >= 0)
                         {
-                            await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                            await writer.FlushAsync();
+                            string textBefore = content[..toolStartIndex];
+                            toolBuffer = content[toolStartIndex..];
+                            inToolCall = true;
+                            if (!string.IsNullOrEmpty(textBefore))
+                            {
+                                delta["content"] = textBefore;
+                                await EmitChunkAsync(chunk);
+                            }
+                            if (TryParseToolCall(toolBuffer, out JsonObject? parsedToolCall) && parsedToolCall != null)
+                            {
+                                await EmitLegacyToolCallAsync(chunk, delta, parsedToolCall);
+                            }
+                            continue;
                         }
+
+                        await EmitChunkAsync(chunk);
+                        continue;
                     }
-                }
-                catch (IOException)
-                {
-                    Logger.Log("[Disconnect] Copilot canceled the request (timeout/stop). Ending llama-server generation...");
-                    break;
-                }
-                catch (System.Net.HttpListenerException)
-                {
-                    Logger.Log("[Disconnect] HTTP connection closed. Ending llama-server generation...");
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Logger.Log($"[Transformer-Error] {ex.Message}");
-                    try
-                    {
-                        await writer.WriteLineAsync(line);
-                        await writer.FlushAsync();
-                    }
-                    catch
-                    {
-                        break;
-                    }
+
+                    await EmitChunkAsync(chunk);
                 }
             }
+            catch (DownstreamDisconnectedException)
+            {
+                clientDisconnected = true;
+            }
+            catch (InvalidOperationException ex)
+            {
+                transformationError = true;
+                Logger.Log($"[OpenAI SSE] Transformation failed ({ex.GetType().Name}).");
+            }
 
-            await FlushRemainingDetectBufferAsync(writer, detectBuffer, toolCallTriggered, inToolCall);
-            LogResponseSummary(responseTextBuffer);
+            OpenAiStreamCompletionStatus status = clientDisconnected
+                ? OpenAiStreamCompletionStatus.ClientDisconnected
+                : transformationError
+                    ? OpenAiStreamCompletionStatus.TransformationError
+                    : upstreamError || !doneReceived
+                        ? OpenAiStreamCompletionStatus.UpstreamError
+                        : string.Equals(finalFinishReason, "tool_calls", StringComparison.Ordinal)
+                            ? OpenAiStreamCompletionStatus.CompletedByToolCall
+                            : finalFinishReason != null
+                                ? OpenAiStreamCompletionStatus.CompletedByLlm
+                                : OpenAiStreamCompletionStatus.CompletedByDone;
+
+            Logger.Log($"[OpenAI SSE][LLAMA SERVER] {string.Join(" || ", llamaServerTrace)}");
+            Logger.Log($"[OpenAI SSE][COPILOT] {string.Join(" || ", copilotTrace)}");
+            Logger.Log($"[OpenAI SSE][Summary] DoneReceived={doneReceived}, FinalFinishReason={finalFinishReason ?? "<none>"}, ToolCallCount={outputToolCallKeys.Count}, GeneratedContentLength={generatedContentLength}, ClientDisconnected={clientDisconnected}, Completion={status}.");
+
+            return new OpenAiStreamTransformResult(
+                doneReceived,
+                finalFinishReason,
+                outputToolCallKeys.Count,
+                generatedContentLength,
+                clientDisconnected,
+                status);
+        }
+
+        private sealed class DownstreamDisconnectedException : Exception
+        {
+        }
+
+        private static string SummarizeOpenAiSseData(string data)
+        {
+            if (data == "[DONE]")
+            {
+                return "[DONE]";
+            }
+
+            JsonNode? root;
+            try
+            {
+                root = JsonNode.Parse(data);
+            }
+            catch (JsonException)
+            {
+                return $"invalid_json(length={data.Length})";
+            }
+
+            if (root is not JsonObject rootObject || rootObject["choices"] is not JsonArray choices)
+            {
+                return $"choices=0,payloadLength={data.Length}";
+            }
+
+            var summaries = new List<string>();
+            foreach (JsonNode? choice in choices)
+            {
+                JsonObject? delta = choice?["delta"] as JsonObject;
+                string contentSummary = delta == null || !delta.ContainsKey("content")
+                    ? "absent"
+                    : delta["content"] == null
+                        ? "null"
+                        : $"length={delta["content"]!.ToString().Length}";
+                string toolSummary = "absent";
+                if (delta?["tool_calls"] is JsonArray toolCalls)
+                {
+                    toolSummary = string.Join(";", toolCalls.Select(toolCall =>
+                    {
+                        JsonObject? function = toolCall?["function"] as JsonObject;
+                        string arguments = function?["arguments"]?.ToString() ?? string.Empty;
+                        return $"index={toolCall?["index"]?.ToString() ?? "<none>"},id={SafeTraceValue(toolCall?["id"]?.ToString())},type={SafeTraceValue(toolCall?["type"]?.ToString())},name={SafeTraceValue(function?["name"]?.ToString())},argumentsLength={arguments.Length}";
+                    }));
+                }
+
+                summaries.Add($"delta.content={contentSummary},delta.tool_calls=[{toolSummary}],finish_reason={choice?["finish_reason"]?.ToString() ?? "<null>"}");
+            }
+
+            return string.Join(" | ", summaries);
+        }
+
+        private static string SafeTraceValue(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "<none>";
+            }
+
+            string safeValue = value.Replace("\r", " ").Replace("\n", " ");
+            return safeValue.Length <= 80 ? safeValue : string.Concat(safeValue.AsSpan(0, 80), "...");
+        }
+
+        private static void TrackOpenAiOutput(string data, HashSet<string> toolCallKeys, ref int generatedContentLength, ref string? finalFinishReason)
+        {
+            JsonNode? root = JsonNode.Parse(data);
+            if (root is not JsonObject rootObject || rootObject["choices"] is not JsonArray choices)
+            {
+                return;
+            }
+
+            foreach (JsonNode? choice in choices)
+            {
+                JsonObject? delta = choice?["delta"] as JsonObject;
+                if (delta?["content"] != null)
+                {
+                    generatedContentLength += delta["content"]!.ToString().Length;
+                }
+
+                if (delta?["tool_calls"] is JsonArray toolCalls)
+                {
+                    foreach (JsonNode? toolCall in toolCalls)
+                    {
+                        string? index = toolCall?["index"]?.ToString();
+                        string? id = toolCall?["id"]?.ToString();
+                        string key = index != null ? $"index:{index}" : id != null ? $"id:{id}" : $"anonymous:{toolCallKeys.Count}";
+                        _ = toolCallKeys.Add(key);
+                    }
+                }
+
+                if (choice?["finish_reason"] != null)
+                {
+                    finalFinishReason = choice["finish_reason"]!.ToString();
+                }
+            }
         }
 
         private static int FindToolCallStartIndex(string content)
@@ -1483,39 +1682,6 @@ namespace FormsSystemStatsWidget.Core
             }
             return string.Empty;
         }
-
-        private static async Task FlushRemainingDetectBufferAsync(StreamWriter writer, string detectBuffer, bool toolCallTriggered, bool inToolCall)
-        {
-            if (string.IsNullOrEmpty(detectBuffer) || toolCallTriggered || inToolCall)
-            {
-                return;
-            }
-
-            var finalChunk = new JsonObject
-            {
-                ["choices"] = new JsonArray {
-                    new JsonObject {
-                        ["delta"] = new JsonObject { ["content"] = detectBuffer },
-                        ["index"] = 0,
-                        ["finish_reason"] = "stop"
-                    }
-                }
-            };
-
-            await writer.WriteLineAsync("data: " + finalChunk.ToJsonString());
-            await writer.FlushAsync();
-        }
-
-        private static void LogResponseSummary(string responseTextBuffer)
-        {
-            string cleanLog = responseTextBuffer.Replace("\r", " ").Replace("\n", " ").Trim();
-            if (cleanLog.Length > 200)
-            {
-                cleanLog = string.Concat(cleanLog.AsSpan(0, 200), "...");
-            }
-            Logger.Log($"[LLM Output Summary] Generated text: {cleanLog}");
-        }
-
 
         private static string RemoveKeyAndGetArgs(JsonObject source, params string[] keysToRemove)
         {
