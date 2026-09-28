@@ -632,8 +632,17 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             Rectangle bounds = GetCmdWindowRestoreBounds(position, size, dockState, screen.WorkingArea);
-            _ = SetWindowPos(handle, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, SwpNoZOrder | SwpNoActivate);
-            Logger.Log($"[CMD] Restored window on {screen.DeviceName}: position=({bounds.X},{bounds.Y}), size={bounds.Width}x{bounds.Height}, dock={dockState}.");
+            Rectangle outerBounds = bounds;
+            if (dockState != 0 &&
+                GetWindowRect(handle, out NativeWindowRect outerNativeRect) &&
+                DwmGetWindowAttribute(handle, DwmwaExtendedFrameBounds, out NativeWindowRect visibleNativeRect, (uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeWindowRect>()) == 0)
+            {
+                outerBounds = GetCmdWindowOuterRestoreBounds(
+                    dockState, bounds, outerNativeRect.ToRectangle(), visibleNativeRect.ToRectangle());
+            }
+
+            _ = SetWindowPos(handle, IntPtr.Zero, outerBounds.X, outerBounds.Y, outerBounds.Width, outerBounds.Height, SwpNoZOrder | SwpNoActivate);
+            Logger.Log($"[CMD] Restored visible frame on {screen.DeviceName}: target={bounds}, hwnd={outerBounds}, dock={dockState}.");
         }
 
         internal static bool TryRecoverLegacyCmdWindowBounds(Point position, Size size, out Rectangle bounds)
@@ -683,6 +692,22 @@ namespace FormsSystemStatsWidget.Forms
 
         internal static Rectangle ConvertNativeWindowRect(int left, int top, int right, int bottom) =>
             Rectangle.FromLTRB(left, top, right, bottom);
+
+        internal static Rectangle ExpandOuterBoundsForVisibleTarget(Rectangle visibleTarget, Rectangle currentOuter, Rectangle currentVisible)
+        {
+            int leftInset = currentVisible.Left - currentOuter.Left;
+            int topInset = currentVisible.Top - currentOuter.Top;
+            int rightInset = currentOuter.Right - currentVisible.Right;
+            int bottomInset = currentOuter.Bottom - currentVisible.Bottom;
+            return Rectangle.FromLTRB(
+                visibleTarget.Left - leftInset,
+                visibleTarget.Top - topInset,
+                visibleTarget.Right + rightInset,
+                visibleTarget.Bottom + bottomInset);
+        }
+
+        internal static Rectangle GetCmdWindowOuterRestoreBounds(int dockState, Rectangle targetBounds, Rectangle currentOuter, Rectangle currentVisible) =>
+            dockState == 0 ? targetBounds : ExpandOuterBoundsForVisibleTarget(targetBounds, currentOuter, currentVisible);
 
         private void StartCmdNormal(string batFilePath)
         {
@@ -793,6 +818,7 @@ namespace FormsSystemStatsWidget.Forms
 
         private const uint SwpNoZOrder = 0x0004;
         private const uint SwpNoActivate = 0x0010;
+        private const uint DwmwaExtendedFrameBounds = 9;
 
         private delegate bool EnumWindowsCallback(IntPtr handle, IntPtr parameter);
 
@@ -832,6 +858,9 @@ namespace FormsSystemStatsWidget.Forms
         [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
         [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
         private static extern bool GetWindowRect(IntPtr hWnd, out NativeWindowRect lpRect);
+
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hwnd, uint attribute, out NativeWindowRect value, uint size);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);

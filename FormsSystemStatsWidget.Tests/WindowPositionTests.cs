@@ -103,6 +103,31 @@ namespace FormsSystemStatsWidget.Tests
         }
 
         [TestMethod]
+        public void CmdWindowRestore_ShouldCompensateForInvisibleResizeFrame()
+        {
+            var visibleTarget = new Rectangle(-1080, 0, 1080, 936);
+            var currentOuter = new Rectangle(100, 100, 420, 320);
+            var currentVisible = new Rectangle(107, 107, 406, 306);
+
+            Rectangle outerTarget = WindowWidget.ExpandOuterBoundsForVisibleTarget(visibleTarget, currentOuter, currentVisible);
+
+            Assert.AreEqual(new Rectangle(-1087, -7, 1094, 950), outerTarget);
+        }
+
+        [TestMethod]
+        public void CmdWindowRestore_FloatingWindow_ShouldKeepSavedBoundsWithoutDockCompensation()
+        {
+            var savedBounds = new Rectangle(300, 250, 900, 700);
+            var currentOuter = new Rectangle(100, 100, 420, 320);
+            var currentVisible = new Rectangle(107, 107, 406, 306);
+
+            Rectangle restoredBounds = WindowWidget.GetCmdWindowOuterRestoreBounds(
+                0, savedBounds, currentOuter, currentVisible);
+
+            Assert.AreEqual(savedBounds, restoredBounds);
+        }
+
+        [TestMethod]
         public void CmdWindowRestore_ShouldRecreateLeftAndRightHalfSnaps()
         {
             var area = new Rectangle(0, 0, 1920, 1080);
