@@ -8,7 +8,6 @@
         private System.ComponentModel.IContainer components = null;
 
         // Loop detection submenu controls
-        private ToolStripMenuItem toolStripMenuItem_reRouteToOllama;
         private ToolStripMenuItem toolStripMenuItem_loopDetectionEnabled;
         private ToolStripSeparator toolStripSeparator_loopDetection;
         private ToolStripMenuItem toolStripMenuItem_triggerAfter;
@@ -85,7 +84,6 @@
             toolStripTextBox_modelsDirectory = new ToolStripTextBox();
             toolStripComboBox_ggufModels = new ToolStripComboBox();
             toolStripMenuItem_loadMmproj = new ToolStripMenuItem();
-            toolStripMenuItem_reRouteToOllama = new ToolStripMenuItem();
             toolStripMenuItem_loopDetectionEnabled = new ToolStripMenuItem();
             toolStripSeparator_loopDetection = new ToolStripSeparator();
             toolStripMenuItem_triggerAfter = new ToolStripMenuItem();
@@ -102,24 +100,23 @@
             toolStripMenuItem_abortEnabled = new ToolStripMenuItem();
             toolStripMenuItem_abortAfterInterjections = new ToolStripMenuItem();
             toolStripTextBox_abortAfterInterjections = new ToolStripTextBox();
-            // Add Re-route to Ollama submenu to context menu
-            contextMenuStrip_widget.Items.Add(toolStripMenuItem_reRouteToOllama);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_loopDetectionEnabled);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripSeparator_loopDetection);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_triggerAfter);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_triggerAfter);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_detectionWindow);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_detectionWindow);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_similarityThreshold);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_similarityThreshold);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripSeparator_loopOptions);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_interjectionEnabled);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_interjectionMessage);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_maxInterjections);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_maxInterjections);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_abortEnabled);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_abortAfterInterjections);
-            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_abortAfterInterjections);
+            toolStripMenuItem_loopDetectionEnabled.Text = "Loop detection enabled";
+            toolStripMenuItem_loopDetectionEnabled.CheckOnClick = true;
+            toolStripMenuItem_triggerAfter.Text = "Trigger after repeats";
+            toolStripTextBox_triggerAfter.Size = new Size(80, 23);
+            toolStripMenuItem_detectionWindow.Text = "Assistant-action window";
+            toolStripTextBox_detectionWindow.Size = new Size(80, 23);
+            toolStripMenuItem_similarityThreshold.Text = "Text similarity threshold";
+            toolStripTextBox_similarityThreshold.Size = new Size(80, 23);
+            toolStripMenuItem_interjectionEnabled.Text = "Insert interjection";
+            toolStripMenuItem_interjectionEnabled.CheckOnClick = true;
+            toolStripTextBox_interjectionMessage.Size = new Size(420, 23);
+            toolStripMenuItem_maxInterjections.Text = "Maximum interjections";
+            toolStripTextBox_maxInterjections.Size = new Size(80, 23);
+            toolStripMenuItem_abortEnabled.Text = "Enable hard abort";
+            toolStripMenuItem_abortEnabled.CheckOnClick = true;
+            toolStripMenuItem_abortAfterInterjections.Text = "Abort after interjections";
+            toolStripTextBox_abortAfterInterjections.Size = new Size(80, 23);
             toolStripMenuItem_contextSize = new ToolStripMenuItem();
             toolStripTextBox_contextSize = new ToolStripTextBox();
             toolStripMenuItem_batchSize = new ToolStripMenuItem();
@@ -963,7 +960,7 @@
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 
             rerouteAPILlamacppOllamaToolStripMenuItem.CheckOnClick = true;
-            rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_openAiApi, toolStripSeparator4, llamacppPortToolStripMenuItem, ollamaPortToolStripMenuItem, printGenerationStatsToolStripMenuItem, showTokenssToolStripMenuItem, toolStripMenuItem_trimThinkingBlocks, extendCopilotSystemPromptToolStripMenuItem });
+            rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_openAiApi, toolStripSeparator4, llamacppPortToolStripMenuItem, ollamaPortToolStripMenuItem, printGenerationStatsToolStripMenuItem, showTokenssToolStripMenuItem, toolStripMenuItem_trimThinkingBlocks, extendCopilotSystemPromptToolStripMenuItem, toolStripSeparator_loopDetection, toolStripMenuItem_loopDetectionEnabled, toolStripMenuItem_triggerAfter, toolStripTextBox_triggerAfter, toolStripMenuItem_detectionWindow, toolStripTextBox_detectionWindow, toolStripMenuItem_similarityThreshold, toolStripTextBox_similarityThreshold, toolStripSeparator_loopOptions, toolStripMenuItem_interjectionEnabled, toolStripTextBox_interjectionMessage, toolStripMenuItem_maxInterjections, toolStripTextBox_maxInterjections, toolStripMenuItem_abortEnabled, toolStripMenuItem_abortAfterInterjections, toolStripTextBox_abortAfterInterjections });
             rerouteAPILlamacppOllamaToolStripMenuItem.Name = "rerouteAPILlamacppOllamaToolStripMenuItem";
             rerouteAPILlamacppOllamaToolStripMenuItem.Size = new Size(290, 22);
             rerouteAPILlamacppOllamaToolStripMenuItem.Text = "🔗 Re-route API llama.cpp -> Ollama";

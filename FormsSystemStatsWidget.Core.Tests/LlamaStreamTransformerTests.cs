@@ -38,6 +38,193 @@ public sealed class LlamaStreamTransformerTests
     }
 
     [TestMethod]
+    public void LoopDetection_RepeatedToolCallAcrossResults_AddsInterjectionAfterHistory()
+    {
+        var config = new LoopDetectionConfig { TriggerAfter = 3, DetectionWindow = 5, SimilarityThreshold = 0.9 };
+        JsonArray messages = CreateRepeatedToolCalls("lookup", "{\"query\":\"same\"}");
+
+        LoopDetectionResult result = new LoopDetectionService(config).ApplyToConversation(messages);
+
+        Assert.IsTrue(result.IsLoopDetected);
+        Assert.IsNotNull(result.InterjectionMessage);
+        Assert.AreEqual(1, result.InterjectionCount);
+        Assert.AreEqual("tool-3", messages[4]?["tool_calls"]?[0]? ["id"]?.ToString());
+        Assert.AreEqual("loop_detection_interjection", messages[5]?["name"]?.ToString());
+    }
+
+    [TestMethod]
+    public void LoopDetection_DifferentArgumentsAndReadEditRead_DoNotTrigger()
+    {
+        var service = new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 3, DetectionWindow = 5 });
+        JsonArray differentArguments = new()
+        {
+            CreateToolMessage("1", "read", "{\"path\":\"one.cs\"}"),
+            CreateToolMessage("2", "read", "{\"path\":\"two.cs\"}"),
+            CreateToolMessage("3", "read", "{\"path\":\"three.cs\"}")
+        };
+        JsonArray readEditRead = new()
+        {
+            CreateToolMessage("1", "read", "{\"path\":\"same.cs\"}"),
+            CreateToolMessage("2", "edit", "{\"path\":\"same.cs\"}"),
+            CreateToolMessage("3", "read", "{\"path\":\"same.cs\"}")
+        };
+
+        Assert.IsFalse(service.DetectLoop(differentArguments).IsLoopDetected);
+        Assert.IsFalse(service.DetectLoop(readEditRead).IsLoopDetected);
+    }
+
+    [TestMethod]
+    public void LoopDetection_TwoMatchingCallsAreNotEnoughToTrigger()
+    {
+        JsonArray messages = new()
+        {
+            CreateToolMessage("tool-1", "lookup", "{\"query\":\"same\"}"),
+            CreateToolMessage("tool-2", "lookup", "{\"query\":\"same\"}")
+        };
+
+        Assert.IsFalse(new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 3 }).DetectLoop(messages).IsLoopDetected);
+    }
+
+    [TestMethod]
+    public void LoopDetection_ReorderedParallelToolCallsAreTheSameRepeatedAction()
+    {
+        JsonArray messages = new()
+        {
+            CreateParallelToolMessage("lookup", "read"),
+            CreateParallelToolMessage("read", "lookup")
+        };
+
+        LoopDetectionResult result = new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 2 }).DetectLoop(messages);
+
+        Assert.IsTrue(result.IsLoopDetected);
+        Assert.AreEqual(2, result.RepeatCount);
+    }
+
+    [TestMethod]
+    public void LoopDetection_RepeatedAssistantOutputInterjectsAndCanContinueNormally()
+    {
+        var service = new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 3 });
+        JsonArray messages = new()
+        {
+            new JsonObject { ["role"] = "assistant", ["content"] = "I will repeat the same action." },
+            new JsonObject { ["role"] = "assistant", ["content"] = "I will repeat the same action." },
+            new JsonObject { ["role"] = "assistant", ["content"] = "I will repeat the same action." }
+        };
+
+        LoopDetectionResult result = service.ApplyToConversation(messages);
+        messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = "I will do something different now." });
+
+        Assert.IsNotNull(result.InterjectionMessage);
+        Assert.IsFalse(service.DetectLoop(messages).IsLoopDetected);
+    }
+
+    [TestMethod]
+    public void LoopDetection_AbortRequiresEnabledAndConfiguredInterjectionCount()
+    {
+        var config = new LoopDetectionConfig { TriggerAfter = 3, AbortEnabled = true, AbortAfterInterjections = 2 };
+        JsonArray messages = new()
+        {
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "user", ["name"] = "loop_detection_interjection", ["content"] = "hint 1" },
+            new JsonObject { ["role"] = "user", ["name"] = "loop_detection_interjection", ["content"] = "hint 2" }
+        };
+
+        Assert.IsTrue(new LoopDetectionService(config).DetectLoop(messages).ShouldAbort);
+        config.AbortEnabled = false;
+        Assert.IsFalse(new LoopDetectionService(config).DetectLoop(messages).ShouldAbort);
+    }
+
+    [TestMethod]
+    public void LoopDetection_InterjectionCountsAreConversationScoped()
+    {
+        var service = new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 3 });
+        JsonArray messages = new()
+        {
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" }
+        };
+
+        Assert.AreEqual(1, service.ApplyToConversation(messages).InterjectionCount);
+        Assert.AreEqual(1, service.DetectLoop(messages).InterjectionCount);
+        Assert.AreEqual(0, service.DetectLoop(new JsonArray()).InterjectionCount);
+    }
+
+    [TestMethod]
+    public void LoopDetection_InterjectionLimitCarriesAcrossGenerationsWithoutCrossingRequests()
+    {
+        var service = new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 3, MaxInterjections = 2 });
+        JsonArray firstGeneration = CreateRepeatedToolCalls("lookup", "{\"query\":\"same\"}");
+        JsonArray secondGeneration = CreateRepeatedToolCalls("lookup", "{\"query\":\"same\"}");
+        secondGeneration.Add(CreateToolMessage("tool-4", "lookup", "{\"query\":\"same\"}"));
+        JsonArray independentConversation = CreateRepeatedToolCalls("lookup", "{\"query\":\"same\"}");
+
+        Assert.AreEqual(1, service.ApplyToConversation(firstGeneration).InterjectionCount);
+        Assert.AreEqual(2, service.ApplyToConversation(secondGeneration).InterjectionCount);
+        Assert.AreEqual(1, service.ApplyToConversation(independentConversation).InterjectionCount);
+    }
+
+    [TestMethod]
+    public void LoopDetection_NewUserTurnDoesNotReuseEarlierLoopHistory()
+    {
+        JsonArray messages = new()
+        {
+            new JsonObject { ["role"] = "user", ["content"] = "first task" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "user", ["content"] = "new task" }
+        };
+
+        Assert.IsFalse(new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 3 }).DetectLoop(messages).IsLoopDetected);
+    }
+
+    private static JsonArray CreateRepeatedToolCalls(string toolName, string arguments)
+    {
+        return new JsonArray
+        {
+            CreateToolMessage("tool-1", toolName, arguments),
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "tool-1", ["content"] = "result 1" },
+            CreateToolMessage("tool-2", toolName, arguments),
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "tool-2", ["content"] = "result 2" },
+            CreateToolMessage("tool-3", toolName, arguments)
+        };
+    }
+
+    private static JsonObject CreateToolMessage(string id, string toolName, string arguments) => new()
+    {
+        ["role"] = "assistant",
+        ["tool_calls"] = new JsonArray
+        {
+            new JsonObject
+            {
+                ["id"] = id,
+                ["function"] = new JsonObject { ["name"] = toolName, ["arguments"] = arguments }
+            }
+        }
+    };
+
+    private static JsonObject CreateParallelToolMessage(string firstName, string secondName) => new()
+    {
+        ["role"] = "assistant",
+        ["tool_calls"] = new JsonArray
+        {
+            new JsonObject
+            {
+                ["id"] = Guid.NewGuid().ToString("N"),
+                ["function"] = new JsonObject { ["name"] = firstName, ["arguments"] = "{}" }
+            },
+            new JsonObject
+            {
+                ["id"] = Guid.NewGuid().ToString("N"),
+                ["function"] = new JsonObject { ["name"] = secondName, ["arguments"] = "{}" }
+            }
+        }
+    };
+
+    [TestMethod]
     public async Task TransformOpenAiStreamAsync_NormalText_PreservesStopAndDone()
     {
         string stream = CreateSse(

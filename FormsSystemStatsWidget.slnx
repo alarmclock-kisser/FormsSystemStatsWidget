@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="FormsSystemStatsWidget.Core.Tests/FormsSystemStatsWidget.Core.Tests.csproj" />
+  <Project Path="FormsSystemStatsWidget.Tests/FormsSystemStatsWidget.Tests.csproj" />
   <Project Path="FormsSystemStatsWidget.Core/FormsSystemStatsWidget.Core.csproj" />
   <Project Path="FormsSystemStatsWidget.Forms/FormsSystemStatsWidget.Forms.csproj" />
   <Project Path="FormsSystemStatsWidget.OnnxGenaiServer/FormsSystemStatsWidget.OnnxGenaiServer.csproj" />

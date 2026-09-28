@@ -102,6 +102,24 @@ namespace FormsSystemStatsWidget.Forms
         public double OnnxRepeatPenalty { get; set; } = 1.1;
         public string OnnxExecutionProvider { get; set; } = "Dml";
         public bool OnnxHideConsole { get; set; } = true;
+
+        // CMD/Terminal window persistence (for llama-server .BAT launched windows)
+        public Point CmdWindowPosition { get; set; } = new(0, 0);
+        public Size CmdWindowSize { get; set; } = Size.Empty;
+        public int CmdWindowMonitorId { get; set; } = 0;
+        public int CmdWindowDockState { get; set; } = 0; // 0=floating, 1=fullscreen, 2=half-left, 3=half-right, 4=half-top, 5=half-bottom
+        public int CmdWindowFontSize { get; set; } = 12; // font size in points
+        public int CmdWindowFontFamily { get; set; } = 0; // 0=default, 1=Courier New, 2=Consolas
+
+        public bool LoopDetectionEnabled { get; set; } = true;
+        public int LoopDetectionTriggerAfter { get; set; } = 3;
+        public int LoopDetectionWindow { get; set; } = 5;
+        public double LoopDetectionSimilarityThreshold { get; set; } = 0.9;
+        public bool LoopInterjectionEnabled { get; set; } = true;
+        public string LoopInterjectionMessage { get; set; } = "You appear to be repeating the same actions or tool calls. Stop looping, review the current tool results and continue with a different action or provide the final answer if the task is complete.";
+        public int LoopMaxInterjections { get; set; } = 2;
+        public bool LoopAbortEnabled { get; set; }
+        public int LoopAbortAfterInterjections { get; set; } = 3;
     }
 
     internal static class WidgetPersistentSettingsStore

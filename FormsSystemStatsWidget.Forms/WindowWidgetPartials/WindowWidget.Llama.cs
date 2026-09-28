@@ -26,7 +26,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 var cfg = this._loopDetectionService.GetConfig();
                 cfg.Enabled = toolStripMenuItem_loopDetectionEnabled.Checked;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
 
             // Trigger after
@@ -36,7 +36,7 @@ namespace FormsSystemStatsWidget.Forms
                 var cfg = this._loopDetectionService.GetConfig();
                 if (int.TryParse(toolStripTextBox_triggerAfter.Text, out var val) && val >= 1)
                     cfg.TriggerAfter = val;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
 
             // Detection window
@@ -46,7 +46,7 @@ namespace FormsSystemStatsWidget.Forms
                 var cfg = this._loopDetectionService.GetConfig();
                 if (int.TryParse(toolStripTextBox_detectionWindow.Text, out var val) && val >= 1)
                     cfg.DetectionWindow = val;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
 
             // Similarity threshold
@@ -56,7 +56,7 @@ namespace FormsSystemStatsWidget.Forms
                 var cfg = this._loopDetectionService.GetConfig();
                 if (double.TryParse(toolStripTextBox_similarityThreshold.Text, out var val) && val >= 0 && val <= 1)
                     cfg.SimilarityThreshold = val;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
 
             // Interjection enabled
@@ -65,7 +65,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 var cfg = this._loopDetectionService.GetConfig();
                 cfg.InterjectionEnabled = toolStripMenuItem_interjectionEnabled.Checked;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
 
             // Interjection message
@@ -74,7 +74,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 var cfg = this._loopDetectionService.GetConfig();
                 cfg.InterjectionMessage = toolStripTextBox_interjectionMessage.Text;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
 
             // Max interjections
@@ -84,7 +84,7 @@ namespace FormsSystemStatsWidget.Forms
                 var cfg = this._loopDetectionService.GetConfig();
                 if (int.TryParse(toolStripTextBox_maxInterjections.Text, out var val) && val >= 1)
                     cfg.MaxInterjections = val;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
 
             // Abort enabled
@@ -103,8 +103,24 @@ namespace FormsSystemStatsWidget.Forms
                 var cfg = this._loopDetectionService.GetConfig();
                 if (int.TryParse(toolStripTextBox_abortAfterInterjections.Text, out var val) && val >= 1)
                     cfg.AbortAfterInterjections = val;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
+        }
+
+        private void ApplyLoopDetectionConfig(LoopDetectionConfig config)
+        {
+            this._loopDetectionService.SetConfig(config);
+            LlamaOllamaBridge.LoopDetectionConfig = config;
+            this._persistentSettings.LoopDetectionEnabled = config.Enabled;
+            this._persistentSettings.LoopDetectionTriggerAfter = config.TriggerAfter;
+            this._persistentSettings.LoopDetectionWindow = config.DetectionWindow;
+            this._persistentSettings.LoopDetectionSimilarityThreshold = config.SimilarityThreshold;
+            this._persistentSettings.LoopInterjectionEnabled = config.InterjectionEnabled;
+            this._persistentSettings.LoopInterjectionMessage = config.InterjectionMessage;
+            this._persistentSettings.LoopMaxInterjections = config.MaxInterjections;
+            this._persistentSettings.LoopAbortEnabled = config.AbortEnabled;
+            this._persistentSettings.LoopAbortAfterInterjections = config.AbortAfterInterjections;
+            this.SavePersistentSettings();
         }
 
 
@@ -462,14 +478,8 @@ namespace FormsSystemStatsWidget.Forms
 
                 Logger.Log($"Loaded inference parameters from batch file: Temperature={LlamaOllamaBridge.UserDefinedTemperature}, RepetitionPenalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty}, PresencePenalty={LlamaOllamaBridge.UserDefinedPresencePenalty}, ReasoningEffort={LlamaOllamaBridge.UserDefinedReasoningEffort}, TopP={LlamaOllamaBridge.UserDefinedTopP}, MinP={LlamaOllamaBridge.UserDefinedMinP}, TopK={LlamaOllamaBridge.UserDefinedTopK}, ReasoningBudget={LlamaOllamaBridge.UserDefinedReasoningBudget}");
 
-                _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c \"{batFilePath}\"",
-                    UseShellExecute = true,
-                    CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
-                    WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? System.Diagnostics.ProcessWindowStyle.Hidden : System.Diagnostics.ProcessWindowStyle.Normal
-                });
+                // Launch CMD with persisted window settings (position, size, font)
+                this.StartCmdWithPersistedSettings(batFilePath);
 
                 try
                 {
@@ -505,6 +515,173 @@ namespace FormsSystemStatsWidget.Forms
 
             return true;
         }
+
+        /// <summary>
+        /// Starts the batch file in Console Host, restores its window bounds, and
+        /// lets Windows retain the console font settings for the stable title.
+        /// </summary>
+        private void StartCmdWithPersistedSettings(string batFilePath)
+        {
+            if (this.toolStripMenuItem_hideCmd.Checked)
+            {
+                this.StartCmdNormal(batFilePath);
+                return;
+            }
+
+            string safeBatName = Regex.Replace(Path.GetFileNameWithoutExtension(batFilePath), "[^A-Za-z0-9_-]", "_");
+            this._activeCmdWindowTitle = $"FSSWidget_{safeBatName}";
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, "conhost.exe"),
+                UseShellExecute = false,
+                CreateNoWindow = false,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+            };
+            startInfo.ArgumentList.Add("cmd.exe");
+            startInfo.ArgumentList.Add("/c");
+            startInfo.ArgumentList.Add($"title {this._activeCmdWindowTitle} & call \"{Path.GetFullPath(batFilePath)}\"");
+
+            try
+            {
+                _ = System.Diagnostics.Process.Start(startInfo);
+                _ = System.Threading.Tasks.Task.Run(this.RestoreCmdWindowWhenReady);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[CMD] Could not start the legacy console host: {ex.Message}");
+                this.StartCmdNormal(batFilePath);
+            }
+        }
+
+        private async System.Threading.Tasks.Task RestoreCmdWindowWhenReady()
+        {
+            for (int attempt = 0; attempt < 30; attempt++)
+            {
+                IntPtr handle = FindWindowByTitle(this._activeCmdWindowTitle);
+                if (handle != IntPtr.Zero)
+                {
+                    this.RestoreCmdWindow(handle);
+                    return;
+                }
+                await System.Threading.Tasks.Task.Delay(100).ConfigureAwait(false);
+            }
+            Logger.Log($"[CMD] Timed out waiting for console window '{this._activeCmdWindowTitle}'.");
+        }
+
+        private void RestoreCmdWindow(IntPtr handle)
+        {
+            Size size = this._persistentSettings.CmdWindowSize;
+            Point position = this._persistentSettings.CmdWindowPosition;
+            if (size.Width <= 0 || size.Height <= 0)
+            {
+                return;
+            }
+
+            Screen screen = Screen.AllScreens.FirstOrDefault(candidate => candidate.Bounds.Contains(position))
+                ?? Screen.PrimaryScreen!;
+            Rectangle bounds = ClampCmdWindowBounds(position, size, screen.WorkingArea);
+            _ = SetWindowPos(handle, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, SwpNoZOrder | SwpNoActivate);
+        }
+
+        internal static Rectangle ClampCmdWindowBounds(Point position, Size size, Rectangle workingArea)
+        {
+            int width = Math.Min(size.Width, workingArea.Width);
+            int height = Math.Min(size.Height, workingArea.Height);
+            int x = Math.Clamp(position.X, workingArea.Left, workingArea.Right - width);
+            int y = Math.Clamp(position.Y, workingArea.Top, workingArea.Bottom - height);
+            return new Rectangle(x, y, width, height);
+        }
+
+        private void StartCmdNormal(string batFilePath)
+        {
+            _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c \"{batFilePath}\"",
+                UseShellExecute = true,
+                CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
+                WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? System.Diagnostics.ProcessWindowStyle.Hidden : System.Diagnostics.ProcessWindowStyle.Normal
+            });
+        }
+
+        /// <summary>
+        /// Saves the visible console geometry while the console is still available.
+        /// </summary>
+        private void SaveCmdWindowSettings()
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(this._activeCmdWindowTitle))
+                {
+                    return;
+                }
+
+                IntPtr handle = FindWindowByTitle(this._activeCmdWindowTitle);
+                if (handle == IntPtr.Zero || !GetWindowRect(handle, out Rectangle rect) || rect.Width <= 0 || rect.Height <= 0)
+                {
+                    return;
+                }
+
+                var position = new Point(rect.X, rect.Y);
+                var size = new Size(rect.Width, rect.Height);
+                int monitorId = this.GetMonitorIdFromLocation(position);
+                int dockState = this.GetDockStateFromBounds(rect);
+                if (this._persistentSettings.CmdWindowPosition != position ||
+                    this._persistentSettings.CmdWindowSize != size ||
+                    this._persistentSettings.CmdWindowMonitorId != monitorId ||
+                    this._persistentSettings.CmdWindowDockState != dockState)
+                {
+                    this._persistentSettings.CmdWindowPosition = position;
+                    this._persistentSettings.CmdWindowSize = size;
+                    this._persistentSettings.CmdWindowMonitorId = monitorId;
+                    this._persistentSettings.CmdWindowDockState = dockState;
+                    WidgetPersistentSettingsStore.Save(this._persistentSettings);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[CMD] Failed to save window settings: {ex.Message}");
+            }
+        }
+
+        private const uint SwpNoZOrder = 0x0004;
+        private const uint SwpNoActivate = 0x0010;
+
+        private delegate bool EnumWindowsCallback(IntPtr handle, IntPtr parameter);
+
+        private static IntPtr FindWindowByTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return IntPtr.Zero;
+            }
+
+            IntPtr found = IntPtr.Zero;
+            EnumWindows((handle, _) =>
+            {
+                var text = new StringBuilder(512);
+                _ = GetWindowText(handle, text, text.Capacity);
+                if (string.Equals(text.ToString(), title, StringComparison.Ordinal))
+                {
+                    found = handle;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool GetWindowRect(IntPtr hWnd, out Rectangle lpRect);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
 
         private void ToolStripMenuItem_killLlamaServer_Click(object? sender, EventArgs e)
         {

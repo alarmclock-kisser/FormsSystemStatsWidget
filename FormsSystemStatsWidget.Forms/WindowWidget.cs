@@ -91,6 +91,7 @@ namespace FormsSystemStatsWidget.Forms
         private bool _onnxPythonEnvironmentCheckCompleted;
         private bool _onnxPythonEnvironmentReady;
         private Process? _llamaServerProcess;
+        private string? _activeCmdWindowTitle;
         private readonly HashSet<Keys> _processingKeys = [];
         private static readonly Regex TokensPerSecondRegex = MyRegex();
         private double _lastStdOutTokensPerSecond;
@@ -110,7 +111,19 @@ namespace FormsSystemStatsWidget.Forms
             // Initialize FontSizeScale from persistent settings (default 1.0f if not set)
             this.FontSizeScale = this._persistentSettings.FontSizeScale != 0f ? this._persistentSettings.FontSizeScale : 1.0f;
             // Initialize LoopDetectionService
-            this._loopDetectionService = new LoopDetectionService(new LoopDetectionConfig());
+            this._loopDetectionService = new LoopDetectionService(new LoopDetectionConfig
+            {
+                Enabled = this._persistentSettings.LoopDetectionEnabled,
+                TriggerAfter = this._persistentSettings.LoopDetectionTriggerAfter,
+                DetectionWindow = this._persistentSettings.LoopDetectionWindow,
+                SimilarityThreshold = this._persistentSettings.LoopDetectionSimilarityThreshold,
+                InterjectionEnabled = this._persistentSettings.LoopInterjectionEnabled,
+                InterjectionMessage = this._persistentSettings.LoopInterjectionMessage,
+                MaxInterjections = this._persistentSettings.LoopMaxInterjections,
+                AbortEnabled = this._persistentSettings.LoopAbortEnabled,
+                AbortAfterInterjections = this._persistentSettings.LoopAbortAfterInterjections
+            });
+            LlamaOllamaBridge.LoopDetectionConfig = this._loopDetectionService.GetConfig();
             // Hook loop detection menu events
             this.HookLoopDetectionMenuEvents();
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
@@ -306,6 +319,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             var timer = new Timer();
             timer.Interval = this._updateIntervalMs;
+            timer.Tick += (sender, e) => this.SaveCmdWindowSettings();
             timer.Tick += this.Timer_Tick;
             timer.Start();
             return timer;
@@ -1369,6 +1383,8 @@ namespace FormsSystemStatsWidget.Forms
 
         private void SavePersistentSettings()
         {
+            // Save CMD window settings before saving widget settings
+            this.SaveCmdWindowSettings();
             WidgetPersistentSettingsStore.Save(this._persistentSettings);
         }
 

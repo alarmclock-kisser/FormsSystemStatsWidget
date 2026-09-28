@@ -34,7 +34,7 @@ public class LoopDetectionConfig
     /// <summary>
     /// Enable/disable insertion of interjection message.
     /// </summary>
-    public bool InterjectionEnabled { get; set; } = false;
+    public bool InterjectionEnabled { get; set; } = true;
 
     /// <summary>
     /// Message to insert when a loop is detected.
@@ -63,14 +63,19 @@ public class LoopDetectionConfig
 /// </summary>
 public class LoopDetectionService
 {
+    private const string InterjectionName = "loop_detection_interjection";
     private LoopDetectionConfig _config;
-    private readonly object _gate = new();
-    private readonly Dictionary<string, List<string>> _recentToolCalls = new();
-    private readonly Dictionary<string, int> _callCounts = new();
-    private readonly List<string> _interjectionHistory = new();
 
     public LoopDetectionService(LoopDetectionConfig config)
     {
+        _config = config;
+    }
+
+    public LoopDetectionConfig GetConfig() => _config;
+
+    public void SetConfig(LoopDetectionConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
         _config = config;
     }
 
@@ -81,118 +86,195 @@ public class LoopDetectionService
     /// <returns>A result containing loop detection info and optionally the interjection message.</returns>
     public LoopDetectionResult DetectLoop(JsonArray messages)
     {
-        if (messages == null || messages.Count == 0)
+        if (messages.Count == 0 || !_config.Enabled)
         {
             return new LoopDetectionResult();
         }
 
-        // Get the current configuration
-        var config = GetConfig();
-
-        // Loop checks are diagnostic only; interjections and aborts are intentionally not applied.
-        if (!config.Enabled)
+        List<AssistantAction> recentActions = GetRecentAssistantActions(messages, Math.Max(1, _config.DetectionWindow));
+        int repeats = CountTrailingRepeats(recentActions, _config.SimilarityThreshold);
+        int triggerAfter = Math.Max(2, _config.TriggerAfter);
+        int interjectionCount = Math.Max(CountCurrentTurnInterjections(messages), Math.Max(0, repeats - triggerAfter));
+        bool detected = repeats >= triggerAfter;
+        var result = new LoopDetectionResult
         {
-            return new LoopDetectionResult();
+            IsLoopDetected = detected,
+            RepeatCount = repeats,
+            InterjectionCount = interjectionCount
+        };
+
+        if (!detected)
+        {
+            return result;
         }
 
-        // Convert messages to string representations for comparison
-        var messageStrings = new List<string>(messages.Count);
-        foreach (JsonNode? message in messages)
+        bool maxInterjectionsReached = interjectionCount >= Math.Max(1, _config.MaxInterjections);
+        if (_config.AbortEnabled &&
+            (interjectionCount >= Math.Max(1, _config.AbortAfterInterjections) || maxInterjectionsReached))
         {
-            messageStrings.Add(message?.ToJsonString() ?? "<null>");
+            result.ShouldAbort = true;
+            return result;
         }
 
-        // Check if we have enough history to detect a loop
-        int windowSize = Math.Min(config.DetectionWindow, messages.Count);
-        if (windowSize < config.TriggerAfter)
+        if (_config.InterjectionEnabled && interjectionCount < Math.Max(0, _config.MaxInterjections))
         {
-            return new LoopDetectionResult();
+            result.InterjectionMessage = _config.InterjectionMessage;
         }
 
-        // Compare the last N messages to detect similarity
-        var recentMessages = messageStrings[^windowSize..];
-        string currentMessage = recentMessages[^1];
+        return result;
+    }
 
-        // Count how many times this pattern has occurred consecutively
-        int consecutiveCount = 1;
-        for (int i = recentMessages.Count - 2; i >= 0; i--)
+    /// <summary>Applies a detected interjection to the conversation for the next upstream generation.</summary>
+    public LoopDetectionResult ApplyToConversation(JsonArray messages)
+    {
+        LoopDetectionResult result = DetectLoop(messages);
+        if (result.InterjectionMessage is not null)
         {
-            if (!IsSimilar(recentMessages[i], currentMessage, config.SimilarityThreshold))
+            messages.Add(new JsonObject
+            {
+                ["role"] = "user",
+                ["name"] = InterjectionName,
+                ["content"] = result.InterjectionMessage
+            });
+            result.InterjectionCount++;
+        }
+
+        return result;
+    }
+
+    private static int CountCurrentTurnInterjections(JsonArray messages)
+    {
+        int count = 0;
+        for (int index = messages.Count - 1; index >= 0; index--)
+        {
+            if (messages[index] is not JsonObject message ||
+                !string.Equals(message["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (string.Equals(message["name"]?.ToString(), InterjectionName, StringComparison.Ordinal))
+            {
+                count++;
+                continue;
+            }
+            break;
+        }
+        return count;
+    }
+
+    private static List<AssistantAction> GetRecentAssistantActions(JsonArray messages, int detectionWindow)
+    {
+        var actions = new List<AssistantAction>();
+        for (int index = messages.Count - 1; index >= 0 && actions.Count < detectionWindow; index--)
+        {
+            if (messages[index] is not JsonObject message)
+            {
+                continue;
+            }
+
+            string role = message["role"]?.ToString() ?? string.Empty;
+            if (string.Equals(role, "user", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.Equals(message["name"]?.ToString(), InterjectionName, StringComparison.Ordinal))
+                {
+                    break;
+                }
+                continue;
+            }
+            if (!string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            AssistantAction? action = CreateAction(message);
+            if (action is not null)
+            {
+                actions.Add(action);
+            }
+        }
+
+        actions.Reverse();
+        return actions;
+    }
+
+    private static AssistantAction? CreateAction(JsonObject message)
+    {
+        if (message["tool_calls"] is JsonArray toolCalls && toolCalls.Count > 0)
+        {
+            string[] signatures = toolCalls
+                .OfType<JsonObject>()
+                .Select(call =>
+                {
+                    JsonObject? function = call["function"] as JsonObject;
+                    string name = function?["name"]?.ToString() ?? string.Empty;
+                    string arguments = Canonicalize(function?["arguments"]);
+                    return $"{name}:{arguments}";
+                })
+                .OrderBy(signature => signature, StringComparer.Ordinal)
+                .ToArray();
+            return signatures.Length == 0 ? null : new AssistantAction(true, string.Join("|", signatures));
+        }
+
+        string content = message["content"]?.ToString()?.Trim() ?? string.Empty;
+        return string.IsNullOrWhiteSpace(content) ? null : new AssistantAction(false, NormalizeText(content));
+    }
+
+    private static string Canonicalize(JsonNode? node)
+    {
+        if (node is JsonObject obj)
+        {
+            return "{" + string.Join(",", obj.OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => $"{JsonSerializer.Serialize(pair.Key)}:{Canonicalize(pair.Value)}")) + "}";
+        }
+        if (node is JsonArray array)
+        {
+            return "[" + string.Join(",", array.Select(Canonicalize)) + "]";
+        }
+        return node?.ToJsonString() ?? "null";
+    }
+
+    private static string NormalizeText(string value) => string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
+
+    private static int CountTrailingRepeats(List<AssistantAction> actions, double threshold)
+    {
+        if (actions.Count == 0)
+        {
+            return 0;
+        }
+
+        AssistantAction latest = actions[^1];
+        int count = 1;
+        for (int index = actions.Count - 2; index >= 0; index--)
+        {
+            AssistantAction previous = actions[index];
+            if (previous.IsToolCall != latest.IsToolCall || !AreSimilar(previous.Signature, latest.Signature, threshold, latest.IsToolCall))
             {
                 break;
             }
-            consecutiveCount++;
+            count++;
         }
-
-        return consecutiveCount >= config.TriggerAfter
-            ? new LoopDetectionResult { IsLoopDetected = true }
-            : new LoopDetectionResult();
+        return count;
     }
 
-    /// <summary>
-    /// Checks if two messages are similar based on a similarity threshold.
-    /// </summary>
-    /// <param name="message1">First message to compare.</param>
-    /// <param name="message2">Second message to compare.</param>
-    /// <param name="threshold">Similarity threshold between 0.0 and 1.0.</param>
-    /// <returns>True if messages are similar.</returns>
-    private bool IsSimilar(string message1, string message2, double threshold)
+    private static bool AreSimilar(string left, string right, double threshold, bool exact)
     {
-        if (string.IsNullOrEmpty(message1) || string.IsNullOrEmpty(message2))
+        if (string.Equals(left, right, StringComparison.Ordinal))
         {
-            return string.IsNullOrEmpty(message1) && string.IsNullOrEmpty(message2);
+            return true;
         }
-
-        // Simple string similarity check - could be enhanced with more sophisticated methods
-        double lengthSimilarity = 1.0 - Math.Abs(message1.Length - message2.Length) / (double)Math.Max(message1.Length, message2.Length);
-
-        // Character similarity (basic)
-        int minLength = Math.Min(message1.Length, message2.Length);
-        int matchCount = 0;
-        for (int i = 0; i < minLength; i++)
+        if (exact || string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right))
         {
-            if (message1[i] == message2[i])
-            {
-                matchCount++;
-            }
+            return false;
         }
 
-        double charSimilarity = (double)matchCount / minLength;
-
-        // Combine similarities (weighted average)
-        double similarity = (lengthSimilarity + charSimilarity) / 2.0;
-
-        return similarity >= threshold;
+        HashSet<string> leftTokens = left.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> rightTokens = right.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+        int intersection = leftTokens.Intersect(rightTokens, StringComparer.Ordinal).Count();
+        int union = leftTokens.Union(rightTokens, StringComparer.Ordinal).Count();
+        return union > 0 && intersection / (double)union >= threshold;
     }
 
-    /// <summary>
-    /// Checks if a specific tool call pattern constitutes a loop based on recent history.
-    /// </summary>
-    /// <param name="toolCallId">The ID of the tool call to check.</param>
-    /// <param name="toolName">The name of the tool being called.</param>
-    /// <returns>True if a loop is detected.</returns>
-    public bool IsLoopDetected(string toolCallId, string toolName)
-    {
-        // Implementation would go here - for now placeholder
-        return false;
-    }
-
-    /// <summary>
-    /// Retrieves the current configuration.
-    /// </summary>
-    /// <returns>The configured <see cref="LoopDetectionConfig"/>.</returns>
-    public LoopDetectionConfig GetConfig()
-    {
-        return _config;
-    }
-
-    /// <summary>
-    /// Replaces the current configuration with the provided one.
-    /// </summary>
-    public void SetConfig(LoopDetectionConfig config)
-    {
-        _config = config;
-    }
+    private sealed record AssistantAction(bool IsToolCall, string Signature);
 }
 
 /// <summary>
@@ -219,6 +301,8 @@ public class LoopDetectionResult
     /// Indicates whether the system should abort further processing.
     /// </summary>
     public bool ShouldAbort { get; set; }
+
+    public int RepeatCount { get; set; }
 
     /// <summary>
     /// Timestamp of detection (UTC).

@@ -49,7 +49,6 @@ namespace FormsSystemStatsWidget.Core
         private static long _modelFileSizeBytes;
         private static long _modelNParams;
         private static int _modelNCtx;
-        private static LoopDetectionService? _loopDetectionService;
         private static string _modelFtype = "unknown";
         private static long _modelNVocab;
         private static long _modelNEmbd;
@@ -352,8 +351,6 @@ namespace FormsSystemStatsWidget.Core
                     Logger.Log($"[LlamaBridge] Wildcard listener requires elevated URL ACL ({ex.Message}). Retrying on http://localhost:{ollamaPort}/ without administrator rights.");
                     _listener.Start();
                 }
-                _loopDetectionService = new LoopDetectionService(LoopDetectionConfig);
-
                 _isRunning = true;
 
                 // Dispatch the listening loop to the thread pool
@@ -498,17 +495,37 @@ namespace FormsSystemStatsWidget.Core
 
         private static string GetBridgeCorrelationId(string requestId) => $"{_bridgeInstanceId}:{requestId}";
 
-        private static void LogRepeatedMessageDiagnostic(string requestId, string sanitizedBody)
+        private static string ApplyLoopDetection(string requestId, string sanitizedBody, out bool shouldAbort)
         {
-            JsonObject? request = JsonNode.Parse(sanitizedBody) as JsonObject;
-            JsonArray messages = request?["messages"] as JsonArray
+            JsonObject request = JsonNode.Parse(sanitizedBody) as JsonObject
+                ?? throw new JsonException("Sanitized request is not a JSON object.");
+            JsonArray messages = request["messages"] as JsonArray
                 ?? throw new JsonException("Sanitized request is missing its messages array.");
-            LoopDetectionService detector = _loopDetectionService
-                ?? throw new InvalidOperationException("Loop diagnostics were not initialized.");
-            LoopDetectionResult result = detector.DetectLoop(messages);
+            var detector = new LoopDetectionService(LoopDetectionConfig);
+            LoopDetectionResult result = detector.ApplyToConversation(messages);
+            shouldAbort = result.ShouldAbort;
             LlamaAgentLoopDiagnostics.LogLifecycle(
-                requestId, "RepeatedMessagePatternCheck",
-                $"scope=inbound_history,message_count={messages.Count},detected={result.IsLoopDetected},interjection_applied=false,abort_applied=false");
+                requestId, "LoopDetectionDecision",
+                $"scope=conversation,message_count={messages.Count},repeat_count={result.RepeatCount},interjections={result.InterjectionCount},detected={result.IsLoopDetected},interjection_applied={result.InterjectionMessage is not null},abort_applied={result.ShouldAbort}");
+            return request.ToJsonString();
+        }
+
+        private static async Task SendLoopAbortAsync(HttpListenerResponse response, string requestId)
+        {
+            response.StatusCode = 429;
+            response.ContentType = "application/json; charset=utf-8";
+            byte[] body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+            {
+                error = new
+                {
+                    message = "Generation stopped because repeated assistant actions continued after loop interjections.",
+                    type = "loop_detected",
+                    request_id = requestId
+                }
+            }));
+            response.ContentLength64 = body.Length;
+            await response.OutputStream.WriteAsync(body);
+            response.Close();
         }
 
         private static string SafeCorrelationHeader(HttpListenerRequest request, string headerName)
@@ -552,7 +569,12 @@ namespace FormsSystemStatsWidget.Core
                 return true;
             }
 
-            LogRepeatedMessageDiagnostic(streamRequestId, sanitizedBody);
+            sanitizedBody = ApplyLoopDetection(streamRequestId, sanitizedBody, out bool shouldAbort);
+            if (shouldAbort)
+            {
+                await SendLoopAbortAsync(response, streamRequestId);
+                return true;
+            }
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
@@ -861,7 +883,12 @@ namespace FormsSystemStatsWidget.Core
                 return true;
             }
 
-            LogRepeatedMessageDiagnostic(streamRequestId, sanitizedBody);
+            sanitizedBody = ApplyLoopDetection(streamRequestId, sanitizedBody, out bool shouldAbort);
+            if (shouldAbort)
+            {
+                await SendLoopAbortAsync(response, streamRequestId);
+                return true;
+            }
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE (OLLAMA PATH)]");
