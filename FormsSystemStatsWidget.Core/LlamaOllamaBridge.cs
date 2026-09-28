@@ -49,6 +49,7 @@ namespace FormsSystemStatsWidget.Core
         private static long _modelFileSizeBytes;
         private static long _modelNParams;
         private static int _modelNCtx;
+        private static LoopDetectionService? _loopDetectionService;
         private static string _modelFtype = "unknown";
         private static long _modelNVocab;
         private static long _modelNEmbd;
@@ -76,10 +77,13 @@ namespace FormsSystemStatsWidget.Core
         public static bool EnableRawChunkLogging = true;
 
         // Configuration options for context trimming
-        public static bool Enabled = true;
+        public static bool Enabled = false;
         public static int KeepLastMessages = 10;
-        public static bool TrimToolResults = true;
+        public static bool TrimToolResults;
         public static string ToolCallMode = "Keep";
+
+        // Configuration options for loop detection and interjection
+        public static LoopDetectionConfig LoopDetectionConfig = new LoopDetectionConfig();
 
         public static string LastStartError => _lastStartError;
         public static bool IsRunning => _isRunning;
@@ -87,72 +91,6 @@ namespace FormsSystemStatsWidget.Core
         // Dynamische Fallbacks, falls der /props-Endpunkt unerwartet fehlschlägt
         private static int _detectedNumCtx = 4096;
         private static double _detectedTemperature = 0.7;
-
-        // Conversation history management
-        private static readonly List<string> _conversationHistory = new();
-
-        /// <summary>
-        /// Adds a message to the conversation history.
-        /// </summary>
-        /// <param name="message">The message to add to the history.</param>
-        public static void AddToHistory(string message)
-        {
-            _conversationHistory.Add(message);
-        }
-
-        /// <summary>
-        /// Trims the conversation history based on configuration options.
-        /// </summary>
-        /// <param name="enabled">Whether trimming is enabled.</param>
-        /// <param name="keepLastMessages">Number of messages to keep.</param>
-        /// <param name="trimToolResults">Whether to trim tool result content.</param>
-        /// <param name="toolCallMode">Mode for handling tool calls.</param>
-        public static void TrimHistory(bool enabled, int keepLastMessages, bool trimToolResults, string toolCallMode)
-        {
-            if (!enabled)
-            {
-                return;
-            }
-
-            // Trim history to keep only the last KeepLastMessages messages
-            while (_conversationHistory.Count > keepLastMessages)
-            {
-                _conversationHistory.RemoveAt(0);
-            }
-
-            // Remove "¿" blocks from the history
-            // This is a simple implementation that removes any line containing "¿"
-            _conversationHistory.RemoveAll(line => line.Contains("¿"));
-
-            // If trimming tool results, remove any tool call markers from the history
-            if (trimToolResults)
-            {
-                _conversationHistory.RemoveAll(line => line.Contains("tool_call"));
-            }
-
-            // Handle different ToolCallMode options
-            if (toolCallMode == "Skeleton")
-            {
-                // Keep only the tool call metadata, not the full call
-                _conversationHistory.RemoveAll(line => line.Contains("tool_call_id"));
-                _conversationHistory.RemoveAll(line => line.Contains("tool_name"));
-                _conversationHistory.RemoveAll(line => line.Contains("tool_args"));
-            }
-            else if (toolCallMode == "Summary")
-            {
-                // For now, just remove the last message if it's a tool call
-                // This is a placeholder implementation
-                if (_conversationHistory.Count > 0)
-                {
-                    string lastMessage = _conversationHistory[_conversationHistory.Count - 1];
-                    if (lastMessage.Contains("tool_call"))
-                    {
-                        _conversationHistory.RemoveAt(_conversationHistory.Count - 1);
-                    }
-                }
-            }
-        }
-
 
         // Options / Settings from UI set
         public static double UserDefinedTemperature { get; set; } = 0.7;
@@ -414,6 +352,8 @@ namespace FormsSystemStatsWidget.Core
                     Logger.Log($"[LlamaBridge] Wildcard listener requires elevated URL ACL ({ex.Message}). Retrying on http://localhost:{ollamaPort}/ without administrator rights.");
                     _listener.Start();
                 }
+                _loopDetectionService = new LoopDetectionService(LoopDetectionConfig);
+
                 _isRunning = true;
 
                 // Dispatch the listening loop to the thread pool
@@ -558,6 +498,19 @@ namespace FormsSystemStatsWidget.Core
 
         private static string GetBridgeCorrelationId(string requestId) => $"{_bridgeInstanceId}:{requestId}";
 
+        private static void LogRepeatedMessageDiagnostic(string requestId, string sanitizedBody)
+        {
+            JsonObject? request = JsonNode.Parse(sanitizedBody) as JsonObject;
+            JsonArray messages = request?["messages"] as JsonArray
+                ?? throw new JsonException("Sanitized request is missing its messages array.");
+            LoopDetectionService detector = _loopDetectionService
+                ?? throw new InvalidOperationException("Loop diagnostics were not initialized.");
+            LoopDetectionResult result = detector.DetectLoop(messages);
+            LlamaAgentLoopDiagnostics.LogLifecycle(
+                requestId, "RepeatedMessagePatternCheck",
+                $"scope=inbound_history,message_count={messages.Count},detected={result.IsLoopDetected},interjection_applied=false,abort_applied=false");
+        }
+
         private static string SafeCorrelationHeader(HttpListenerRequest request, string headerName)
         {
             string? value = request.Headers[headerName];
@@ -585,7 +538,12 @@ namespace FormsSystemStatsWidget.Core
             Logger.Log($"[LlamaBridge][OpenAI #{streamRequestId}] Processing OpenAI-compatible direct stream...");
             using var reader = new StreamReader(request.InputStream);
             string requestBody = await reader.ReadToEndAsync();
-            string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget);
+            string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(
+                requestBody, _modelFamily, _detectedNumCtx,
+                UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty,
+                UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget,
+                trimThinkingBlocks: Enabled, keepLastMessages: KeepLastMessages,
+                trimToolResults: TrimToolResults, toolCallMode: ToolCallMode);
             ToolHistoryInspection history = LlamaAgentLoopDiagnostics.BeginRequest(
                 "/v1/chat/completions", streamRequestId, requestBody, sanitizedBody, _modelFamily);
             if (!history.IsValid)
@@ -593,6 +551,8 @@ namespace FormsSystemStatsWidget.Core
                 await SendInvalidToolHistoryAsync(response, streamRequestId, history);
                 return true;
             }
+
+            LogRepeatedMessageDiagnostic(streamRequestId, sanitizedBody);
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
@@ -889,7 +849,9 @@ namespace FormsSystemStatsWidget.Core
             string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(
                 openAiReq.ToJsonString(), _modelFamily, _detectedNumCtx,
                 UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty,
-                UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget);
+                UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget,
+                trimThinkingBlocks: Enabled, keepLastMessages: KeepLastMessages,
+                trimToolResults: TrimToolResults, toolCallMode: ToolCallMode);
             ToolHistoryInspection history = LlamaAgentLoopDiagnostics.BeginRequest(
                 "/api/chat->/v1/chat/completions", streamRequestId, openAiReq.ToJsonString(), sanitizedBody, _modelFamily,
                 requireToolCallIds: false, inboundRequestBody: body);
@@ -898,6 +860,8 @@ namespace FormsSystemStatsWidget.Core
                 await SendInvalidToolHistoryAsync(response, streamRequestId, history);
                 return true;
             }
+
+            LogRepeatedMessageDiagnostic(streamRequestId, sanitizedBody);
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE (OLLAMA PATH)]");

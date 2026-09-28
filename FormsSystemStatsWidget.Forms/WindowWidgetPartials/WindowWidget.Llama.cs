@@ -51,9 +51,6 @@ namespace FormsSystemStatsWidget.Forms
             var cur = this.Cursor;
             this.Cursor = Cursors.WaitCursor; 
 
-            // Trim conversation history before starting the bridge route
-            LlamaOllamaBridge.TrimHistory(LlamaOllamaBridge.Enabled, LlamaOllamaBridge.KeepLastMessages, LlamaOllamaBridge.TrimToolResults, LlamaOllamaBridge.ToolCallMode); 
-
             string apiUrl = this.toolStripTextBox_openAiApiUrl.Text.Trim();
             int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;
             this.toolStripTextBox_llamacppPort.Text = llamaPort.ToString();
@@ -1030,6 +1027,53 @@ namespace FormsSystemStatsWidget.Forms
         private void showTokenssToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
             this._persistentSettings.ShowTokensPerSecond = this.showTokenssToolStripMenuItem.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_trimThinkingBlocks_CheckedChanged(object sender, EventArgs e)
+        {
+            LlamaOllamaBridge.Enabled = this.toolStripMenuItem_trimThinkingBlocks.Checked;
+            this._persistentSettings.TrimThinkingBlocks = LlamaOllamaBridge.Enabled;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_configTrimToolResults_CheckedChanged(object sender, EventArgs e)
+        {
+            LlamaOllamaBridge.TrimToolResults = this.toolStripMenuItem_configTrimToolResults.Checked;
+            this._persistentSettings.TrimThinkingToolResults = LlamaOllamaBridge.TrimToolResults;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripTextBox_configKeepLastMessages_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_configKeepLastMessages.Text.Trim();
+            if (int.TryParse(entered, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int keepLastMessages))
+            {
+                this.toolStripTextBox_configKeepLastMessages.Text = keepLastMessages.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                LlamaOllamaBridge.KeepLastMessages = keepLastMessages;
+                this._persistentSettings.TrimThinkingKeepLastMessages = keepLastMessages;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                _ = MessageBox.Show(this, "Enter a non-negative whole number for the number of recent messages to keep unchanged.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_configKeepLastMessages.Text = LlamaOllamaBridge.KeepLastMessages.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripMenuItem_onlyKeepToolCallSkeletons_CheckedChanged(object sender, EventArgs e)
+        {
+            string mode = this.toolStripMenuItem_onlyKeepToolCallSkeletons.Checked ? "Skeleton" : "Keep";
+            LlamaOllamaBridge.ToolCallMode = mode;
+            this._persistentSettings.TrimThinkingToolCallMode = mode;
             this.SavePersistentSettings();
         }
 

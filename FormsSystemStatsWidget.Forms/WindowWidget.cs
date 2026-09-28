@@ -40,7 +40,35 @@ namespace FormsSystemStatsWidget.Forms
         internal const int GWL_EXSTYLE = -20;
         internal const int WS_EX_LAYERED = 0x80000;
 
+        // Helper methods for monitor and dock state detection
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromPoint(Point pt, uint dwFlags);
+
+        internal const uint MONITOR_DEFAULTTOPRIMARY = 0x00000001;
+        internal const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
+
+        private static MONITORINFO _monitorInfo = new MONITORINFO();
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct MONITORINFO
+        {
+            public int cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public uint dwFlags;
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
         private readonly Timer UpdateTimer;
+        private float FontSizeScale;
         private GpuStats? Gpu;
         private GpuStats? Gpu2 = null;
         private DynamicGradientProgressBar? _progRam;
@@ -74,9 +102,12 @@ namespace FormsSystemStatsWidget.Forms
 
         public WindowWidget()
         {
+            this.KeyPreview = true;
             this.InitializeComponent();
             this.DoubleBuffered = true;
             this._persistentSettings = WidgetPersistentSettingsStore.Load();
+            // Initialize FontSizeScale from persistent settings (default 1.0f if not set)
+            this.FontSizeScale = this._persistentSettings.FontSizeScale != 0f ? this._persistentSettings.FontSizeScale : 1.0f;
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
             this.ApplyApplicationIcon();
             this.ConfigureContextMenuAutoCloseBehavior();
@@ -112,12 +143,23 @@ namespace FormsSystemStatsWidget.Forms
                 this.Location = adjustedPosition;
             }
 
+            // Restore monitor ID from persistent settings
+            this._persistentSettings.WidgetMonitorId = this._persistentSettings.WidgetMonitorId != 0 
+                ? this._persistentSettings.WidgetMonitorId 
+                : 0; // Will be adjusted after position restore
+
             // Hook event for when Form is moved, to update the position in persistent settings
             this.Move += (sender, e) =>
             {
                 if (!this._explicitWidgetCloseRequested)
                 {
                     this._persistentSettings.WidgetPosition = this.Location;
+                    
+                    // Determine which monitor the window is on
+                    this._persistentSettings.WidgetMonitorId = this.GetMonitorIdFromLocation(this.Location);
+                    
+                    // Determine dock state (document, floating, fullscreen, etc.)
+                    this._persistentSettings.WidgetDockState = this.GetDockStateFromBounds(this.Bounds);
                 }
             };
 
@@ -125,6 +167,50 @@ namespace FormsSystemStatsWidget.Forms
             this.FormClosing += (sender, e) =>
             {
                 this.SavePersistentSettings();
+            };
+
+            // Hook KeyDown event for font size toggling with Ctrl key
+            this.KeyDown += (sender, e) =>
+            {
+                // Ctrl + Plus: zoom in
+                if (e.Control && e.KeyCode == Keys.Add)
+                {
+                    this.FontSizeScale = Math.Min(2.0f, this.FontSizeScale + 0.1f);
+                    this._persistentSettings.FontSizeScale = this.FontSizeScale;
+                    this.ApplyFontSizeScale();
+                }
+                // Ctrl + Minus: zoom out
+                else if (e.Control && e.KeyCode == Keys.Subtract)
+                {
+                    this.FontSizeScale = Math.Max(0.5f, this.FontSizeScale - 0.1f);
+                    this._persistentSettings.FontSizeScale = this.FontSizeScale;
+                    this.ApplyFontSizeScale();
+                }
+                // Ctrl + 0: reset to default size
+                else if (e.Control && (e.KeyCode == Keys.D0 || e.KeyCode == Keys.NumPad0))
+                {
+                    this.FontSizeScale = 1.0f;
+                    this._persistentSettings.FontSizeScale = this.FontSizeScale;
+                    this.ApplyFontSizeScale();
+                }
+            };
+
+            // Hook MouseWheel event for Ctrl+MouseWheel zoom
+            this.MouseWheel += (sender, e) =>
+            {
+                if (Control.ModifierKeys == Keys.Control && e.Delta != 0)
+                {
+                    if (e.Delta > 0)
+                    {
+                        this.FontSizeScale = Math.Min(2.0f, this.FontSizeScale + 0.1f);
+                    }
+                    else
+                    {
+                        this.FontSizeScale = Math.Max(0.5f, this.FontSizeScale - 0.1f);
+                    }
+                    this._persistentSettings.FontSizeScale = this.FontSizeScale;
+                    this.ApplyFontSizeScale();
+                }
             };
 
             try { TrafficStats.Init(); }
@@ -253,6 +339,91 @@ namespace FormsSystemStatsWidget.Forms
                     this.contextMenuStrip_widget.Show(this, e.Location);
                 }
             };
+        }
+
+        private int GetMonitorIdFromLocation(Point location)
+        {
+            try
+            {
+                IntPtr monitor = MonitorFromPoint(location, MONITOR_DEFAULTTONEAREST);
+                if (monitor != IntPtr.Zero)
+                {
+                    // Get the monitor name to use as a unique identifier
+                    // We'll use a hash of the monitor handle as the ID
+                    int monitorId = Math.Abs(monitor.GetHashCode() % 10000);
+                    return monitorId;
+                }
+            }
+            catch { }
+            return 0; // Default to primary monitor
+        }
+
+        private int GetDockStateFromBounds(Rectangle bounds)
+        {
+            // Determine dock state based on window bounds relative to screen
+            // We use custom integer values since this is a Form, not a MDI child
+            // 0=floating, 1=fullscreen, 2=half-left, 3=half-right, 4=half-top, 5=half-bottom
+            
+            Rectangle screen = Screen.FromRectangle(bounds).Bounds;
+            
+            // Check if window is maximized/fullscreen
+            if (bounds.Equals(screen) || (bounds.Width >= screen.Width * 0.9 && bounds.Height >= screen.Height * 0.9))
+            {
+                return 1; // fullscreen
+            }
+            
+            // Check if window is docked to left half
+            if (bounds.X <= screen.Left && bounds.Width <= screen.Width * 0.5 && Math.Abs(bounds.Y - screen.Top) < 10)
+            {
+                return 2; // half-left
+            }
+            
+            // Check if window is docked to right half
+            if (bounds.X >= screen.Left + screen.Width * 0.5 && bounds.Width <= screen.Width * 0.5 && Math.Abs(bounds.Y - screen.Top) < 10)
+            {
+                return 3; // half-right
+            }
+            
+            // Check if window is docked to top half
+            if (bounds.Y <= screen.Top && bounds.Height <= screen.Height * 0.5 && Math.Abs(bounds.X - screen.Left) < 10)
+            {
+                return 4; // half-top
+            }
+            
+            // Check if window is docked to bottom half
+            if (bounds.Y >= screen.Top + screen.Height * 0.5 && bounds.Height <= screen.Height * 0.5 && Math.Abs(bounds.X - screen.Left) < 10)
+            {
+                return 5; // half-bottom
+            }
+            
+            return 0; // floating/default
+        }
+
+        private void ApplyFontSizeScale()
+        {
+            try
+            {
+                // Apply the font size scale to the form and its controls
+                float scaleFactor = this.FontSizeScale;
+                
+                // Update default font size if needed
+                foreach (Control ctrl in this.Controls)
+                {
+                    if (ctrl.Font != null)
+                    {
+                        float newSize = ctrl.Font.Size * scaleFactor;
+                        ctrl.Font = new System.Drawing.Font(ctrl.Font.FontFamily, newSize, ctrl.Font.Style, ctrl.Font.Unit);
+                    }
+                }
+                
+                // Update context menu strip font
+                if (this.contextMenuStrip_widget != null)
+                {
+                    float newMenuSize = this.contextMenuStrip_widget.Font.Size * scaleFactor;
+                    this.contextMenuStrip_widget.Font = new System.Drawing.Font(this.contextMenuStrip_widget.Font.FontFamily, newMenuSize, this.contextMenuStrip_widget.Font.Style);
+                }
+            }
+            catch { }
         }
 
         private void InitializeLlamaUiSelections()
@@ -397,6 +568,20 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_additionalCopilotSystemPrompt.Text = this._persistentSettings.AdditionalCopilotSystemPrompt.Trim();
             this.extendCopilotSystemPromptToolStripMenuItem.Checked = this._persistentSettings.ExtendCopilotSystemPrompt;
             this.toolStripMenuItem_appendParams.Checked = this._persistentSettings.AppendParams;
+            this.toolStripMenuItem_trimThinkingBlocks.Checked = this._persistentSettings.TrimThinkingBlocks;
+            LlamaOllamaBridge.Enabled = this._persistentSettings.TrimThinkingBlocks;
+            int keepLastMessages = Math.Max(0, this._persistentSettings.TrimThinkingKeepLastMessages);
+            this._persistentSettings.TrimThinkingKeepLastMessages = keepLastMessages;
+            this.toolStripTextBox_configKeepLastMessages.Text = keepLastMessages.ToString(CultureInfo.InvariantCulture);
+            LlamaOllamaBridge.KeepLastMessages = keepLastMessages;
+            this.toolStripMenuItem_configTrimToolResults.Checked = this._persistentSettings.TrimThinkingToolResults;
+            LlamaOllamaBridge.TrimToolResults = this._persistentSettings.TrimThinkingToolResults;
+            string toolCallMode = string.Equals(this._persistentSettings.TrimThinkingToolCallMode, "Skeleton", StringComparison.OrdinalIgnoreCase)
+                ? "Skeleton"
+                : "Keep";
+            this._persistentSettings.TrimThinkingToolCallMode = toolCallMode;
+            this.toolStripMenuItem_onlyKeepToolCallSkeletons.Checked = toolCallMode == "Skeleton";
+            LlamaOllamaBridge.ToolCallMode = toolCallMode;
             LlamaOllamaBridge.AdditionalCopilotSystemPrompt = this._persistentSettings.ExtendCopilotSystemPrompt
                 ? this._persistentSettings.AdditionalCopilotSystemPrompt
                 : string.Empty;
@@ -437,6 +622,11 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_skeletonMaxLines.Text = this._persistentSettings.SmartPromptSkeletonMaxLines.ToString(CultureInfo.InvariantCulture);
             this.toolStripTextBox_focusKeywordLimit.Text = this._persistentSettings.SmartPromptFocusKeywordLimit.ToString(CultureInfo.InvariantCulture);
             this.toolStripTextBox_tailKeepBonusChars.Text = this._persistentSettings.SmartPromptTailKeepBonusChars.ToString(CultureInfo.InvariantCulture);
+
+            // Restore font size scale
+            this._persistentSettings.FontSizeScale = Math.Max(0.5f, Math.Min(2.0f, this._persistentSettings.FontSizeScale));
+            this.FontSizeScale = this._persistentSettings.FontSizeScale;
+            this.ApplyFontSizeScale();
 
             SmartPromptOptimizationSettings.IsEnabled = this.smartPromptOptimizationsToolStripMenuItem.Checked;
             SmartPromptOptimizationSettings.PromptSafetyRatio = this._persistentSettings.SmartPromptSafetyRatio;
@@ -1462,4 +1652,3 @@ namespace FormsSystemStatsWidget.Forms
     
     }
 }
-

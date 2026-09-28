@@ -11,6 +11,33 @@ public sealed class LlamaStreamTransformerTests
     private const string ModelName = "test-model";
 
     [TestMethod]
+    public void LoopDetection_DiagnosesRepeatedMessagesWithoutInterjectingOrAborting()
+    {
+        var config = new LoopDetectionConfig
+        {
+            Enabled = true,
+            TriggerAfter = 3,
+            DetectionWindow = 5,
+            SimilarityThreshold = 1.0,
+            InterjectionEnabled = false,
+            AbortEnabled = true
+        };
+        var messages = new JsonArray
+        {
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "repeat" }
+        };
+
+        LoopDetectionResult result = new LoopDetectionService(config).DetectLoop(messages);
+
+        Assert.IsTrue(result.IsLoopDetected);
+        Assert.IsNull(result.InterjectionMessage);
+        Assert.IsFalse(result.ShouldAbort);
+        Assert.AreEqual(3, messages.Count);
+    }
+
+    [TestMethod]
     public async Task TransformOpenAiStreamAsync_NormalText_PreservesStopAndDone()
     {
         string stream = CreateSse(
@@ -26,6 +53,42 @@ public sealed class LlamaStreamTransformerTests
         Assert.IsTrue(result.DoneReceived);
         Assert.AreEqual(5, result.GeneratedContentLength);
         Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.CompletedByLlm, result.Status);
+        StringAssert.Contains(output, "[DONE]");
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_NemotronXmlToolCall_ConvertsFunctionAndPreservesParameterValues()
+    {
+        const string toolMarkup = "<tool_call>\n<function=lookup_project>\n<parameter=name>\nalpha\n</parameter>\n<parameter=query>\nfirst line\nsecond line\n</parameter>\n<parameter=options>\n{\"dry_run\":true}\n</parameter>\n</function>\n</tool_call>";
+        JsonObject contentFrame = new()
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["index"] = 0,
+                    ["delta"] = new JsonObject { ["content"] = toolMarkup },
+                    ["finish_reason"] = null
+                }
+            }
+        };
+
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(CreateSse(
+            contentFrame.ToJsonString(),
+            "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}",
+            "[DONE]"));
+        JsonObject[] chunks = ParseChunks(output).ToArray();
+        JsonObject toolDelta = chunks.Single(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray)["choices"]![0]!["delta"]!["tool_calls"]![0]!.AsObject();
+        JsonObject arguments = JsonNode.Parse(toolDelta["function"]?["arguments"]?.ToString() ?? "{}")!.AsObject();
+
+        Assert.AreEqual("lookup_project", toolDelta["function"]?["name"]?.ToString());
+        Assert.AreEqual("alpha", arguments["name"]?.ToString());
+        Assert.AreEqual("first line\nsecond line", arguments["query"]?.ToString());
+        Assert.IsTrue(arguments["options"]?["dry_run"]!.GetValue<bool>());
+        Assert.AreEqual("tool_calls", result.FinalFinishReason);
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.CompletedByToolCall, result.Status);
+        Assert.IsFalse(chunks.Any(chunk => (chunk["choices"]?[0]?["delta"]?["content"]?.ToString() ?? string.Empty).Contains("<tool_call>", StringComparison.Ordinal)));
+        Assert.AreEqual(1, chunks.Count(chunk => chunk["choices"]?[0]?["finish_reason"]?.ToString() == "tool_calls"));
         StringAssert.Contains(output, "[DONE]");
     }
 
@@ -734,6 +797,212 @@ public sealed class LlamaStreamTransformerTests
         Assert.IsTrue(result.ClientDisconnected);
         Assert.IsFalse(result.DoneReceived);
         Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.ClientDisconnected, result.Status);
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_ThinkingBlockTrimmingIsOptIn()
+    {
+        var request = new JsonObject
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["role"] = "assistant",
+                    ["content"] = "<think>private reasoning</think>Visible answer",
+                    ["reasoning_content"] = "separate private reasoning"
+                }
+            }
+        };
+
+        JsonObject sanitized = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(request.ToJsonString(), "llama", numCtx: 100000))!.AsObject();
+        JsonObject assistant = sanitized["messages"]!.AsArray().OfType<JsonObject>().First();
+
+        Assert.AreEqual("<think>private reasoning</think>Visible answer", assistant["content"]?.ToString());
+        Assert.AreEqual("separate private reasoning", assistant["reasoning_content"]?.ToString());
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_TrimsOnlyOlderMessagesAndHandlesNestedBlocks()
+    {
+        var request = new JsonObject
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["role"] = "assistant",
+                    ["content"] = "A<think>outer<think>nested</think>remainder</think>M<think>second</think>B",
+                    ["reasoning_content"] = "separate private reasoning"
+                },
+                new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call-1", ["content"] = "Tool before<think>tool thought</think>after" },
+                new JsonObject { ["role"] = "assistant", ["content"] = "<think>recent thought</think>Recent answer" },
+                new JsonObject { ["role"] = "user", ["content"] = "Keep <think>quoted text</think> intact." }
+            }
+        };
+
+        JsonObject sanitized = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(
+                request.ToJsonString(), "llama", numCtx: 100000,
+                trimThinkingBlocks: true, keepLastMessages: 2))!.AsObject();
+        JsonArray messages = sanitized["messages"]!.AsArray();
+        JsonObject[] assistantMessages = messages.OfType<JsonObject>()
+            .Where(message => string.Equals(message["role"]?.ToString(), "assistant", StringComparison.OrdinalIgnoreCase)).ToArray();
+        JsonObject toolMessage = messages.OfType<JsonObject>()
+            .First(message => string.Equals(message["role"]?.ToString(), "tool", StringComparison.OrdinalIgnoreCase));
+        JsonObject userMessage = messages
+            .OfType<JsonObject>()
+            .First(message => string.Equals(message["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase));
+
+        Assert.AreEqual("AMB", assistantMessages[0]["content"]?.ToString());
+        Assert.IsFalse(assistantMessages[0].ContainsKey("reasoning_content"));
+        Assert.AreEqual("Tool before<think>tool thought</think>after", toolMessage["content"]?.ToString());
+        Assert.AreEqual("call-1", toolMessage["tool_call_id"]?.ToString());
+        Assert.AreEqual("<think>recent thought</think>Recent answer", assistantMessages[1]["content"]?.ToString());
+        Assert.AreEqual("Keep <think>quoted text</think> intact.", userMessage["content"]?.ToString());
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_TrimThinkingBlocksPreservesMultimodalParts()
+    {
+        var request = new JsonObject
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["role"] = "assistant",
+                    ["content"] = new JsonArray
+                    {
+                        new JsonObject { ["type"] = "text", ["text"] = "Before<think>private</think>After" },
+                        new JsonObject { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:image/png;base64,AA==" } }
+                    }
+                }
+            }
+        };
+
+        JsonObject sanitized = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(
+                request.ToJsonString(), "llama", numCtx: 100000,
+                trimThinkingBlocks: true, keepLastMessages: 0))!.AsObject();
+        JsonObject assistant = sanitized["messages"]!.AsArray().OfType<JsonObject>()
+            .First(message => message["role"]?.ToString() == "assistant");
+        JsonArray content = assistant["content"]!.AsArray();
+
+        Assert.AreEqual("BeforeAfter", content[0]?["text"]?.ToString());
+        Assert.AreEqual("image_url", content[1]?["type"]?.ToString());
+        Assert.AreEqual("data:image/png;base64,AA==", content[1]?["image_url"]?["url"]?.ToString());
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_TrimToolResultsOnlyWhenEnabled()
+    {
+        var request = new JsonObject
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call-1", ["content"] = "Tool before<think>private</think>after" },
+                new JsonObject { ["role"] = "user", ["content"] = "Continue." }
+            }
+        };
+
+        JsonArray untrimmedMessages = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(
+                request.ToJsonString(), "llama", numCtx: 100000,
+                trimThinkingBlocks: true, keepLastMessages: 1))!["messages"]!.AsArray();
+        JsonArray trimmedMessages = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(
+                request.ToJsonString(), "llama", numCtx: 100000,
+                trimThinkingBlocks: true, keepLastMessages: 1, trimToolResults: true))!["messages"]!.AsArray();
+        JsonObject untrimmedTool = untrimmedMessages.OfType<JsonObject>().First(message => message["role"]?.ToString() == "tool");
+        JsonObject trimmedTool = trimmedMessages.OfType<JsonObject>().First(message => message["role"]?.ToString() == "tool");
+
+        Assert.AreEqual("Tool before<think>private</think>after", untrimmedTool["content"]?.ToString());
+        Assert.AreEqual("Tool beforeafter", trimmedTool["content"]?.ToString());
+        Assert.AreEqual("call-1", trimmedTool["tool_call_id"]?.ToString());
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_ToolCallModesPreserveOrSkeletonizeCallsWithoutLosingHistory()
+    {
+        var originalToolCalls = new JsonArray
+        {
+            new JsonObject
+            {
+                ["id"] = "call-A",
+                ["type"] = "function",
+                ["function"] = new JsonObject { ["name"] = "read_file", ["arguments"] = "{\"path\":\"old.cs\"}" }
+            },
+            new JsonObject
+            {
+                ["id"] = "call-B",
+                ["type"] = "function",
+                ["function"] = new JsonObject { ["name"] = "write_file", ["arguments"] = "{\"path\":\"new.cs\"}" }
+            }
+        };
+        var request = new JsonObject
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["role"] = "assistant",
+                    ["content"] = "Before<think>old reasoning</think>After",
+                    ["tool_calls"] = originalToolCalls
+                },
+                new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call-A", ["content"] = "read result" },
+                new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call-B", ["content"] = "write result" },
+                new JsonObject { ["role"] = "user", ["content"] = "Next request." }
+            }
+        };
+
+        JsonArray keptMessages = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(
+                request.ToJsonString(), "llama", numCtx: 100000,
+                trimThinkingBlocks: true, keepLastMessages: 1, toolCallMode: "Keep"))!["messages"]!.AsArray();
+        JsonArray skeletonMessages = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(
+                request.ToJsonString(), "qwen", numCtx: 100000,
+                trimThinkingBlocks: true, keepLastMessages: 1, toolCallMode: "Skeleton"))!["messages"]!.AsArray();
+        JsonObject keptAssistant = keptMessages.OfType<JsonObject>().First(message => message["role"]?.ToString() == "assistant");
+        JsonObject skeletonAssistant = skeletonMessages.OfType<JsonObject>().First(message => message["role"]?.ToString() == "assistant");
+        JsonObject[] skeletonCalls = skeletonAssistant["tool_calls"]!.AsArray().OfType<JsonObject>().ToArray();
+        JsonObject[] skeletonToolResults = skeletonMessages.OfType<JsonObject>().Where(message => message["role"]?.ToString() == "tool").ToArray();
+
+        Assert.IsTrue(JsonNode.DeepEquals(originalToolCalls, keptAssistant["tool_calls"]));
+        Assert.AreEqual("BeforeAfter", keptAssistant["content"]?.ToString());
+        CollectionAssert.AreEqual(new[] { "call-A", "call-B" }, skeletonCalls.Select(call => call["id"]?.ToString()).ToArray());
+        CollectionAssert.AreEqual(new[] { "read_file", "write_file" }, skeletonCalls.Select(call => call["function"]?["name"]?.ToString()).ToArray());
+        CollectionAssert.AreEqual(new[] { "{}", "{}" }, skeletonCalls.Select(call => call["function"]?["arguments"]?.ToString()).ToArray());
+        CollectionAssert.AreEqual(new[] { "call-A", "call-B" }, skeletonToolResults.Select(message => message["tool_call_id"]?.ToString()).ToArray());
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(skeletonMessages).IsValid);
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_ThinkingTrimmingIsIdempotent()
+    {
+        var request = new JsonObject
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "assistant", ["content"] = "A<think>nested<think>inner</think>outer</think>B" }
+            }
+        };
+
+        string once = LlamaStreamTransformer.SanitizeIncomingRequest(
+            request.ToJsonString(), "llama", numCtx: 100000,
+            trimThinkingBlocks: true, keepLastMessages: 0);
+        string twice = LlamaStreamTransformer.SanitizeIncomingRequest(
+            once, "llama", numCtx: 100000,
+            trimThinkingBlocks: true, keepLastMessages: 0);
+        JsonObject firstAssistant = JsonNode.Parse(once)!["messages"]!.AsArray()
+            .OfType<JsonObject>().First(message => message["role"]?.ToString() == "assistant");
+        JsonObject secondAssistant = JsonNode.Parse(twice)!["messages"]!.AsArray()
+            .OfType<JsonObject>().First(message => message["role"]?.ToString() == "assistant");
+
+        Assert.AreEqual("AB", firstAssistant["content"]?.ToString());
+        Assert.AreEqual(firstAssistant["content"]?.ToString(), secondAssistant["content"]?.ToString());
     }
 
     [TestMethod]

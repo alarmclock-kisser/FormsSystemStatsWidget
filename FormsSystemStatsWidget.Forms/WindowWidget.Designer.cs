@@ -6,11 +6,6 @@
         ///  Required designer variable.
         /// </summary>
         private System.ComponentModel.IContainer components = null;
-        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem_configEnabled;
-        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem_configKeepLastMessages;
-        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem_configTrimToolResults;
-        private System.Windows.Forms.ToolStripComboBox toolStripComboBox_configToolCallMode;
-        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem_configToolCallMode;
 
         /// <summary>
         ///  Clean up any resources being used.
@@ -141,6 +136,11 @@
             toolStripTextBox_ollamaPort = new ToolStripTextBox();
             printGenerationStatsToolStripMenuItem = new ToolStripMenuItem();
             showTokenssToolStripMenuItem = new ToolStripMenuItem();
+            toolStripMenuItem_trimThinkingBlocks = new ToolStripMenuItem();
+            toolStripMenuItem_configKeepLastMessages = new ToolStripMenuItem();
+            toolStripTextBox_configKeepLastMessages = new ToolStripTextBox();
+            toolStripMenuItem_configTrimToolResults = new ToolStripMenuItem();
+            toolStripMenuItem_onlyKeepToolCallSkeletons = new ToolStripMenuItem();
             extendCopilotSystemPromptToolStripMenuItem = new ToolStripMenuItem();
             toolStripTextBox_additionalCopilotSystemPrompt = new ToolStripTextBox();
             toolStripMenuItem_appendParams = new ToolStripMenuItem();
@@ -164,25 +164,6 @@
             toolStripSeparator6 = new ToolStripSeparator();
             openDebugConsoleToolStripMenuItem = new ToolStripMenuItem();
 
-            // Configuration options for llama.cpp bridge
-            toolStripMenuItem_configEnabled = new ToolStripMenuItem();
-            toolStripMenuItem_configKeepLastMessages = new ToolStripMenuItem();
-            toolStripMenuItem_configTrimToolResults = new ToolStripMenuItem();
-            toolStripComboBox_configToolCallMode = new ToolStripComboBox();
-
-            // Add configuration items to the reroute menu
-            toolStripMenuItem_configEnabled.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_configEnabled });
-            toolStripMenuItem_configKeepLastMessages.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_configKeepLastMessages });
-            toolStripMenuItem_configTrimToolResults.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_configTrimToolResults });
-            toolStripComboBox_configToolCallMode.Items.AddRange(new ToolStripItem[] { toolStripMenuItem_configToolCallMode });
-
-            // Add the new configuration items to the reroute menu's DropDownItems
-            rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { 
-                toolStripMenuItem_configEnabled, 
-                toolStripMenuItem_configKeepLastMessages, 
-                toolStripMenuItem_configTrimToolResults, 
-                toolStripComboBox_configToolCallMode
-            });
             toolStripMenuItem_visuallyFormatLog = new ToolStripMenuItem();
             toolStripMenuItem_includeRawChunksLog = new ToolStripMenuItem();
             toolStripMenuItem_logGenerationSpeed = new ToolStripMenuItem();
@@ -928,7 +909,7 @@
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 
             rerouteAPILlamacppOllamaToolStripMenuItem.CheckOnClick = true;
-            rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_openAiApi, toolStripSeparator4, llamacppPortToolStripMenuItem, ollamaPortToolStripMenuItem, printGenerationStatsToolStripMenuItem, showTokenssToolStripMenuItem, extendCopilotSystemPromptToolStripMenuItem });
+            rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_openAiApi, toolStripSeparator4, llamacppPortToolStripMenuItem, ollamaPortToolStripMenuItem, printGenerationStatsToolStripMenuItem, showTokenssToolStripMenuItem, toolStripMenuItem_trimThinkingBlocks, extendCopilotSystemPromptToolStripMenuItem });
             rerouteAPILlamacppOllamaToolStripMenuItem.Name = "rerouteAPILlamacppOllamaToolStripMenuItem";
             rerouteAPILlamacppOllamaToolStripMenuItem.Size = new Size(290, 22);
             rerouteAPILlamacppOllamaToolStripMenuItem.Text = "🔗 Re-route API llama.cpp -> Ollama";
@@ -998,7 +979,46 @@
             showTokenssToolStripMenuItem.Name = "showTokenssToolStripMenuItem";
             showTokenssToolStripMenuItem.Size = new Size(232, 22);
             showTokenssToolStripMenuItem.Text = "Show tokens/s";
-            // 
+            //
+            // toolStripMenuItem_trimThinkingBlocks
+            //
+            toolStripMenuItem_trimThinkingBlocks.CheckOnClick = true;
+            toolStripMenuItem_trimThinkingBlocks.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_configKeepLastMessages, toolStripMenuItem_configTrimToolResults, toolStripMenuItem_onlyKeepToolCallSkeletons });
+            toolStripMenuItem_trimThinkingBlocks.Name = "toolStripMenuItem_trimThinkingBlocks";
+            toolStripMenuItem_trimThinkingBlocks.Size = new Size(232, 22);
+            toolStripMenuItem_trimThinkingBlocks.Text = "Trim thinking blocks";
+            toolStripMenuItem_trimThinkingBlocks.CheckedChanged += toolStripMenuItem_trimThinkingBlocks_CheckedChanged;
+            //
+            // toolStripMenuItem_configKeepLastMessages
+            //
+            toolStripMenuItem_configKeepLastMessages.DropDownItems.AddRange(new ToolStripItem[] { toolStripTextBox_configKeepLastMessages });
+            toolStripMenuItem_configKeepLastMessages.Name = "toolStripMenuItem_configKeepLastMessages";
+            toolStripMenuItem_configKeepLastMessages.Size = new Size(232, 22);
+            toolStripMenuItem_configKeepLastMessages.Text = "Keep last N messages unchanged";
+            //
+            // toolStripTextBox_configKeepLastMessages
+            //
+            toolStripTextBox_configKeepLastMessages.Name = "toolStripTextBox_configKeepLastMessages";
+            toolStripTextBox_configKeepLastMessages.Size = new Size(100, 23);
+            toolStripTextBox_configKeepLastMessages.Text = "10";
+            toolStripTextBox_configKeepLastMessages.KeyDown += toolStripTextBox_configKeepLastMessages_KeyDown;
+            //
+            // toolStripMenuItem_configTrimToolResults
+            //
+            toolStripMenuItem_configTrimToolResults.CheckOnClick = true;
+            toolStripMenuItem_configTrimToolResults.Name = "toolStripMenuItem_configTrimToolResults";
+            toolStripMenuItem_configTrimToolResults.Size = new Size(232, 22);
+            toolStripMenuItem_configTrimToolResults.Text = "Trim thinking from tool results";
+            toolStripMenuItem_configTrimToolResults.CheckedChanged += toolStripMenuItem_configTrimToolResults_CheckedChanged;
+            //
+            // toolStripMenuItem_onlyKeepToolCallSkeletons
+            //
+            toolStripMenuItem_onlyKeepToolCallSkeletons.CheckOnClick = true;
+            toolStripMenuItem_onlyKeepToolCallSkeletons.Name = "toolStripMenuItem_onlyKeepToolCallSkeletons";
+            toolStripMenuItem_onlyKeepToolCallSkeletons.Size = new Size(232, 22);
+            toolStripMenuItem_onlyKeepToolCallSkeletons.Text = "Only keep tool-call skeletons";
+            toolStripMenuItem_onlyKeepToolCallSkeletons.CheckedChanged += toolStripMenuItem_onlyKeepToolCallSkeletons_CheckedChanged;
+            //
             // extendCopilotSystemPromptToolStripMenuItem
             // 
             extendCopilotSystemPromptToolStripMenuItem.Checked = true;
@@ -1487,6 +1507,11 @@
         private ToolStripMenuItem injectToolCallingRulesToolStripMenuItem;
         private ToolStripTextBox toolStripTextBox_injectToolCallingRules;
         private ToolStripMenuItem showTokenssToolStripMenuItem;
+        private ToolStripMenuItem toolStripMenuItem_trimThinkingBlocks;
+        private ToolStripMenuItem toolStripMenuItem_configKeepLastMessages;
+        private ToolStripTextBox toolStripTextBox_configKeepLastMessages;
+        private ToolStripMenuItem toolStripMenuItem_configTrimToolResults;
+        private ToolStripMenuItem toolStripMenuItem_onlyKeepToolCallSkeletons;
         private ToolStripMenuItem extendCopilotSystemPromptToolStripMenuItem;
         private ToolStripTextBox toolStripTextBox_additionalCopilotSystemPrompt;
         private ToolStripMenuItem toolStripMenuItem_appendParams;

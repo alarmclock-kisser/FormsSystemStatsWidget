@@ -77,9 +77,16 @@ namespace FormsSystemStatsWidget.Forms
         public int OllamaPort { get; set; } = 11434;
         public string AdditionalLoadArgs { get; set; } = "--mlock -t 4 -tb 4";
         public Point WidgetPosition { get; set; } = new(0, 0);
+        public int WidgetMonitorId { get; set; } = 0;
+        public int WidgetDockState { get; set; } = 0; // 0=floating, 1=fullscreen, 2=half-left, 3=half-right, 4=half-top, 5=half-bottom
+        public float FontSizeScale { get; set; } = 1.0f;
         public bool BlackOutMode { get; set; } = false;
 
         public bool PrintGenerationStats { get; set; } = false;
+        public bool TrimThinkingBlocks { get; set; }
+        public int TrimThinkingKeepLastMessages { get; set; } = 10;
+        public bool TrimThinkingToolResults { get; set; }
+        public string TrimThinkingToolCallMode { get; set; } = "Keep";
         public string AdditionalCopilotSystemPrompt { get; set; } = string.Empty;
         public bool ExtendCopilotSystemPrompt { get; set; } = false;
         public bool AppendParams { get; set; } = false;

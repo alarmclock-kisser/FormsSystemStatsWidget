@@ -17,7 +17,7 @@ namespace FormsSystemStatsWidget.Core
     {
         // Robuste Regex für alle möglichen Tool-Call-Formate
         private static readonly Regex ToolCallStartRegex = new(
-            @"(?:```(?:json|javascript|js)\s*\n)?\s*(?:<function|{\s*""(?:tool|name|function|action|command)"")",
+            @"(?:```(?:json|javascript|js)\s*\n)?\s*(?:<tool_call(?:\s*>)|<function|{\s*""(?:tool|name|function|action|command)"")",
             RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline);
 
         // Spezifische Regex für XML-ähnliche Tool-Calls (Nemotron-Standard)
@@ -27,7 +27,7 @@ namespace FormsSystemStatsWidget.Core
 
         // Spezifische Regex für Parameter in XML-ähnlichen Tool-Calls
         private static readonly Regex ParameterRegex = new(
-            @"<parameter\s+(?:name\s*=\s*[""']?(?<pname>[^""'>\s]+)[""']?|(?<pname>[^""'>\s]+))\s*>(?<pval>[\s\S]*?)</parameter>",
+            @"<parameter(?:\s+name\s*=\s*[""']?(?<pname>[^""'>\s]+)[""']?|\s*=\s*[""']?(?<pname>[^""'>\s]+)[""']?|\s+(?<pname>[^""'>\s]+))\s*>(?<pval>[\s\S]*?)</parameter>",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Für Qwen-ähnliche Tool-Calls (falls benötigt)
@@ -57,6 +57,9 @@ namespace FormsSystemStatsWidget.Core
 
         private static readonly Regex FunctionToolCallRegex = new(@"<function=(?<name>[^\s>]+)>\s*(?<body>.*?)\s*</function>(?:\s*</tool_call>)?", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline);
         private static readonly Regex KeywordSearchRegex = new(@"\b[\p{L}\p{Nd}_]{3,}\b", RegexOptions.Compiled);
+        private static readonly Regex ThinkingTagRegex = new(
+            @"</think\s*>|<think\b[^>]*>",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         // Anti-Truncation: Dreifache Backticks im Code sicher verpacken, damit UI-Parser nicht abbrechen
         private static readonly Regex CodeFenceBlockRegex = new(@"(" + "``" + @"`)(?<lang>[^\r\n`]*)\r?\n(?<code>[\s\S]*?)\1", RegexOptions.Compiled);
@@ -68,12 +71,14 @@ namespace FormsSystemStatsWidget.Core
             "this", "that", "with", "from", "were", "have", "just"
         };
 
-        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double presencePenalty = 1.0, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40, string? reasoningEffort = null, int reasoningBudget = 0)
+        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double presencePenalty = 1.0, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40, string? reasoningEffort = null, int reasoningBudget = 0, bool trimThinkingBlocks = false, int keepLastMessages = 10, bool trimToolResults = false, string toolCallMode = "Keep")
         {
             try
             {
                 JsonNode? node = JsonNode.Parse(jsonInput);
-                bool flattenToolHistory = string.Equals(modelFamily, "qwen", StringComparison.OrdinalIgnoreCase);
+                // Keep native call IDs and ordering intact when history trimming is enabled.
+                bool flattenToolHistory = !trimThinkingBlocks &&
+                    string.Equals(modelFamily, "qwen", StringComparison.OrdinalIgnoreCase);
 
                 if (node is not JsonObject root)
                 {
@@ -115,10 +120,34 @@ namespace FormsSystemStatsWidget.Core
                     return root.ToJsonString();
                 }
 
-                foreach (JsonObject message in messages.OfType<JsonObject>())
+                int firstMessageToTrim = Math.Max(0, messages.Count - Math.Max(0, keepLastMessages));
+                for (int messageIndex = 0; messageIndex < messages.Count; messageIndex++)
                 {
+                    if (messages[messageIndex] is not JsonObject message)
+                    {
+                        continue;
+                    }
+
                     _ = message.Remove("audio");
                     _ = message.Remove("refusal");
+
+                    if (trimThinkingBlocks && messageIndex < firstMessageToTrim)
+                    {
+                        string role = message["role"]?.ToString() ?? string.Empty;
+                        if (string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase))
+                        {
+                            RemoveThinkingBlocksFromMessageContent(message, removeReasoningContent: true);
+                            if (string.Equals(toolCallMode, "Skeleton", StringComparison.OrdinalIgnoreCase))
+                            {
+                                ReduceToolCallsToSkeleton(message);
+                            }
+                        }
+                        else if (trimToolResults && string.Equals(role, "tool", StringComparison.OrdinalIgnoreCase))
+                        {
+                            RemoveThinkingBlocksFromMessageContent(message, removeReasoningContent: false);
+                        }
+                    }
+
                     NormalizeToolHistoryMessage(message, flattenToolHistory);
                 }
 
@@ -751,6 +780,125 @@ namespace FormsSystemStatsWidget.Core
 
             content = candidate;
             return true;
+        }
+
+        private static void RemoveThinkingBlocksFromMessageContent(JsonObject message, bool removeReasoningContent)
+        {
+            if (removeReasoningContent)
+            {
+                _ = message.Remove("reasoning_content");
+            }
+
+            if (message["content"] is JsonValue contentValue &&
+                contentValue.TryGetValue<string>(out string? content) &&
+                content != null)
+            {
+                message["content"] = RemoveThinkingBlocks(content);
+                return;
+            }
+
+            if (message["content"] is not JsonArray contentParts)
+            {
+                return;
+            }
+
+            foreach (JsonObject part in contentParts.OfType<JsonObject>())
+            {
+                if (!string.Equals(part["type"]?.ToString(), "text", StringComparison.OrdinalIgnoreCase) ||
+                    part["text"] is not JsonValue textValue ||
+                    !textValue.TryGetValue<string>(out string? text) ||
+                    text == null)
+                {
+                    continue;
+                }
+
+                part["text"] = RemoveThinkingBlocks(text);
+            }
+        }
+
+        private static string RemoveThinkingBlocks(string content)
+        {
+            MatchCollection tags = ThinkingTagRegex.Matches(content);
+            if (tags.Count == 0)
+            {
+                return content;
+            }
+
+            var result = new StringBuilder(content.Length);
+            int copyStart = 0;
+            int depth = 0;
+
+            foreach (Match tag in tags)
+            {
+                if (depth == 0)
+                {
+                    result.Append(content, copyStart, tag.Index - copyStart);
+                }
+
+                if (tag.Value.StartsWith("</", StringComparison.Ordinal))
+                {
+                    if (depth > 0)
+                    {
+                        depth--;
+                    }
+                }
+                else
+                {
+                    depth++;
+                }
+
+                copyStart = tag.Index + tag.Length;
+            }
+
+            if (depth == 0)
+            {
+                result.Append(content, copyStart, content.Length - copyStart);
+            }
+
+            return result.ToString();
+        }
+
+        private static void ReduceToolCallsToSkeleton(JsonObject message)
+        {
+            if (message["tool_calls"] is JsonArray toolCalls)
+            {
+                foreach (JsonObject toolCall in toolCalls.OfType<JsonObject>())
+                {
+                    foreach (string propertyName in toolCall
+                        .Select(property => property.Key)
+                        .Where(propertyName => propertyName is not ("id" or "type" or "index" or "function"))
+                        .ToArray())
+                    {
+                        _ = toolCall.Remove(propertyName);
+                    }
+
+                    if (toolCall["function"] is JsonObject function)
+                    {
+                        foreach (string propertyName in function
+                            .Select(property => property.Key)
+                            .Where(propertyName => propertyName is not ("name" or "arguments"))
+                            .ToArray())
+                        {
+                            _ = function.Remove(propertyName);
+                        }
+
+                        function["arguments"] = "{}";
+                    }
+                }
+            }
+
+            if (message["function_call"] is JsonObject legacyFunctionCall)
+            {
+                foreach (string propertyName in legacyFunctionCall
+                    .Select(property => property.Key)
+                    .Where(propertyName => propertyName is not ("name" or "arguments"))
+                    .ToArray())
+                {
+                    _ = legacyFunctionCall.Remove(propertyName);
+                }
+
+                legacyFunctionCall["arguments"] = "{}";
+            }
         }
 
         private static int CountKeywordHits(string content, HashSet<string> focusKeywords)
@@ -1407,12 +1555,7 @@ namespace FormsSystemStatsWidget.Core
                     bool hasNativeToolCalls = delta["tool_calls"] is JsonArray nativeToolCalls && nativeToolCalls.Count > 0;
                     if (toolCallTriggered && !hasNativeToolCalls)
                     {
-                        if (choice["finish_reason"] != null)
-                        {
-                            JsonObject finishChunk = chunk.DeepClone().AsObject();
-                            finishChunk["choices"]![0]!["delta"] = new JsonObject();
-                            await EmitChunkAsync(finishChunk);
-                        }
+                        // The converted tool call already emitted its own tool_calls finish chunk.
                         continue;
                     }
 
@@ -1894,12 +2037,16 @@ namespace FormsSystemStatsWidget.Core
                 string paramName = p.Groups["pname"].Value.Trim();
                 string paramValue = p.Groups["pval"].Value.Trim();
 
-                // Bereinige den Wert von überschüssigem Whitespace
-                paramValue = Regex.Replace(paramValue, @"\s+", " ").Trim();
-
                 if (!string.IsNullOrWhiteSpace(paramName))
                 {
-                    args[paramName] = paramValue;
+                    try
+                    {
+                        args[paramName] = JsonNode.Parse(paramValue);
+                    }
+                    catch (JsonException)
+                    {
+                        args[paramName] = JsonValue.Create(paramValue);
+                    }
                 }
             }
 
