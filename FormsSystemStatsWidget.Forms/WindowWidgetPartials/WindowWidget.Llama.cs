@@ -603,21 +603,49 @@ namespace FormsSystemStatsWidget.Forms
         {
             Size size = this._persistentSettings.CmdWindowSize;
             Point position = this._persistentSettings.CmdWindowPosition;
-            if (size.Width <= 0 || size.Height <= 0)
-            {
-                return;
-            }
-
             Screen[] screens = Screen.AllScreens;
             Screen screen = screens.FirstOrDefault(candidate => string.Equals(
                     candidate.DeviceName,
                     this._persistentSettings.CmdWindowMonitorDeviceName,
                     StringComparison.OrdinalIgnoreCase))
                 ?? Screen.FromPoint(position);
-            Rectangle bounds = GetCmdWindowRestoreBounds(
-                position, size, this._persistentSettings.CmdWindowDockState, screen.WorkingArea);
+            int dockState = this._persistentSettings.CmdWindowDockState;
+            if (size.Width < 250 || size.Height < 200)
+            {
+                if (!TryRecoverLegacyCmdWindowBounds(position, size, out Rectangle recoveredBounds))
+                {
+                    Logger.Log($"[CMD] Ignoring invalid saved window size {size}; using the terminal's default geometry.");
+                    return;
+                }
+
+                int recoveredDockState = GetDockStateFromBounds(recoveredBounds, screen.WorkingArea);
+                if (recoveredDockState == 0)
+                {
+                    Logger.Log($"[CMD] Ignoring legacy window bounds that do not match a supported snap layout: {recoveredBounds}.");
+                    return;
+                }
+
+                Logger.Log($"[CMD] Recovered legacy native RECT {recoveredBounds}; inferred dock state {recoveredDockState}.");
+                position = recoveredBounds.Location;
+                size = recoveredBounds.Size;
+                dockState = recoveredDockState;
+            }
+
+            Rectangle bounds = GetCmdWindowRestoreBounds(position, size, dockState, screen.WorkingArea);
             _ = SetWindowPos(handle, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, SwpNoZOrder | SwpNoActivate);
-            Logger.Log($"[CMD] Restored window on {screen.DeviceName}: position=({bounds.X},{bounds.Y}), size={bounds.Width}x{bounds.Height}, dock={this._persistentSettings.CmdWindowDockState}.");
+            Logger.Log($"[CMD] Restored window on {screen.DeviceName}: position=({bounds.X},{bounds.Y}), size={bounds.Width}x{bounds.Height}, dock={dockState}.");
+        }
+
+        internal static bool TryRecoverLegacyCmdWindowBounds(Point position, Size size, out Rectangle bounds)
+        {
+            bounds = Rectangle.Empty;
+            if (size.Width <= position.X || size.Height <= position.Y)
+            {
+                return false;
+            }
+
+            bounds = Rectangle.FromLTRB(position.X, position.Y, size.Width, size.Height);
+            return bounds.Width >= 250 && bounds.Height >= 200;
         }
 
         internal static Rectangle GetCmdWindowRestoreBounds(Point position, Size size, int dockState, Rectangle workingArea)
@@ -652,6 +680,9 @@ namespace FormsSystemStatsWidget.Forms
             int y = Math.Clamp(position.Y, workingArea.Top, workingArea.Bottom - height);
             return new Rectangle(x, y, width, height);
         }
+
+        internal static Rectangle ConvertNativeWindowRect(int left, int top, int right, int bottom) =>
+            Rectangle.FromLTRB(left, top, right, bottom);
 
         private void StartCmdNormal(string batFilePath)
         {
@@ -723,8 +754,15 @@ namespace FormsSystemStatsWidget.Forms
                 }
 
                 IntPtr handle = FindWindowByTitle(this._activeCmdWindowTitle);
-                if (handle == IntPtr.Zero || !GetWindowRect(handle, out Rectangle rect) || rect.Width <= 0 || rect.Height <= 0)
+                if (handle == IntPtr.Zero || !GetWindowRect(handle, out NativeWindowRect nativeRect))
                 {
+                    return;
+                }
+
+                Rectangle rect = nativeRect.ToRectangle();
+                if (rect.Width < 250 || rect.Height < 200)
+                {
+                    Logger.Log($"[CMD] Ignoring implausible window bounds: {rect}.");
                     return;
                 }
 
@@ -780,8 +818,20 @@ namespace FormsSystemStatsWidget.Forms
             return found;
         }
 
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        private static extern bool GetWindowRect(IntPtr hWnd, out Rectangle lpRect);
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct NativeWindowRect
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+
+            public readonly Rectangle ToRectangle() => ConvertNativeWindowRect(this.Left, this.Top, this.Right, this.Bottom);
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        private static extern bool GetWindowRect(IntPtr hWnd, out NativeWindowRect lpRect);
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);

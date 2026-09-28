@@ -112,6 +112,38 @@ namespace FormsSystemStatsWidget.Tests
         }
 
         [TestMethod]
+        public void CmdWindowCapture_ShouldConvertNativeRectEdgesToPositionAndSize()
+        {
+            Rectangle captured = WindowWidget.ConvertNativeWindowRect(-1080, 0, 0, 936);
+
+            Assert.AreEqual(new Rectangle(-1080, 0, 1080, 936), captured);
+        }
+
+        [TestMethod]
+        public void CmdWindowCapture_ShouldDetectTopHalfDockOnPortraitMonitor()
+        {
+            Rectangle monitorWorkingArea = new(-1080, 0, 1080, 1872);
+            Rectangle captured = WindowWidget.ConvertNativeWindowRect(-1087, 0, 7, 950);
+
+            Assert.AreEqual(4, WindowWidget.GetDockStateFromBounds(captured, monitorWorkingArea));
+        }
+
+        [TestMethod]
+        public void CmdWindowRestore_ShouldRecoverLegacyCorruptRectAndRestoreTopHalfSnap()
+        {
+            bool recovered = WindowWidget.TryRecoverLegacyCmdWindowBounds(
+                new Point(-1087, 0), new Size(7, 943), out Rectangle recoveredBounds);
+            Rectangle monitorWorkingArea = new(-1080, 0, 1080, 1872);
+
+            Assert.IsTrue(recovered);
+            Assert.AreEqual(new Rectangle(-1087, 0, 1094, 943), recoveredBounds);
+            int dockState = WindowWidget.GetDockStateFromBounds(recoveredBounds, monitorWorkingArea);
+            Assert.AreEqual(4, dockState);
+            Assert.AreEqual(new Rectangle(-1080, 0, 1080, 936),
+                WindowWidget.GetCmdWindowRestoreBounds(recoveredBounds.Location, recoveredBounds.Size, dockState, monitorWorkingArea));
+        }
+
+        [TestMethod]
         public void TerminalStart_ShouldUseAvailableTerminalAndPreserveBatchPathWithSpaces()
         {
             System.Diagnostics.ProcessStartInfo startInfo = WindowWidget.CreateTerminalStartInfo(

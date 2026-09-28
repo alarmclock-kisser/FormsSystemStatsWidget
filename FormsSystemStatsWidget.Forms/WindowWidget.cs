@@ -379,11 +379,11 @@ namespace FormsSystemStatsWidget.Forms
 
         private int GetDockStateFromBounds(Rectangle bounds)
         {
-            // Determine dock state based on window bounds relative to screen
-            // We use custom integer values since this is a Form, not a MDI child
-            // 0=floating, 1=fullscreen, 2=half-left, 3=half-right, 4=half-top, 5=half-bottom
-            
-            Rectangle screen = Screen.FromRectangle(bounds).WorkingArea;
+            return GetDockStateFromBounds(bounds, Screen.FromRectangle(bounds).WorkingArea);
+        }
+
+        internal static int GetDockStateFromBounds(Rectangle bounds, Rectangle screen)
+        {
             int tolerance = Math.Max(10, SystemInformation.BorderSize.Width * 2);
             
             // Check if window is maximized/fullscreen
