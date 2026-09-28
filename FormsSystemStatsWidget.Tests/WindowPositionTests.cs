@@ -76,8 +76,8 @@ namespace FormsSystemStatsWidget.Tests
         [TestMethod]
         public void CmdWindowRestore_ShouldKeepSavedBoundsWhenTheyFitOnScreen()
         {
-            Rectangle bounds = WindowWidget.ClampCmdWindowBounds(
-                new Point(150, 160), new Size(800, 600), new Rectangle(0, 0, 1920, 1080));
+            Rectangle bounds = WindowWidget.GetCmdWindowRestoreBounds(
+                new Point(150, 160), new Size(800, 600), 0, new Rectangle(0, 0, 1920, 1080));
 
             Assert.AreEqual(new Rectangle(150, 160, 800, 600), bounds);
         }
@@ -85,10 +85,50 @@ namespace FormsSystemStatsWidget.Tests
         [TestMethod]
         public void CmdWindowRestore_ShouldClampOffscreenBoundsToWorkingArea()
         {
-            Rectangle bounds = WindowWidget.ClampCmdWindowBounds(
-                new Point(-300, -100), new Size(800, 600), new Rectangle(0, 0, 1920, 1080));
+            Rectangle bounds = WindowWidget.GetCmdWindowRestoreBounds(
+                new Point(-300, -100), new Size(800, 600), 0, new Rectangle(0, 0, 1920, 1080));
 
             Assert.AreEqual(new Rectangle(0, 0, 800, 600), bounds);
+        }
+
+        [TestMethod]
+        public void CmdWindowRestore_ShouldRecreateTopHalfSnapOnSelectedMonitor()
+        {
+            Rectangle selectedMonitorWorkingArea = new Rectangle(-1600, 0, 1600, 900);
+
+            Rectangle bounds = WindowWidget.GetCmdWindowRestoreBounds(
+                new Point(-1500, 20), new Size(1580, 430), 4, selectedMonitorWorkingArea);
+
+            Assert.AreEqual(new Rectangle(-1600, 0, 1600, 450), bounds);
+        }
+
+        [TestMethod]
+        public void CmdWindowRestore_ShouldRecreateLeftAndRightHalfSnaps()
+        {
+            var area = new Rectangle(0, 0, 1920, 1080);
+
+            Assert.AreEqual(new Rectangle(0, 0, 960, 1080), WindowWidget.GetCmdWindowRestoreBounds(Point.Empty, new Size(960, 1080), 2, area));
+            Assert.AreEqual(new Rectangle(960, 0, 960, 1080), WindowWidget.GetCmdWindowRestoreBounds(Point.Empty, new Size(960, 1080), 3, area));
+        }
+
+        [TestMethod]
+        public void TerminalStart_ShouldUseAvailableTerminalAndPreserveBatchPathWithSpaces()
+        {
+            System.Diagnostics.ProcessStartInfo startInfo = WindowWidget.CreateTerminalStartInfo(
+                @"C:\Model Load\Qwen Server.bat", "FSSWidget_Qwen_Server", new WidgetPersistentSettings());
+
+            Assert.IsFalse(startInfo.UseShellExecute);
+            if (startInfo.FileName.EndsWith("wt.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                CollectionAssert.Contains(startInfo.ArgumentList.ToArray(), "FSSWidget_Qwen_Server");
+                CollectionAssert.Contains(startInfo.ArgumentList.ToArray(), "--suppressApplicationTitle");
+                CollectionAssert.Contains(startInfo.ArgumentList.ToArray(), @"call ""C:\Model Load\Qwen Server.bat""");
+            }
+            else
+            {
+                Assert.AreEqual(System.IO.Path.Combine(Environment.SystemDirectory, "cmd.exe"), startInfo.FileName);
+                StringAssert.Contains(startInfo.Arguments, @"title FSSWidget_Qwen_Server & call ""C:\Model Load\Qwen Server.bat""");
+            }
         }
     }
 }

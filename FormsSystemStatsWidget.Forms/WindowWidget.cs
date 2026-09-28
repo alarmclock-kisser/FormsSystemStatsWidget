@@ -383,34 +383,39 @@ namespace FormsSystemStatsWidget.Forms
             // We use custom integer values since this is a Form, not a MDI child
             // 0=floating, 1=fullscreen, 2=half-left, 3=half-right, 4=half-top, 5=half-bottom
             
-            Rectangle screen = Screen.FromRectangle(bounds).Bounds;
+            Rectangle screen = Screen.FromRectangle(bounds).WorkingArea;
+            int tolerance = Math.Max(10, SystemInformation.BorderSize.Width * 2);
             
             // Check if window is maximized/fullscreen
-            if (bounds.Equals(screen) || (bounds.Width >= screen.Width * 0.9 && bounds.Height >= screen.Height * 0.9))
+            if (bounds.Width >= screen.Width * 0.9 && bounds.Height >= screen.Height * 0.9)
             {
                 return 1; // fullscreen
             }
             
             // Check if window is docked to left half
-            if (bounds.X <= screen.Left && bounds.Width <= screen.Width * 0.5 && Math.Abs(bounds.Y - screen.Top) < 10)
+            if (Math.Abs(bounds.X - screen.Left) <= tolerance && Math.Abs(bounds.Y - screen.Top) <= tolerance &&
+                bounds.Width <= screen.Width * 0.55 && bounds.Height >= screen.Height * 0.9)
             {
                 return 2; // half-left
             }
             
             // Check if window is docked to right half
-            if (bounds.X >= screen.Left + screen.Width * 0.5 && bounds.Width <= screen.Width * 0.5 && Math.Abs(bounds.Y - screen.Top) < 10)
+            if (Math.Abs(bounds.Right - screen.Right) <= tolerance && Math.Abs(bounds.Y - screen.Top) <= tolerance &&
+                bounds.Width <= screen.Width * 0.55 && bounds.Height >= screen.Height * 0.9)
             {
                 return 3; // half-right
             }
             
             // Check if window is docked to top half
-            if (bounds.Y <= screen.Top && bounds.Height <= screen.Height * 0.5 && Math.Abs(bounds.X - screen.Left) < 10)
+            if (Math.Abs(bounds.Y - screen.Top) <= tolerance && Math.Abs(bounds.X - screen.Left) <= tolerance &&
+                bounds.Height <= screen.Height * 0.55 && bounds.Width >= screen.Width * 0.9)
             {
                 return 4; // half-top
             }
             
             // Check if window is docked to bottom half
-            if (bounds.Y >= screen.Top + screen.Height * 0.5 && bounds.Height <= screen.Height * 0.5 && Math.Abs(bounds.X - screen.Left) < 10)
+            if (Math.Abs(bounds.Bottom - screen.Bottom) <= tolerance && Math.Abs(bounds.X - screen.Left) <= tolerance &&
+                bounds.Height <= screen.Height * 0.55 && bounds.Width >= screen.Width * 0.9)
             {
                 return 5; // half-bottom
             }
@@ -828,6 +833,16 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_execModelLoadBat.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.openDebugConsoleToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.toolStripMenuItem_loadOnnxGenaiServer.DropDown.Closing += this.KeepOnnxSubMenuOpenForInputInteractions;
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_loopDetectionEnabled.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_triggerAfter.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_detectionWindow.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_similarityThreshold.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_interjectionEnabled.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_interjectionMessage.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_maxInterjections.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_abortEnabled.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_abortAfterInterjections.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.toolStripMenuItem_onnxHideCmd.CheckedChanged += this.FlagOnnxHideConsoleToggled;
         }
 

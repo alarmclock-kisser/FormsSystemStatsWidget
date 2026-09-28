@@ -3,6 +3,7 @@ using Microsoft.VisualBasic;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -31,33 +32,12 @@ namespace FormsSystemStatsWidget.Forms
 
             // Trigger after
             toolStripTextBox_triggerAfter.Text = this._loopDetectionService.GetConfig().TriggerAfter.ToString();
-            toolStripTextBox_triggerAfter.Leave += (s, e) =>
-            {
-                var cfg = this._loopDetectionService.GetConfig();
-                if (int.TryParse(toolStripTextBox_triggerAfter.Text, out var val) && val >= 1)
-                    cfg.TriggerAfter = val;
-                this.ApplyLoopDetectionConfig(cfg);
-            };
 
             // Detection window
             toolStripTextBox_detectionWindow.Text = this._loopDetectionService.GetConfig().DetectionWindow.ToString();
-            toolStripTextBox_detectionWindow.Leave += (s, e) =>
-            {
-                var cfg = this._loopDetectionService.GetConfig();
-                if (int.TryParse(toolStripTextBox_detectionWindow.Text, out var val) && val >= 1)
-                    cfg.DetectionWindow = val;
-                this.ApplyLoopDetectionConfig(cfg);
-            };
 
             // Similarity threshold
             toolStripTextBox_similarityThreshold.Text = this._loopDetectionService.GetConfig().SimilarityThreshold.ToString("F2");
-            toolStripTextBox_similarityThreshold.Leave += (s, e) =>
-            {
-                var cfg = this._loopDetectionService.GetConfig();
-                if (double.TryParse(toolStripTextBox_similarityThreshold.Text, out var val) && val >= 0 && val <= 1)
-                    cfg.SimilarityThreshold = val;
-                this.ApplyLoopDetectionConfig(cfg);
-            };
 
             // Interjection enabled
             toolStripMenuItem_interjectionEnabled.Checked = this._loopDetectionService.GetConfig().InterjectionEnabled;
@@ -70,22 +50,9 @@ namespace FormsSystemStatsWidget.Forms
 
             // Interjection message
             toolStripTextBox_interjectionMessage.Text = this._loopDetectionService.GetConfig().InterjectionMessage;
-            toolStripTextBox_interjectionMessage.Leave += (s, e) =>
-            {
-                var cfg = this._loopDetectionService.GetConfig();
-                cfg.InterjectionMessage = toolStripTextBox_interjectionMessage.Text;
-                this.ApplyLoopDetectionConfig(cfg);
-            };
 
             // Max interjections
             toolStripTextBox_maxInterjections.Text = this._loopDetectionService.GetConfig().MaxInterjections.ToString();
-            toolStripTextBox_maxInterjections.Leave += (s, e) =>
-            {
-                var cfg = this._loopDetectionService.GetConfig();
-                if (int.TryParse(toolStripTextBox_maxInterjections.Text, out var val) && val >= 1)
-                    cfg.MaxInterjections = val;
-                this.ApplyLoopDetectionConfig(cfg);
-            };
 
             // Abort enabled
             toolStripMenuItem_abortEnabled.Checked = this._loopDetectionService.GetConfig().AbortEnabled;
@@ -93,18 +60,85 @@ namespace FormsSystemStatsWidget.Forms
             {
                 var cfg = this._loopDetectionService.GetConfig();
                 cfg.AbortEnabled = toolStripMenuItem_abortEnabled.Checked;
-                this._loopDetectionService.SetConfig(cfg);
+                this.ApplyLoopDetectionConfig(cfg);
             };
 
             // Abort after interjections
             toolStripTextBox_abortAfterInterjections.Text = this._loopDetectionService.GetConfig().AbortAfterInterjections.ToString();
-            toolStripTextBox_abortAfterInterjections.Leave += (s, e) =>
+        }
+
+        private void toolStripTextBox_triggerAfter_KeyDown(object? sender, KeyEventArgs e) =>
+            this.ApplyLoopIntegerInput(toolStripTextBox_triggerAfter, e, value => this._loopDetectionService.GetConfig().TriggerAfter = value, 2, 100);
+
+        private void toolStripTextBox_detectionWindow_KeyDown(object? sender, KeyEventArgs e) =>
+            this.ApplyLoopIntegerInput(toolStripTextBox_detectionWindow, e, value => this._loopDetectionService.GetConfig().DetectionWindow = value, 2, 100);
+
+        private void toolStripTextBox_similarityThreshold_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
             {
-                var cfg = this._loopDetectionService.GetConfig();
-                if (int.TryParse(toolStripTextBox_abortAfterInterjections.Text, out var val) && val >= 1)
-                    cfg.AbortAfterInterjections = val;
-                this.ApplyLoopDetectionConfig(cfg);
-            };
+                return;
+            }
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            string text = toolStripTextBox_similarityThreshold.Text.Trim();
+            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out double value) &&
+                !double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) || value is < 0 or > 1)
+            {
+                toolStripTextBox_similarityThreshold.Text = this._loopDetectionService.GetConfig().SimilarityThreshold.ToString("0.##", CultureInfo.CurrentCulture);
+                return;
+            }
+            this._loopDetectionService.GetConfig().SimilarityThreshold = value;
+            this.toolStripTextBox_similarityThreshold.Text = value.ToString("0.##", CultureInfo.CurrentCulture);
+            this.ApplyLoopDetectionConfig(this._loopDetectionService.GetConfig());
+        }
+
+        private void toolStripTextBox_interjectionMessage_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            if (!string.IsNullOrWhiteSpace(toolStripTextBox_interjectionMessage.Text))
+            {
+                this._loopDetectionService.GetConfig().InterjectionMessage = toolStripTextBox_interjectionMessage.Text.Trim();
+                this.ApplyLoopDetectionConfig(this._loopDetectionService.GetConfig());
+            }
+            else
+            {
+                toolStripTextBox_interjectionMessage.Text = this._loopDetectionService.GetConfig().InterjectionMessage;
+            }
+        }
+
+        private void toolStripTextBox_maxInterjections_KeyDown(object? sender, KeyEventArgs e) =>
+            this.ApplyLoopIntegerInput(toolStripTextBox_maxInterjections, e, value => this._loopDetectionService.GetConfig().MaxInterjections = value, 1, 20);
+
+        private void toolStripTextBox_abortAfterInterjections_KeyDown(object? sender, KeyEventArgs e) =>
+            this.ApplyLoopIntegerInput(toolStripTextBox_abortAfterInterjections, e, value => this._loopDetectionService.GetConfig().AbortAfterInterjections = value, 1, 20);
+
+        private void ApplyLoopIntegerInput(ToolStripTextBox textBox, KeyEventArgs e, Action<int> assign, int minimum, int maximum)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            if (!int.TryParse(textBox.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out int value) || value < minimum || value > maximum)
+            {
+                textBox.Text = textBox == toolStripTextBox_triggerAfter
+                    ? this._loopDetectionService.GetConfig().TriggerAfter.ToString(CultureInfo.CurrentCulture)
+                    : textBox == toolStripTextBox_detectionWindow
+                        ? this._loopDetectionService.GetConfig().DetectionWindow.ToString(CultureInfo.CurrentCulture)
+                        : textBox == toolStripTextBox_maxInterjections
+                            ? this._loopDetectionService.GetConfig().MaxInterjections.ToString(CultureInfo.CurrentCulture)
+                            : this._loopDetectionService.GetConfig().AbortAfterInterjections.ToString(CultureInfo.CurrentCulture);
+                return;
+            }
+            assign(value);
+            this.ApplyLoopDetectionConfig(this._loopDetectionService.GetConfig());
         }
 
         private void ApplyLoopDetectionConfig(LoopDetectionConfig config)
@@ -517,38 +551,35 @@ namespace FormsSystemStatsWidget.Forms
         }
 
         /// <summary>
-        /// Starts the batch file in Console Host, restores its window bounds, and
-        /// lets Windows retain the console font settings for the stable title.
+        /// Starts the batch file through cmd.exe so Windows can use the configured
+        /// default terminal, then restores its window bounds when its title appears.
         /// </summary>
         private void StartCmdWithPersistedSettings(string batFilePath)
         {
             if (this.toolStripMenuItem_hideCmd.Checked)
             {
+                this._activeCmdWindowTitle = null;
                 this.StartCmdNormal(batFilePath);
                 return;
             }
 
             string safeBatName = Regex.Replace(Path.GetFileNameWithoutExtension(batFilePath), "[^A-Za-z0-9_-]", "_");
             this._activeCmdWindowTitle = $"FSSWidget_{safeBatName}";
-            var startInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = Path.Combine(Environment.SystemDirectory, "conhost.exe"),
-                UseShellExecute = false,
-                CreateNoWindow = false,
-                WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
-            };
-            startInfo.ArgumentList.Add("cmd.exe");
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add($"title {this._activeCmdWindowTitle} & call \"{Path.GetFullPath(batFilePath)}\"");
+            System.Diagnostics.ProcessStartInfo startInfo = CreateTerminalStartInfo(batFilePath, this._activeCmdWindowTitle, this._persistentSettings);
 
             try
             {
-                _ = System.Diagnostics.Process.Start(startInfo);
+                System.Diagnostics.Process? process = System.Diagnostics.Process.Start(startInfo);
+                if (process is null)
+                {
+                    throw new InvalidOperationException("cmd.exe did not start.");
+                }
+                Logger.Log($"[CMD] Started batch file through cmd.exe (PID {process.Id}), window title '{this._activeCmdWindowTitle}'.");
                 _ = System.Threading.Tasks.Task.Run(this.RestoreCmdWindowWhenReady);
             }
             catch (Exception ex)
             {
-                Logger.Log($"[CMD] Could not start the legacy console host: {ex.Message}");
+                Logger.Log($"[CMD] Could not start batch file through cmd.exe: {ex.Message}");
                 this.StartCmdNormal(batFilePath);
             }
         }
@@ -577,14 +608,44 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
-            Screen screen = Screen.AllScreens.FirstOrDefault(candidate => candidate.Bounds.Contains(position))
-                ?? Screen.PrimaryScreen!;
-            Rectangle bounds = ClampCmdWindowBounds(position, size, screen.WorkingArea);
+            Screen[] screens = Screen.AllScreens;
+            Screen screen = screens.FirstOrDefault(candidate => string.Equals(
+                    candidate.DeviceName,
+                    this._persistentSettings.CmdWindowMonitorDeviceName,
+                    StringComparison.OrdinalIgnoreCase))
+                ?? Screen.FromPoint(position);
+            Rectangle bounds = GetCmdWindowRestoreBounds(
+                position, size, this._persistentSettings.CmdWindowDockState, screen.WorkingArea);
             _ = SetWindowPos(handle, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, SwpNoZOrder | SwpNoActivate);
+            Logger.Log($"[CMD] Restored window on {screen.DeviceName}: position=({bounds.X},{bounds.Y}), size={bounds.Width}x{bounds.Height}, dock={this._persistentSettings.CmdWindowDockState}.");
         }
 
-        internal static Rectangle ClampCmdWindowBounds(Point position, Size size, Rectangle workingArea)
+        internal static Rectangle GetCmdWindowRestoreBounds(Point position, Size size, int dockState, Rectangle workingArea)
         {
+            if (dockState == 1)
+            {
+                return workingArea;
+            }
+
+            if (dockState == 2)
+            {
+                return new Rectangle(workingArea.Left, workingArea.Top, workingArea.Width / 2, workingArea.Height);
+            }
+            if (dockState == 3)
+            {
+                int snapWidth = workingArea.Width / 2;
+                return new Rectangle(workingArea.Left + workingArea.Width - snapWidth, workingArea.Top, snapWidth, workingArea.Height);
+            }
+            if (dockState == 4)
+            {
+                return new Rectangle(workingArea.Left, workingArea.Top, workingArea.Width, workingArea.Height / 2);
+            }
+            if (dockState == 5)
+            {
+                int snapHeight = workingArea.Height / 2;
+                return new Rectangle(workingArea.Left, workingArea.Top + workingArea.Height - snapHeight, workingArea.Width, snapHeight);
+            }
+
             int width = Math.Min(size.Width, workingArea.Width);
             int height = Math.Min(size.Height, workingArea.Height);
             int x = Math.Clamp(position.X, workingArea.Left, workingArea.Right - width);
@@ -594,14 +655,59 @@ namespace FormsSystemStatsWidget.Forms
 
         private void StartCmdNormal(string batFilePath)
         {
-            _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            string fullPath = Path.GetFullPath(batFilePath);
+            var startInfo = new System.Diagnostics.ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = $"/c \"{batFilePath}\"",
-                UseShellExecute = true,
+                FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                Arguments = $"/c call \"{fullPath}\"",
+                UseShellExecute = false,
                 CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
-                WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? System.Diagnostics.ProcessWindowStyle.Hidden : System.Diagnostics.ProcessWindowStyle.Normal
-            });
+                WindowStyle = this.toolStripMenuItem_hideCmd.Checked
+                    ? System.Diagnostics.ProcessWindowStyle.Hidden
+                    : System.Diagnostics.ProcessWindowStyle.Normal
+            };
+            _ = System.Diagnostics.Process.Start(startInfo);
+        }
+
+        internal static System.Diagnostics.ProcessStartInfo CreateTerminalStartInfo(string batFilePath, string windowTitle, WidgetPersistentSettings settings)
+        {
+            string fullPath = Path.GetFullPath(batFilePath);
+            string windowsTerminal = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Microsoft", "WindowsApps", "wt.exe");
+            if (File.Exists(windowsTerminal))
+            {
+                var terminalStartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = windowsTerminal,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                terminalStartInfo.ArgumentList.Add("-w");
+                terminalStartInfo.ArgumentList.Add("new");
+                if (settings.CmdWindowPosition != Point.Empty)
+                {
+                    terminalStartInfo.ArgumentList.Add("--pos");
+                    terminalStartInfo.ArgumentList.Add($"{settings.CmdWindowPosition.X},{settings.CmdWindowPosition.Y}");
+                }
+                terminalStartInfo.ArgumentList.Add("new-tab");
+                terminalStartInfo.ArgumentList.Add("--title");
+                terminalStartInfo.ArgumentList.Add(windowTitle);
+                terminalStartInfo.ArgumentList.Add("--suppressApplicationTitle");
+                terminalStartInfo.ArgumentList.Add("cmd.exe");
+                terminalStartInfo.ArgumentList.Add("/c");
+                terminalStartInfo.ArgumentList.Add($"call \"{fullPath}\"");
+                return terminalStartInfo;
+            }
+
+            return new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                Arguments = $"/c title {windowTitle} & call \"{fullPath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = false,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+            };
         }
 
         /// <summary>
@@ -626,15 +732,18 @@ namespace FormsSystemStatsWidget.Forms
                 var size = new Size(rect.Width, rect.Height);
                 int monitorId = this.GetMonitorIdFromLocation(position);
                 int dockState = this.GetDockStateFromBounds(rect);
+                string monitorDeviceName = Screen.FromRectangle(rect).DeviceName;
                 if (this._persistentSettings.CmdWindowPosition != position ||
                     this._persistentSettings.CmdWindowSize != size ||
                     this._persistentSettings.CmdWindowMonitorId != monitorId ||
-                    this._persistentSettings.CmdWindowDockState != dockState)
+                    this._persistentSettings.CmdWindowDockState != dockState ||
+                    !string.Equals(this._persistentSettings.CmdWindowMonitorDeviceName, monitorDeviceName, StringComparison.OrdinalIgnoreCase))
                 {
                     this._persistentSettings.CmdWindowPosition = position;
                     this._persistentSettings.CmdWindowSize = size;
                     this._persistentSettings.CmdWindowMonitorId = monitorId;
                     this._persistentSettings.CmdWindowDockState = dockState;
+                    this._persistentSettings.CmdWindowMonitorDeviceName = monitorDeviceName;
                     WidgetPersistentSettingsStore.Save(this._persistentSettings);
                 }
             }
@@ -661,7 +770,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 var text = new StringBuilder(512);
                 _ = GetWindowText(handle, text, text.Capacity);
-                if (string.Equals(text.ToString(), title, StringComparison.Ordinal))
+                if (text.ToString().Contains(title, StringComparison.OrdinalIgnoreCase))
                 {
                     found = handle;
                     return false;

@@ -18,6 +18,7 @@
         private ToolStripTextBox toolStripTextBox_similarityThreshold;
         private ToolStripSeparator toolStripSeparator_loopOptions;
         private ToolStripMenuItem toolStripMenuItem_interjectionEnabled;
+        private ToolStripMenuItem toolStripMenuItem_interjectionMessage;
         private ToolStripTextBox toolStripTextBox_interjectionMessage;
         private ToolStripMenuItem toolStripMenuItem_maxInterjections;
         private ToolStripTextBox toolStripTextBox_maxInterjections;
@@ -94,29 +95,55 @@
             toolStripTextBox_similarityThreshold = new ToolStripTextBox();
             toolStripSeparator_loopOptions = new ToolStripSeparator();
             toolStripMenuItem_interjectionEnabled = new ToolStripMenuItem();
+            toolStripMenuItem_interjectionMessage = new ToolStripMenuItem();
             toolStripTextBox_interjectionMessage = new ToolStripTextBox();
             toolStripMenuItem_maxInterjections = new ToolStripMenuItem();
             toolStripTextBox_maxInterjections = new ToolStripTextBox();
             toolStripMenuItem_abortEnabled = new ToolStripMenuItem();
             toolStripMenuItem_abortAfterInterjections = new ToolStripMenuItem();
             toolStripTextBox_abortAfterInterjections = new ToolStripTextBox();
-            toolStripMenuItem_loopDetectionEnabled.Text = "Loop detection enabled";
+            toolStripMenuItem_loopDetectionEnabled.Text = "Loop detection";
             toolStripMenuItem_loopDetectionEnabled.CheckOnClick = true;
             toolStripMenuItem_triggerAfter.Text = "Trigger after repeats";
-            toolStripTextBox_triggerAfter.Size = new Size(80, 23);
-            toolStripMenuItem_detectionWindow.Text = "Assistant-action window";
-            toolStripTextBox_detectionWindow.Size = new Size(80, 23);
+            toolStripMenuItem_triggerAfter.DropDownItems.Add(toolStripTextBox_triggerAfter);
+            toolStripTextBox_triggerAfter.Size = new Size(100, 23);
+            toolStripTextBox_triggerAfter.KeyDown += toolStripTextBox_triggerAfter_KeyDown;
+            toolStripMenuItem_detectionWindow.Text = "Detection window";
+            toolStripMenuItem_detectionWindow.DropDownItems.Add(toolStripTextBox_detectionWindow);
+            toolStripTextBox_detectionWindow.Size = new Size(100, 23);
+            toolStripTextBox_detectionWindow.KeyDown += toolStripTextBox_detectionWindow_KeyDown;
             toolStripMenuItem_similarityThreshold.Text = "Text similarity threshold";
-            toolStripTextBox_similarityThreshold.Size = new Size(80, 23);
+            toolStripMenuItem_similarityThreshold.DropDownItems.Add(toolStripTextBox_similarityThreshold);
+            toolStripTextBox_similarityThreshold.Size = new Size(100, 23);
+            toolStripTextBox_similarityThreshold.KeyDown += toolStripTextBox_similarityThreshold_KeyDown;
             toolStripMenuItem_interjectionEnabled.Text = "Insert interjection";
             toolStripMenuItem_interjectionEnabled.CheckOnClick = true;
             toolStripTextBox_interjectionMessage.Size = new Size(420, 23);
+            toolStripTextBox_interjectionMessage.KeyDown += toolStripTextBox_interjectionMessage_KeyDown;
+            toolStripTextBox_interjectionMessage.Text = "You appear to be repeating the same actions or tool calls. Stop looping, review the current tool results and continue with a different action or provide the final answer if the task is complete.";
+            toolStripMenuItem_interjectionMessage.Text = "Interjection message";
+            toolStripMenuItem_interjectionMessage.DropDownItems.Add(toolStripTextBox_interjectionMessage);
+            toolStripMenuItem_maxInterjections.DropDownItems.Add(toolStripTextBox_maxInterjections);
+            toolStripTextBox_maxInterjections.Size = new Size(100, 23);
+            toolStripTextBox_maxInterjections.KeyDown += toolStripTextBox_maxInterjections_KeyDown;
+            toolStripMenuItem_interjectionEnabled.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_interjectionMessage, toolStripMenuItem_maxInterjections });
             toolStripMenuItem_maxInterjections.Text = "Maximum interjections";
-            toolStripTextBox_maxInterjections.Size = new Size(80, 23);
             toolStripMenuItem_abortEnabled.Text = "Enable hard abort";
             toolStripMenuItem_abortEnabled.CheckOnClick = true;
             toolStripMenuItem_abortAfterInterjections.Text = "Abort after interjections";
-            toolStripTextBox_abortAfterInterjections.Size = new Size(80, 23);
+            toolStripMenuItem_abortAfterInterjections.DropDownItems.Add(toolStripTextBox_abortAfterInterjections);
+            toolStripTextBox_abortAfterInterjections.Size = new Size(100, 23);
+            toolStripTextBox_abortAfterInterjections.KeyDown += toolStripTextBox_abortAfterInterjections_KeyDown;
+            toolStripMenuItem_abortEnabled.DropDownItems.Add(toolStripMenuItem_abortAfterInterjections);
+            toolStripMenuItem_loopDetectionEnabled.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                toolStripMenuItem_triggerAfter,
+                toolStripMenuItem_detectionWindow,
+                toolStripMenuItem_similarityThreshold,
+                toolStripSeparator_loopOptions,
+                toolStripMenuItem_interjectionEnabled,
+                toolStripMenuItem_abortEnabled
+            });
             toolStripMenuItem_contextSize = new ToolStripMenuItem();
             toolStripTextBox_contextSize = new ToolStripTextBox();
             toolStripMenuItem_batchSize = new ToolStripMenuItem();
@@ -960,7 +987,7 @@
             // rerouteAPILlamacppOllamaToolStripMenuItem
             // 
             rerouteAPILlamacppOllamaToolStripMenuItem.CheckOnClick = true;
-            rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_openAiApi, toolStripSeparator4, llamacppPortToolStripMenuItem, ollamaPortToolStripMenuItem, printGenerationStatsToolStripMenuItem, showTokenssToolStripMenuItem, toolStripMenuItem_trimThinkingBlocks, extendCopilotSystemPromptToolStripMenuItem, toolStripSeparator_loopDetection, toolStripMenuItem_loopDetectionEnabled, toolStripMenuItem_triggerAfter, toolStripTextBox_triggerAfter, toolStripMenuItem_detectionWindow, toolStripTextBox_detectionWindow, toolStripMenuItem_similarityThreshold, toolStripTextBox_similarityThreshold, toolStripSeparator_loopOptions, toolStripMenuItem_interjectionEnabled, toolStripTextBox_interjectionMessage, toolStripMenuItem_maxInterjections, toolStripTextBox_maxInterjections, toolStripMenuItem_abortEnabled, toolStripMenuItem_abortAfterInterjections, toolStripTextBox_abortAfterInterjections });
+            rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_openAiApi, toolStripSeparator4, llamacppPortToolStripMenuItem, ollamaPortToolStripMenuItem, printGenerationStatsToolStripMenuItem, showTokenssToolStripMenuItem, toolStripMenuItem_trimThinkingBlocks, extendCopilotSystemPromptToolStripMenuItem, toolStripSeparator_loopDetection, toolStripMenuItem_loopDetectionEnabled });
             rerouteAPILlamacppOllamaToolStripMenuItem.Name = "rerouteAPILlamacppOllamaToolStripMenuItem";
             rerouteAPILlamacppOllamaToolStripMenuItem.Size = new Size(290, 22);
             rerouteAPILlamacppOllamaToolStripMenuItem.Text = "🔗 Re-route API llama.cpp -> Ollama";

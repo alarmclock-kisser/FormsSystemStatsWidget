@@ -107,6 +107,7 @@ namespace FormsSystemStatsWidget.Forms
         public Point CmdWindowPosition { get; set; } = new(0, 0);
         public Size CmdWindowSize { get; set; } = Size.Empty;
         public int CmdWindowMonitorId { get; set; } = 0;
+        public string CmdWindowMonitorDeviceName { get; set; } = string.Empty;
         public int CmdWindowDockState { get; set; } = 0; // 0=floating, 1=fullscreen, 2=half-left, 3=half-right, 4=half-top, 5=half-bottom
         public int CmdWindowFontSize { get; set; } = 12; // font size in points
         public int CmdWindowFontFamily { get; set; } = 0; // 0=default, 1=Courier New, 2=Consolas
