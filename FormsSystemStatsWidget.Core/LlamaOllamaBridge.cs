@@ -471,6 +471,13 @@ namespace FormsSystemStatsWidget.Core
             using var reader = new StreamReader(request.InputStream);
             string requestBody = await reader.ReadToEndAsync();
             string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget);
+            ToolHistoryInspection history = LlamaAgentLoopDiagnostics.BeginRequest(
+                "/v1/chat/completions", streamRequestId, requestBody, sanitizedBody, _modelFamily);
+            if (!history.IsValid)
+            {
+                await SendInvalidToolHistoryAsync(response, streamRequestId, history);
+                return true;
+            }
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
@@ -665,7 +672,8 @@ namespace FormsSystemStatsWidget.Core
                 return false;
             }
 
-            Logger.Log("[LlamaBridge] Translating NDJSON-Ollama request...");
+            string streamRequestId = Interlocked.Increment(ref _nextStreamRequestId).ToString(CultureInfo.InvariantCulture);
+            Logger.Log($"[LlamaBridge][Ollama #{streamRequestId}] Translating NDJSON-Ollama request...");
             using var reader = new StreamReader(request.InputStream);
             string body = await reader.ReadToEndAsync();
             JsonNode? ollamaReq = JsonNode.Parse(body);
@@ -728,6 +736,14 @@ namespace FormsSystemStatsWidget.Core
                 openAiReq.ToJsonString(), _modelFamily, _detectedNumCtx,
                 UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty,
                 UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget);
+            ToolHistoryInspection history = LlamaAgentLoopDiagnostics.BeginRequest(
+                "/api/chat->/v1/chat/completions", streamRequestId, openAiReq.ToJsonString(), sanitizedBody, _modelFamily,
+                requireToolCallIds: false);
+            if (!history.IsValid)
+            {
+                await SendInvalidToolHistoryAsync(response, streamRequestId, history);
+                return true;
+            }
 
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE (OLLAMA PATH)]");
@@ -748,11 +764,11 @@ namespace FormsSystemStatsWidget.Core
             LlamaStreamTransformer.OpenAiStreamTransformResult? streamResult = null;
             if (ollamaReq?["stream"]?.GetValue<bool>() == false)
             {
-                await WriteNonStreamingOllamaResponseAsync(response, upstreamRes);
+                await WriteNonStreamingOllamaResponseAsync(response, upstreamRes, streamRequestId);
             }
             else
             {
-                streamResult = await WriteStreamingOllamaResponseAsync(response, upstreamRes);
+                streamResult = await WriteStreamingOllamaResponseAsync(response, upstreamRes, streamRequestId);
             }
 
             if (streamResult?.ClientDisconnected == true)
@@ -765,17 +781,37 @@ namespace FormsSystemStatsWidget.Core
             }
 
             Logger.Log(streamResult == null
-                ? "[LlamaBridge] Ollama non-stream response ended."
-                : $"[LlamaBridge] Ollama stream ended: {streamResult.Status}.");
+                ? $"[LlamaBridge][Ollama #{streamRequestId}] Non-stream response ended."
+                : $"[LlamaBridge][Ollama #{streamRequestId}] Stream ended: {streamResult.Status}.");
             return true;
         }
 
-        private static async Task WriteNonStreamingOllamaResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamRes)
+        private static async Task WriteNonStreamingOllamaResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamRes, string streamRequestId)
         {
             string resContent = await upstreamRes.Content.ReadAsStringAsync();
             JsonNode? openAiRes = JsonNode.Parse(resContent);
+            Logger.Log($"[AGENT_LOOP #{streamRequestId}] NonStreamingResponse chars={resContent.Length},response_hash={LlamaAgentLoopDiagnostics.HashForTests(openAiRes)}.");
             JsonObject? choice = openAiRes?["choices"]?[0] as JsonObject;
             JsonObject? openAiMessage = choice?["message"] as JsonObject;
+            LlamaAgentLoopDiagnostics.BeginResponse(streamRequestId);
+            if (openAiMessage != null)
+            {
+                var diagnosticChunk = new JsonObject
+                {
+                    ["choices"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["index"] = choice?["index"]?.DeepClone() ?? JsonValue.Create(0),
+                            ["delta"] = openAiMessage.DeepClone(),
+                            ["finish_reason"] = choice?["finish_reason"]?.DeepClone()
+                        }
+                    }
+                };
+                LlamaAgentLoopDiagnostics.ObserveResponseChunk(streamRequestId, diagnosticChunk);
+            }
+            LlamaAgentLoopDiagnostics.CompleteResponse(
+                streamRequestId, doneReceived: openAiMessage != null, choice?["finish_reason"]?.ToString());
             var ollamaMessage = new JsonObject
             {
                 ["role"] = "assistant",
@@ -833,10 +869,27 @@ namespace FormsSystemStatsWidget.Core
             throw new JsonException("Tool-call arguments must be a JSON object.");
         }
 
-        private static async Task<LlamaStreamTransformer.OpenAiStreamTransformResult> WriteStreamingOllamaResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamRes)
+        private static async Task<LlamaStreamTransformer.OpenAiStreamTransformResult> WriteStreamingOllamaResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamRes, string streamRequestId)
         {
             using Stream responseStream = await upstreamRes.Content.ReadAsStreamAsync();
-            return await LlamaStreamTransformer.TransformOpenAiStreamToOllamaAsync(responseStream, response.OutputStream, _detectedModelName);
+            return await LlamaStreamTransformer.TransformOpenAiStreamToOllamaAsync(responseStream, response.OutputStream, _detectedModelName, streamRequestId);
+        }
+
+        private static async Task SendInvalidToolHistoryAsync(
+            HttpListenerResponse response,
+            string streamRequestId,
+            ToolHistoryInspection history)
+        {
+            Logger.Log($"[LlamaBridge][#{streamRequestId}] Refusing invalid tool history before llama-server request.");
+            response.StatusCode = (int)HttpStatusCode.BadRequest;
+            response.ContentType = "application/json; charset=utf-8";
+            byte[] body = Encoding.UTF8.GetBytes(new JsonObject
+            {
+                ["error"] = "Invalid assistant/tool message history.",
+                ["details"] = new JsonArray(history.Issues.Select(issue => JsonValue.Create(issue)).ToArray())
+            }.ToJsonString());
+            await response.OutputStream.WriteAsync(body);
+            response.OutputStream.Close();
         }
 
         private static async Task<bool> TryHandleApiTagsAsync(HttpListenerRequest request, HttpListenerResponse response)

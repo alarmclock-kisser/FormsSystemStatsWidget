@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -122,7 +123,15 @@ namespace FormsSystemStatsWidget.Core
                 }
 
                 EnsureSystemMessageFirst(messages);
-                InjectStrictToolCallingRules(messages);
+                bool hasNativeToolDefinitions = root["tools"] is JsonArray nativeTools && nativeTools.Count > 0;
+                if (hasNativeToolDefinitions)
+                {
+                    Logger.Log("[Sanitizer] Skipped legacy JSON-tool instructions because native tool definitions are present.");
+                }
+                else
+                {
+                    InjectStrictToolCallingRules(messages);
+                }
                 EnsureAdditionalSystemPrompt(messages, temperature, repetitionPenalty, presencePenalty, userDefinedTopP, userDefinedMinP, userDefinedTopK, reasoningEffort, reasoningBudget);
 
                 double promptSafetyRatio = Math.Clamp(SmartPromptOptimizationSettings.PromptSafetyRatio, 0.10, 1.00);
@@ -141,13 +150,20 @@ namespace FormsSystemStatsWidget.Core
 
                 while (GetTotalContentLength(messages) > hardCharLimit && messages.Count > (hasSystem ? 2 : 1))
                 {
-                    messages.RemoveAt(deleteIndex);
+                    if (!TryRemoveOldestCompleteConversationUnit(messages, deleteIndex))
+                    {
+                        Logger.Log("[Sanitizer] Context remains over the configured limit; preserving the newest conversation unit rather than splitting tool history.");
+                        break;
+                    }
                 }
 
                 if (GetTotalContentLength(messages) > hardCharLimit && messages.Count > 0)
                 {
                     JsonObject? lastMessage = messages.Last() as JsonObject;
-                    if (lastMessage != null && TryGetStringContent(lastMessage, out string content) && content.Length > hardCharLimit)
+                    bool isToolHistoryMessage = string.Equals(lastMessage?["role"]?.ToString(), "tool", StringComparison.OrdinalIgnoreCase) ||
+                                                lastMessage?["tool_calls"] is JsonArray;
+                    if (!isToolHistoryMessage && lastMessage != null &&
+                        TryGetStringContent(lastMessage, out string content) && content.Length > hardCharLimit)
                     {
                         int safeStart = Math.Max(0, content.Length - hardCharLimit + Math.Max(0, SmartPromptOptimizationSettings.TailKeepBonusChars));
                         string truncatedContent = string.Concat($"[Context automatically rolled by proxy to fit dynamic limit of {numCtx} ctx]\r\n", content.AsSpan(safeStart));
@@ -162,6 +178,36 @@ namespace FormsSystemStatsWidget.Core
                 Logger.Log($"[Sanitizer-Error] {ex.Message}");
                 return jsonInput;
             }
+        }
+
+        private static bool TryRemoveOldestCompleteConversationUnit(JsonArray messages, int firstRemovableIndex)
+        {
+            if (firstRemovableIndex >= messages.Count)
+            {
+                return false;
+            }
+
+            int nextUserIndex = -1;
+            for (int index = firstRemovableIndex + 1; index < messages.Count; index++)
+            {
+                if (string.Equals(messages[index]?["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+                {
+                    nextUserIndex = index;
+                    break;
+                }
+            }
+
+            if (nextUserIndex < 0)
+            {
+                return false;
+            }
+
+            for (int index = nextUserIndex - 1; index >= firstRemovableIndex; index--)
+            {
+                messages.RemoveAt(index);
+            }
+
+            return true;
         }
 
         // --- NEUE METHODE: Gehirnwäsche für lokale Modelle (Prompt Injection) ---
@@ -371,7 +417,9 @@ namespace FormsSystemStatsWidget.Core
         {
             foreach (JsonObject message in messages.OfType<JsonObject>())
             {
-                if (string.Equals(message["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(message["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(message["role"]?.ToString(), "tool", StringComparison.OrdinalIgnoreCase) ||
+                    message["tool_calls"] is JsonArray)
                 {
                     continue;
                 }
@@ -549,9 +597,57 @@ namespace FormsSystemStatsWidget.Core
                     break;
                 }
 
-                messages.RemoveAt(candidate.Index);
+                if (!TryRemoveConversationUnitContaining(messages, candidate.Index, hasSystem, latestUserIndex))
+                {
+                    break;
+                }
                 totalLength = GetTotalContentLength(messages);
+                latestUserIndex = FindLatestRoleIndex(messages, "user");
             }
+        }
+
+        private static bool TryRemoveConversationUnitContaining(
+            JsonArray messages,
+            int candidateIndex,
+            bool hasSystem,
+            int latestUserIndex)
+        {
+            if (candidateIndex >= latestUserIndex && latestUserIndex >= 0)
+            {
+                return false;
+            }
+
+            int firstRemovableIndex = hasSystem ? 1 : 0;
+            int startIndex = candidateIndex;
+            while (startIndex > firstRemovableIndex &&
+                   !string.Equals(messages[startIndex]?["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+            {
+                startIndex--;
+            }
+
+            if (!string.Equals(messages[startIndex]?["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+            {
+                startIndex = firstRemovableIndex;
+            }
+
+            int endIndex = startIndex + 1;
+            while (endIndex < messages.Count &&
+                   !string.Equals(messages[endIndex]?["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+            {
+                endIndex++;
+            }
+
+            if (endIndex == messages.Count || endIndex == latestUserIndex || startIndex == latestUserIndex)
+            {
+                return false;
+            }
+
+            for (int index = endIndex - 1; index >= startIndex; index--)
+            {
+                messages.RemoveAt(index);
+            }
+
+            return true;
         }
 
         private static bool CanRemoveMessage(JsonArray messages, int index, bool hasSystem, int latestUserIndex)
@@ -561,7 +657,7 @@ namespace FormsSystemStatsWidget.Core
                 return false;
             }
 
-            if (index == messages.Count - 1 || index == latestUserIndex)
+            if (index == messages.Count - 1 || (latestUserIndex >= 0 && index >= latestUserIndex))
             {
                 return false;
             }
@@ -972,7 +1068,9 @@ namespace FormsSystemStatsWidget.Core
         {
             const int traceLimit = 12;
             streamRequestId ??= "untracked";
+            LlamaAgentLoopDiagnostics.BeginResponse(streamRequestId);
             using var streamReader = new StreamReader(upstreamStream);
+            using var responseHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
             var llamaServerTrace = new Queue<string>();
             var copilotTrace = new Queue<string>();
@@ -1010,6 +1108,7 @@ namespace FormsSystemStatsWidget.Core
                     byte[] outputBytes = Encoding.UTF8.GetBytes(outputLine + "\r\n");
                     await downstreamStream.WriteAsync(outputBytes);
                     await downstreamStream.FlushAsync();
+                    responseHash.AppendData(outputBytes);
                 }
                 catch (IOException)
                 {
@@ -1038,6 +1137,7 @@ namespace FormsSystemStatsWidget.Core
                     {
                         TrackOpenAiOutput(data, outputToolCallKeys, ref generatedContentLength, ref finalFinishReason);
                         JsonNode? forwardedChunk = JsonNode.Parse(data);
+                        LlamaAgentLoopDiagnostics.ObserveResponseChunk(streamRequestId, forwardedChunk);
                         RecordToolDeltas(forwardedChunk, copilotToolDeltas);
                         if (isEmittingLegacyToolCall)
                         {
@@ -1346,11 +1446,13 @@ namespace FormsSystemStatsWidget.Core
                                 ? OpenAiStreamCompletionStatus.CompletedByLlm
                                 : OpenAiStreamCompletionStatus.CompletedByDone;
 
+            LlamaAgentLoopDiagnostics.CompleteResponse(streamRequestId, doneReceived, finalFinishReason);
             string parity = llamaToolDeltas.SemanticallyMatches(forwardedNativeToolDeltas) ? "PASS" : "FAIL";
             Logger.Log($"[OpenAI SSE][LLAMA #{streamRequestId}] {string.Join(" || ", llamaServerTrace)}");
             Logger.Log($"[OpenAI SSE][COPILOT #{streamRequestId}] {string.Join(" || ", copilotTrace)}");
             Logger.Log($"[OpenAI SSE][ToolDeltaParity #{streamRequestId}] ToolDeltaParity={parity}; LLAMA: {llamaToolDeltas}; COPILOT: {copilotToolDeltas}; native_forwarded={forwardedNativeToolDeltas}; intentionally_transformed={intentionallyTransformedToolDeltas}.");
-            Logger.Log($"[OpenAI SSE][Summary #{streamRequestId}] DoneReceived={doneReceived}, FinalFinishReason={finalFinishReason ?? "<none>"}, ToolCallCount={outputToolCallKeys.Count}, GeneratedContentLength={generatedContentLength}, ClientDisconnected={clientDisconnected}, Completion={status}.");
+            string responseHashValue = Convert.ToHexString(responseHash.GetHashAndReset());
+            Logger.Log($"[OpenAI SSE][Summary #{streamRequestId}] DoneReceived={doneReceived}, FinalFinishReason={finalFinishReason ?? "<none>"}, ToolCallCount={outputToolCallKeys.Count}, GeneratedContentLength={generatedContentLength}, ResponseHash={responseHashValue}, ClientDisconnected={clientDisconnected}, Completion={status}.");
 
             return new OpenAiStreamTransformResult(
                 doneReceived,

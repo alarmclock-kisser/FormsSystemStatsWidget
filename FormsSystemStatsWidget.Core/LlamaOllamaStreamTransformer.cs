@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -17,10 +18,15 @@ namespace FormsSystemStatsWidget.Core
             public StringBuilder Arguments { get; } = new();
         }
 
-        public static async Task<OpenAiStreamTransformResult> TransformOpenAiStreamToOllamaAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName)
+        public static async Task<OpenAiStreamTransformResult> TransformOpenAiStreamToOllamaAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, string? streamRequestId = null)
         {
             const int traceLimit = 12;
+            if (streamRequestId != null)
+            {
+                LlamaAgentLoopDiagnostics.BeginResponse(streamRequestId);
+            }
             using var streamReader = new StreamReader(upstreamStream);
+            using var responseHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var llamaServerTrace = new Queue<string>();
             var ollamaTrace = new Queue<string>();
             var toolCalls = new SortedDictionary<int, OllamaToolCallAccumulator>();
@@ -48,6 +54,7 @@ namespace FormsSystemStatsWidget.Core
                     byte[] outputBytes = Encoding.UTF8.GetBytes(chunk.ToJsonString() + "\r\n");
                     await downstreamStream.WriteAsync(outputBytes);
                     await downstreamStream.FlushAsync();
+                    responseHash.AppendData(outputBytes);
                 }
                 catch (IOException)
                 {
@@ -206,6 +213,11 @@ namespace FormsSystemStatsWidget.Core
                         break;
                     }
 
+                    if (streamRequestId != null)
+                    {
+                        LlamaAgentLoopDiagnostics.ObserveResponseChunk(streamRequestId, chunk);
+                    }
+
                     if (chunk["choices"] is not JsonArray choices)
                     {
                         continue;
@@ -293,9 +305,14 @@ namespace FormsSystemStatsWidget.Core
                                 ? OpenAiStreamCompletionStatus.CompletedByLlm
                                 : OpenAiStreamCompletionStatus.CompletedByDone;
 
-            Logger.Log($"[Ollama SSE][LLAMA SERVER] {string.Join(" || ", llamaServerTrace)}");
-            Logger.Log($"[Ollama SSE][OLLAMA CLIENT] {string.Join(" || ", ollamaTrace)}");
-            Logger.Log($"[Ollama SSE][Summary] DoneReceived={doneReceived}, FinalFinishReason={finalFinishReason ?? "<none>"}, ToolCallCount={toolCalls.Count}, GeneratedContentLength={generatedContentLength}, ClientDisconnected={clientDisconnected}, Completion={status}.");
+            if (streamRequestId != null)
+            {
+                LlamaAgentLoopDiagnostics.CompleteResponse(streamRequestId, doneReceived && !clientDisconnected, finalFinishReason);
+            }
+            string responseHashValue = Convert.ToHexString(responseHash.GetHashAndReset());
+            Logger.Log($"[Ollama SSE][LLAMA SERVER #{streamRequestId ?? "untracked"}] {string.Join(" || ", llamaServerTrace)}");
+            Logger.Log($"[Ollama SSE][OLLAMA CLIENT #{streamRequestId ?? "untracked"}] {string.Join(" || ", ollamaTrace)}");
+            Logger.Log($"[Ollama SSE][Summary #{streamRequestId ?? "untracked"}] DoneReceived={doneReceived}, FinalFinishReason={finalFinishReason ?? "<none>"}, ToolCallCount={toolCalls.Count}, GeneratedContentLength={generatedContentLength}, ResponseHash={responseHashValue}, ClientDisconnected={clientDisconnected}, Completion={status}.");
 
             return new OpenAiStreamTransformResult(
                 doneReceived,

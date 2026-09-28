@@ -102,6 +102,504 @@ public sealed class LlamaStreamTransformerTests
     }
 
     [TestMethod]
+    public async Task TransformOpenAiStreamAsync_FourFragmentNativeToolCall_PreservesEveryArgumentFragment()
+    {
+        string[] fragments = ["{", "\"path\":\"", "foo.cs", "\"}"];
+        string stream = CreateSse(
+            CreateToolDelta(0, "fragmented", "function", "read_file", fragments[0]),
+            CreateToolDelta(0, null, null, null, fragments[1]),
+            CreateToolDelta(0, null, null, null, fragments[2]),
+            CreateToolDelta(0, null, null, null, fragments[3]),
+            "{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}",
+            "[DONE]");
+
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(stream);
+        JsonObject[] toolChunks = ParseChunks(output)
+            .Where(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray)
+            .ToArray();
+        string[] forwardedFragments = toolChunks
+            .Select(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["function"]?["arguments"]?.ToString() ?? string.Empty)
+            .ToArray();
+
+        CollectionAssert.AreEqual(fragments, forwardedFragments);
+        Assert.AreEqual("fragmented", toolChunks[0]["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["id"]?.ToString());
+        Assert.AreEqual("function", toolChunks[0]["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["type"]?.ToString());
+        Assert.AreEqual("read_file", toolChunks[0]["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["function"]?["name"]?.ToString());
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.CompletedByToolCall, result.Status);
+        StringAssert.Contains(output, "[DONE]");
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_NativeDeltasAfterFirstMetadata_AreNeverSuppressed()
+    {
+        string[] fragments = ["{\"", "path", "\":\"", "foo.cs\"}"];
+        string[] frames = fragments.Select((fragment, index) =>
+            CreateToolDelta(0, index == 0 ? "call-many" : null, index == 0 ? "function" : null,
+                index == 0 ? "read_file" : null, fragment)).ToArray();
+        (string output, _) = await TransformAsync(CreateSse(frames
+            .Concat(["{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}", "[DONE]"])
+            .ToArray()));
+
+        JsonObject[] forwarded = ParseChunks(output)
+            .Where(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray)
+            .ToArray();
+        Assert.AreEqual(fragments.Length, forwarded.Length);
+        CollectionAssert.AreEqual(fragments, forwarded.Select(chunk =>
+            chunk["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["function"]?["arguments"]?.ToString() ?? string.Empty).ToArray());
+    }
+
+    [TestMethod]
+    public void ToolHistory_AssistantCallAndResultSurviveNextSanitizedRequest()
+    {
+        JsonArray messages = new()
+        {
+            new JsonObject { ["role"] = "system", ["content"] = "system" },
+            new JsonObject { ["role"] = "user", ["content"] = "inspect" },
+            CreateAssistantToolCall("A", "read_file", "{\"path\":\"a.cs\"}"),
+            CreateToolResult("A", "contents")
+        };
+
+        JsonArray sanitized = SanitizeMessages(messages);
+        Assert.IsTrue(JsonNode.DeepEquals(messages, sanitized));
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(sanitized).IsValid);
+    }
+
+    [TestMethod]
+    public void ToolHistory_MultipleAssistantToolPairsRemainOrdered()
+    {
+        JsonArray messages = CreateMultiPairHistory(("A", "read_file"), ("B", "sql"), ("C", "write_file"));
+
+        JsonArray sanitized = SanitizeMessages(messages);
+        Assert.IsTrue(JsonNode.DeepEquals(messages, sanitized));
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(sanitized).IsValid);
+        CollectionAssert.AreEqual(
+            new[] { "A", "B", "C" },
+            sanitized.Where(message => message?["role"]?.ToString() == "tool")
+                .Select(message => message?["tool_call_id"]?.ToString()).ToArray());
+    }
+
+    [TestMethod]
+    public void ToolHistory_MismatchedResultId_IsRejectedWithDiagnostic()
+    {
+        JsonArray messages = new() { CreateAssistantToolCall("A", "read_file", "{}"), CreateToolResult("B", "result") };
+
+        ToolHistoryInspection result = LlamaAgentLoopDiagnostics.ValidateToolHistory(messages);
+        Assert.IsFalse(result.IsValid);
+        StringAssert.Contains(string.Join(";", result.Issues), "tool result id B");
+    }
+
+    [TestMethod]
+    public void ToolHistory_DuplicateResultId_IsRejectedWithDiagnostic()
+    {
+        JsonArray messages = new()
+        {
+            CreateAssistantToolCall("A", "read_file", "{}"),
+            CreateToolResult("A", "result"),
+            CreateToolResult("A", "duplicate")
+        };
+
+        ToolHistoryInspection result = LlamaAgentLoopDiagnostics.ValidateToolHistory(messages);
+        Assert.IsFalse(result.IsValid);
+        StringAssert.Contains(string.Join(";", result.Issues), "duplicated");
+    }
+
+    [TestMethod]
+    public void ToolHistory_NullAssistantContentWithToolCallIsPreserved()
+    {
+        JsonArray messages = new()
+        {
+            new JsonObject { ["role"] = "assistant", ["content"] = null, ["tool_calls"] = CreateToolCalls(("A", "read_file", "{}")) },
+            CreateToolResult("A", "result"),
+            new JsonObject { ["role"] = "assistant", ["content"] = null }
+        };
+
+        JsonArray sanitized = SanitizeMessages(messages);
+        Assert.IsTrue(JsonNode.DeepEquals(messages, sanitized));
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(sanitized).IsValid);
+        Assert.IsNull(sanitized[0]?["content"]);
+        Assert.AreEqual("A", sanitized[0]?["tool_calls"]?[0]?["id"]?.ToString());
+    }
+
+    [TestMethod]
+    public void ToolHistory_ParallelCallsAndResultsRemainMatched()
+    {
+        JsonArray messages = new()
+        {
+            new JsonObject
+            {
+                ["role"] = "assistant",
+                ["content"] = null,
+                ["tool_calls"] = CreateToolCalls(("A", "read_file", "{}"), ("B", "sql", "{}"))
+            },
+            CreateToolResult("A", "read"),
+            CreateToolResult("B", "rows")
+        };
+
+        JsonObject request = new() { ["parallel_tool_calls"] = true, ["messages"] = messages };
+        JsonObject sanitized = JsonNode.Parse(LlamaStreamTransformer.SanitizeIncomingRequest(request.ToJsonString(), "llama", numCtx: 100000))!.AsObject();
+
+        Assert.IsTrue(sanitized["parallel_tool_calls"]!.GetValue<bool>());
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(sanitized["messages"]!.AsArray()).IsValid);
+        CollectionAssert.AreEqual(new[] { "A", "B" }, sanitized["messages"]![0]!["tool_calls"]!.AsArray()
+            .Select(call => call?["id"]?.ToString()).ToArray());
+    }
+
+    [TestMethod]
+    public void ToolHistory_ParallelToolCallsFalseAndToolDefinitionsArePreserved()
+    {
+        JsonObject request = new()
+        {
+            ["parallel_tool_calls"] = false,
+            ["tools"] = new JsonArray
+            {
+                new JsonObject { ["type"] = "function", ["function"] = new JsonObject { ["name"] = "read_file" } },
+                new JsonObject { ["type"] = "function", ["function"] = new JsonObject { ["name"] = "sql" } }
+            },
+            ["messages"] = new JsonArray { new JsonObject { ["role"] = "user", ["content"] = "go" } }
+        };
+
+        JsonObject sanitized = JsonNode.Parse(LlamaStreamTransformer.SanitizeIncomingRequest(request.ToJsonString(), "llama", numCtx: 100000))!.AsObject();
+        Assert.IsFalse(sanitized["parallel_tool_calls"]!.GetValue<bool>());
+        Assert.AreEqual(2, sanitized["tools"]!.AsArray().Count);
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_LargeFragmentedArguments_AreNotTruncated()
+    {
+        string arguments = "{\"value\":\"" + new string('x', 25000) + "\"}";
+        const int fragmentLength = 37;
+        var frames = new List<string>();
+        for (int offset = 0, fragment = 0; offset < arguments.Length; offset += fragmentLength, fragment++)
+        {
+            string part = arguments.Substring(offset, Math.Min(fragmentLength, arguments.Length - offset));
+            frames.Add(CreateToolDelta(0, fragment == 0 ? "large-call" : null, fragment == 0 ? "function" : null,
+                fragment == 0 ? "large_tool" : null, part));
+        }
+        frames.Add("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}");
+        frames.Add("[DONE]");
+
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(CreateSse(frames.ToArray()));
+        JsonObject[] chunks = ParseChunks(output)
+            .Where(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray)
+            .ToArray();
+        string reconstructed = string.Concat(chunks.Select(chunk =>
+            chunk["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["function"]?["arguments"]?.ToString()));
+
+        Assert.AreEqual(arguments, reconstructed);
+        Assert.AreEqual(frames.Count - 2, chunks.Length);
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.CompletedByToolCall, result.Status);
+        Assert.IsTrue(result.DoneReceived);
+        StringAssert.Contains(output, "[DONE]");
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_IncompleteNativeToolCall_DoesNotInventFinishReason()
+    {
+        string stream = CreateSse(CreateToolDelta(0, "unfinished", "function", "read_file", "{\"path\":"));
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(stream);
+
+        Assert.IsFalse(result.DoneReceived);
+        Assert.IsNull(result.FinalFinishReason);
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.UpstreamError, result.Status);
+        Assert.IsFalse(output.Contains("\"finish_reason\":\"tool_calls\"", StringComparison.Ordinal));
+        Assert.IsFalse(output.Contains("[DONE]", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_CompletedToolCallAndDone_IsCompletedByToolCall()
+    {
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(
+            CreateSse(CreateToolDelta(0, "complete", "function", "read_file", "{}"),
+                "{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}", "[DONE]"));
+
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.CompletedByToolCall, result.Status);
+        Assert.AreEqual("tool_calls", result.FinalFinishReason);
+        Assert.IsTrue(result.DoneReceived);
+        StringAssert.Contains(output, "[DONE]");
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_NormalTextAfterPreviousToolCall_IsASeparateNormalCompletion()
+    {
+        (string toolOutput, _) = await TransformAsync(CreateSse(
+            CreateToolDelta(0, "prior", "function", "read_file", "{}"),
+            "{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}", "[DONE]"));
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(CreateSse(
+            "{\"choices\":[{\"delta\":{\"content\":\"Done\"},\"finish_reason\":null}]}",
+            "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}", "[DONE]"));
+
+        Assert.IsTrue(ParseChunks(toolOutput).Any(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray));
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.CompletedByLlm, result.Status);
+        Assert.AreEqual("stop", result.FinalFinishReason);
+        Assert.AreEqual("Done", ParseChunks(output).First()["choices"]?[0]?["delta"]?["content"]?.ToString());
+    }
+
+    [TestMethod]
+    public async Task AgentLoop_ThreeExplicitRequestsDoNotCreateAnAutonomousFourthResponse()
+    {
+        JsonArray requestOne = new() { new JsonObject { ["role"] = "user", ["content"] = "inspect and edit" } };
+        (string firstOutput, _) = await TransformAsync(CreateSse(
+            CreateToolDelta(0, "A", "function", "read_file", "{}"),
+            "{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}", "[DONE]"));
+
+        JsonArray requestTwo = requestOne.DeepClone().AsArray();
+        requestTwo.Add(CreateAssistantToolCall("A", "read_file", "{}"));
+        requestTwo.Add(CreateToolResult("A", "file contents"));
+        (string secondOutput, _) = await TransformAsync(CreateSse(
+            CreateToolDelta(0, "B", "function", "write_file", "{\"path\":\"x\"}"),
+            "{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}", "[DONE]"));
+
+        JsonArray requestThree = requestTwo.DeepClone().AsArray();
+        requestThree.Add(CreateAssistantToolCall("B", "write_file", "{\"path\":\"x\"}"));
+        requestThree.Add(CreateToolResult("B", "written"));
+        (string thirdOutput, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(CreateSse(
+            "{\"choices\":[{\"delta\":{\"content\":\"Finished\"},\"finish_reason\":null}]}",
+            "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}", "[DONE]"));
+
+        Assert.IsTrue(ParseChunks(firstOutput).Any(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray));
+        Assert.IsTrue(ParseChunks(secondOutput).Any(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray));
+        Assert.AreEqual("Finished", ParseChunks(thirdOutput).First()["choices"]?[0]?["delta"]?["content"]?.ToString());
+        Assert.AreEqual("stop", result.FinalFinishReason);
+        Assert.AreEqual(3, new[] { firstOutput, secondOutput, thirdOutput }.Length);
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(requestThree).IsValid);
+    }
+
+    [TestMethod]
+    public void AgentLoop_HistoryWithPreviouslyReturnedToolResultIsNotTreatedAsDuplicate()
+    {
+        JsonArray messages = CreateMultiPairHistory(("A", "read_file"), ("B", "sql"));
+        messages.Add(new JsonObject { ["role"] = "user", ["content"] = "continue" });
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(messages).IsValid);
+        Assert.AreEqual(
+            LlamaAgentLoopDiagnostics.HashForTests(messages),
+            LlamaAgentLoopDiagnostics.HashForTests(messages.DeepClone()));
+    }
+
+    [TestMethod]
+    public void AgentLoop_TracksCallCreationResultReceiptAndReappearanceAcrossRequests()
+    {
+        const string callId = "cross-request-call";
+        const string firstRequestId = "910001";
+        const string resultRequestId = "910002";
+        const string reappearanceRequestId = "910003";
+        JsonObject firstRequest = new()
+        {
+            ["messages"] = new JsonArray { new JsonObject { ["role"] = "user", ["content"] = "inspect" } }
+        };
+        string firstBody = firstRequest.ToJsonString();
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.BeginRequest(
+            "/test", firstRequestId, firstBody, firstBody, "llama").IsValid);
+        LlamaAgentLoopDiagnostics.BeginResponse(firstRequestId);
+        LlamaAgentLoopDiagnostics.ObserveResponseChunk(
+            firstRequestId, JsonNode.Parse(CreateToolDelta(0, callId, "function", "read_file", "{\"path\":\"a.cs\"}")));
+        LlamaAgentLoopDiagnostics.CompleteResponse(firstRequestId, true, "tool_calls");
+
+        JsonObject secondRequest = new()
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "user", ["content"] = "inspect" },
+                CreateAssistantToolCall(callId, "read_file", "{\"path\":\"a.cs\"}"),
+                CreateToolResult(callId, "file contents")
+            }
+        };
+        string secondBody = secondRequest.ToJsonString();
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.BeginRequest(
+            "/test", resultRequestId, secondBody, secondBody, "llama").IsValid);
+        AgentToolCallSnapshot afterResult = LlamaAgentLoopDiagnostics.GetToolCallSnapshot(callId)!;
+        Assert.AreEqual(910001L, afterResult.CreatedRequest);
+        Assert.AreEqual(910002L, afterResult.ResultReceivedRequest);
+        Assert.IsNull(afterResult.ReappearedRequest);
+
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.BeginRequest(
+            "/test", reappearanceRequestId, secondBody, secondBody, "llama").IsValid);
+        LlamaAgentLoopDiagnostics.BeginResponse(reappearanceRequestId);
+        LlamaAgentLoopDiagnostics.ObserveResponseChunk(
+            reappearanceRequestId, JsonNode.Parse(CreateToolDelta(0, callId, "function", "read_file", "{\"path\":\"a.cs\"}")));
+        LlamaAgentLoopDiagnostics.CompleteResponse(reappearanceRequestId, true, "tool_calls");
+
+        AgentToolCallSnapshot reappeared = LlamaAgentLoopDiagnostics.GetToolCallSnapshot(callId)!;
+        Assert.AreEqual(910001L, reappeared.CreatedRequest);
+        Assert.AreEqual(910002L, reappeared.ResultReceivedRequest);
+        Assert.AreEqual(910003L, reappeared.ReappearedRequest);
+        Assert.AreEqual(64, reappeared.ArgumentsHash.Length);
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_IncompleteToolCallWithClientDisconnectIsNotCompleted()
+    {
+        using var input = new MemoryStream(Encoding.UTF8.GetBytes(CreateSse(
+            CreateToolDelta(0, "partial", "function", "read_file", "{\"path\":"))));
+        using var output = new DisconnectingStream();
+
+        LlamaStreamTransformer.OpenAiStreamTransformResult result =
+            await LlamaStreamTransformer.TransformOpenAiStreamWithDiagnosticsAsync(input, output, ModelName);
+
+        Assert.IsTrue(result.ClientDisconnected);
+        Assert.IsFalse(result.DoneReceived);
+        Assert.IsNull(result.FinalFinishReason);
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.ClientDisconnected, result.Status);
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_LengthFinishReasonIsNotReportedAsStopOrToolCall()
+    {
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(CreateSse(
+            "{\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}", "[DONE]"));
+
+        Assert.AreEqual("length", result.FinalFinishReason);
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.CompletedByLlm, result.Status);
+        Assert.IsTrue(result.DoneReceived);
+        Assert.IsFalse(output.Contains("finish_reason\":\"stop", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ToolHistory_RealisticCopilotSequenceRetainsOrderAfterSanitize()
+    {
+        JsonArray messages = new()
+        {
+            new JsonObject { ["role"] = "system", ["content"] = "system" },
+            new JsonObject { ["role"] = "user", ["content"] = "task" },
+            CreateAssistantToolCall("A", "read", "{}"), CreateToolResult("A", "1"),
+            CreateAssistantToolCall("B", "read", "{}"), CreateToolResult("B", "2"),
+            CreateAssistantToolCall("C", "sql", "{}"), CreateToolResult("C", "3"),
+            new JsonObject { ["role"] = "user", ["content"] = "follow-up" },
+            CreateAssistantToolCall("D", "read", "{}"), CreateToolResult("D", "4"),
+            CreateAssistantToolCall("E", "sql", "{}"), CreateToolResult("E", "5"),
+            CreateAssistantToolCall("F", "write", "{}"), CreateToolResult("F", "6"),
+            new JsonObject { ["role"] = "assistant", ["content"] = null }
+        };
+
+        JsonArray sanitized = SanitizeMessages(messages);
+        Assert.IsTrue(JsonNode.DeepEquals(messages, sanitized));
+        Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(sanitized).IsValid);
+        CollectionAssert.AreEqual(
+            messages.Select(message => message?["role"]?.ToString()).ToArray(),
+            sanitized.Select(message => message?["role"]?.ToString()).ToArray());
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_ContextTrimmingRemovesWholeOldToolTurn()
+    {
+        bool originalOptimization = SmartPromptOptimizationSettings.IsEnabled;
+        SmartPromptOptimizationSettings.IsEnabled = false;
+        try
+        {
+            var request = new JsonObject
+            {
+                ["messages"] = new JsonArray
+                {
+                    new JsonObject { ["role"] = "system", ["content"] = "system" },
+                    new JsonObject { ["role"] = "user", ["content"] = "old request" },
+                    CreateAssistantToolCall("old-call", "read_file", "{}"),
+                    CreateToolResult("old-call", new string('r', 500)),
+                    new JsonObject { ["role"] = "user", ["content"] = "new request" }
+                }
+            };
+
+            JsonObject sanitized = JsonNode.Parse(
+                LlamaStreamTransformer.SanitizeIncomingRequest(request.ToJsonString(), "llama", numCtx: 100))!.AsObject();
+            JsonArray messages = sanitized["messages"]!.AsArray();
+            Assert.AreEqual("new request", messages[^1]?["content"]?.ToString());
+            Assert.IsFalse(messages.Any(message => message?["tool_call_id"]?.ToString() == "old-call"));
+            Assert.IsTrue(LlamaAgentLoopDiagnostics.ValidateToolHistory(messages).IsValid);
+        }
+        finally
+        {
+            SmartPromptOptimizationSettings.IsEnabled = originalOptimization;
+        }
+    }
+
+    private static JsonArray CreateToolCalls(params (string Id, string Name, string Arguments)[] calls)
+    {
+        var result = new JsonArray();
+        for (int index = 0; index < calls.Length; index++)
+        {
+            result.Add(new JsonObject
+            {
+                ["index"] = index,
+                ["id"] = calls[index].Id,
+                ["type"] = "function",
+                ["function"] = new JsonObject
+                {
+                    ["name"] = calls[index].Name,
+                    ["arguments"] = calls[index].Arguments
+                }
+            });
+        }
+        return result;
+    }
+
+    private static JsonObject CreateAssistantToolCall(string id, string name, string arguments) => new()
+    {
+        ["role"] = "assistant",
+        ["content"] = null,
+        ["tool_calls"] = CreateToolCalls((id, name, arguments))
+    };
+
+    private static JsonObject CreateToolResult(string id, string content) => new()
+    {
+        ["role"] = "tool",
+        ["tool_call_id"] = id,
+        ["content"] = content
+    };
+
+    private static JsonArray CreateMultiPairHistory(params (string Id, string Name)[] calls)
+    {
+        var messages = new JsonArray { new JsonObject { ["role"] = "system", ["content"] = "system" } };
+        for (int index = 0; index < calls.Length; index++)
+        {
+            messages.Add(new JsonObject { ["role"] = "user", ["content"] = $"request {index}" });
+            messages.Add(CreateAssistantToolCall(calls[index].Id, calls[index].Name, "{}"));
+            messages.Add(CreateToolResult(calls[index].Id, $"result {index}"));
+        }
+        return messages;
+    }
+
+    private static JsonArray SanitizeMessages(JsonArray messages)
+    {
+        var request = new JsonObject
+        {
+            ["messages"] = messages.DeepClone()
+        };
+        bool originalStrictRules = SmartPromptOptimizationSettings.InjectStrictToolCallingRules;
+        SmartPromptOptimizationSettings.InjectStrictToolCallingRules = false;
+        try
+        {
+            JsonObject sanitized = JsonNode.Parse(
+                LlamaStreamTransformer.SanitizeIncomingRequest(request.ToJsonString(), "llama", numCtx: 100000))!.AsObject();
+            return sanitized["messages"]!.AsArray();
+        }
+        finally
+        {
+            SmartPromptOptimizationSettings.InjectStrictToolCallingRules = originalStrictRules;
+        }
+    }
+
+    private static string CreateToolDelta(int index, string? id, string? type, string? name, string arguments)
+    {
+        var toolCall = new JsonObject { ["index"] = index };
+        if (id != null) toolCall["id"] = id;
+        if (type != null) toolCall["type"] = type;
+        var function = new JsonObject();
+        if (name != null) function["name"] = name;
+        function["arguments"] = arguments;
+        toolCall["function"] = function;
+
+        return new JsonObject
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["delta"] = new JsonObject { ["tool_calls"] = new JsonArray(toolCall) },
+                    ["finish_reason"] = null
+                }
+            }
+        }.ToJsonString();
+    }
+
+    [TestMethod]
     public async Task TransformOpenAiStreamAsync_ContentAlongsideNativeToolCall_PreservesBothDeltas()
     {
         string stream = CreateSse(
@@ -292,6 +790,32 @@ public sealed class LlamaStreamTransformerTests
         Assert.IsFalse(sanitized.ContainsKey("max_tokens"));
         Assert.IsFalse(sanitized.ContainsKey("max_completion_tokens"));
         Assert.IsFalse(sanitized.ContainsKey("n_predict"));
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_NativeToolsDoNotReceiveLegacyJsonOnlyInstructions()
+    {
+        var request = new JsonObject
+        {
+            ["tools"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "function",
+                    ["function"] = new JsonObject { ["name"] = "read_file" }
+                }
+            },
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "system", ["content"] = "Keep the requested answer concise." },
+                new JsonObject { ["role"] = "user", ["content"] = "Read a file." }
+            }
+        };
+
+        JsonObject sanitized = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(request.ToJsonString(), "llama", numCtx: 100000))!.AsObject();
+        Assert.AreEqual("Keep the requested answer concise.", sanitized["messages"]?[0]?["content"]?.ToString());
+        Assert.AreEqual("read_file", sanitized["tools"]?[0]?["function"]?["name"]?.ToString());
     }
 
     private static string CreateToolCallResponse(string id, string name)
