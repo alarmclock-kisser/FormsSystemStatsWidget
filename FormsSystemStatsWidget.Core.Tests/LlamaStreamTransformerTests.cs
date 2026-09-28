@@ -376,6 +376,55 @@ public sealed class LlamaStreamTransformerTests
     }
 
     [TestMethod]
+    public void AgentLoop_RequestMessageHashChangesWhenToolResultChanges()
+    {
+        JsonObject firstRequest = new()
+        {
+            ["temperature"] = 0.2,
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "assistant", ["tool_calls"] = CreateToolCalls(("A", "read_file", "{}")) },
+                CreateToolResult("A", "first result")
+            }
+        };
+        JsonObject sameHistoryDifferentSettings = new()
+        {
+            ["temperature"] = 0.8,
+            ["messages"] = firstRequest["messages"]!.DeepClone()
+        };
+        JsonObject changedHistory = new()
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "assistant", ["tool_calls"] = CreateToolCalls(("A", "read_file", "{}")) },
+                CreateToolResult("A", "second result")
+            }
+        };
+
+        Assert.AreEqual(
+            LlamaAgentLoopDiagnostics.HashRequestMessages(firstRequest.ToJsonString()),
+            LlamaAgentLoopDiagnostics.HashRequestMessages(sameHistoryDifferentSettings.ToJsonString()));
+        Assert.AreNotEqual(
+            LlamaAgentLoopDiagnostics.HashRequestMessages(firstRequest.ToJsonString()),
+            LlamaAgentLoopDiagnostics.HashRequestMessages(changedHistory.ToJsonString()));
+
+        JsonObject sameRequestDifferentPropertyOrder = new()
+        {
+            ["messages"] = firstRequest["messages"]!.DeepClone(),
+            ["temperature"] = 0.2
+        };
+        Assert.AreEqual(
+            LlamaAgentLoopDiagnostics.HashRequestBody(firstRequest.ToJsonString()),
+            LlamaAgentLoopDiagnostics.HashRequestBody(sameRequestDifferentPropertyOrder.ToJsonString()));
+        Assert.AreNotEqual(
+            LlamaAgentLoopDiagnostics.HashRequestBody(firstRequest.ToJsonString()),
+            LlamaAgentLoopDiagnostics.HashRequestBody(sameHistoryDifferentSettings.ToJsonString()));
+        Assert.AreNotEqual(
+            LlamaAgentLoopDiagnostics.HashRequestBody(firstRequest.ToJsonString()),
+            LlamaAgentLoopDiagnostics.HashRequestBody(changedHistory.ToJsonString()));
+    }
+
+    [TestMethod]
     public void AgentLoop_TracksCallCreationResultReceiptAndReappearanceAcrossRequests()
     {
         const string callId = "cross-request-call";

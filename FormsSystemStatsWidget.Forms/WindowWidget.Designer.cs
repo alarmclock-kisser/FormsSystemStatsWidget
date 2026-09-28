@@ -6,6 +6,11 @@
         ///  Required designer variable.
         /// </summary>
         private System.ComponentModel.IContainer components = null;
+        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem_configEnabled;
+        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem_configKeepLastMessages;
+        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem_configTrimToolResults;
+        private System.Windows.Forms.ToolStripComboBox toolStripComboBox_configToolCallMode;
+        private System.Windows.Forms.ToolStripMenuItem toolStripMenuItem_configToolCallMode;
 
         /// <summary>
         ///  Clean up any resources being used.
@@ -158,6 +163,26 @@
             toolStripMenuItem_remapAnyKey = new ToolStripMenuItem();
             toolStripSeparator6 = new ToolStripSeparator();
             openDebugConsoleToolStripMenuItem = new ToolStripMenuItem();
+
+            // Configuration options for llama.cpp bridge
+            toolStripMenuItem_configEnabled = new ToolStripMenuItem();
+            toolStripMenuItem_configKeepLastMessages = new ToolStripMenuItem();
+            toolStripMenuItem_configTrimToolResults = new ToolStripMenuItem();
+            toolStripComboBox_configToolCallMode = new ToolStripComboBox();
+
+            // Add configuration items to the reroute menu
+            toolStripMenuItem_configEnabled.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_configEnabled });
+            toolStripMenuItem_configKeepLastMessages.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_configKeepLastMessages });
+            toolStripMenuItem_configTrimToolResults.DropDownItems.AddRange(new ToolStripItem[] { toolStripMenuItem_configTrimToolResults });
+            toolStripComboBox_configToolCallMode.Items.AddRange(new ToolStripItem[] { toolStripMenuItem_configToolCallMode });
+
+            // Add the new configuration items to the reroute menu's DropDownItems
+            rerouteAPILlamacppOllamaToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { 
+                toolStripMenuItem_configEnabled, 
+                toolStripMenuItem_configKeepLastMessages, 
+                toolStripMenuItem_configTrimToolResults, 
+                toolStripComboBox_configToolCallMode
+            });
             toolStripMenuItem_visuallyFormatLog = new ToolStripMenuItem();
             toolStripMenuItem_includeRawChunksLog = new ToolStripMenuItem();
             toolStripMenuItem_logGenerationSpeed = new ToolStripMenuItem();

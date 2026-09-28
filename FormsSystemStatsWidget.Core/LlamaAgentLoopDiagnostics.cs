@@ -41,6 +41,25 @@ internal static class LlamaAgentLoopDiagnostics
     private static readonly Dictionary<string, Dictionary<string, StreamedToolCall>> ActiveResponses = new(StringComparer.Ordinal);
     private const int MaximumRememberedToolCalls = 4096;
 
+    internal static void LogLifecycle(string requestId, string state, string? details = null)
+    {
+        string timestamp = DateTimeOffset.UtcNow.ToString("O");
+        Logger.Log(details == null
+            ? $"[REQUEST_LIFECYCLE {timestamp} #{requestId}] {state}"
+            : $"[REQUEST_LIFECYCLE {timestamp} #{requestId}] {state} {details}");
+    }
+
+    internal static string HashRequestBody(string requestBody)
+    {
+        JsonObject? request = ParseObject(requestBody);
+        return request == null ? HashText(requestBody) : HashNode(request);
+    }
+
+    internal static string HashRequestMessages(string requestBody)
+    {
+        return HashNode(ParseObject(requestBody)?["messages"]);
+    }
+
     internal static ToolHistoryInspection ValidateToolHistory(JsonArray messages)
     {
         var calls = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -101,8 +120,10 @@ internal static class LlamaAgentLoopDiagnostics
         string originalBody,
         string sanitizedBody,
         string modelFamily,
-        bool requireToolCallIds = true)
+        bool requireToolCallIds = true,
+        string? inboundRequestBody = null)
     {
+        string inboundBody = inboundRequestBody ?? originalBody;
         JsonObject? original = ParseObject(originalBody);
         JsonObject? sanitized = ParseObject(sanitizedBody);
         JsonArray originalMessages = original?["messages"] as JsonArray ?? [];
@@ -123,7 +144,7 @@ internal static class LlamaAgentLoopDiagnostics
         string validationStatus = !requireToolCallIds
             ? "SKIPPED_OLLAMA_IDLESS"
             : issues.Length == 0 ? "PASS" : "FAIL";
-        LogRequestSummary(route, requestId, original, sanitized, originalBody, sanitizedBody, validationStatus);
+        LogRequestSummary(route, requestId, original, sanitized, originalBody, sanitizedBody, validationStatus, inboundBody);
         if (issues.Length > 0)
         {
             Logger.Log($"[AGENT_LOOP #{requestId}] INVALID_TOOL_HISTORY: {string.Join(" | ", issues.Select(SafeLogValue))}");
@@ -369,7 +390,8 @@ internal static class LlamaAgentLoopDiagnostics
         JsonObject? sanitized,
         string originalBody,
         string sanitizedBody,
-        string validationStatus)
+        string validationStatus,
+        string inboundRequestBody)
     {
         JsonArray originalMessages = original?["messages"] as JsonArray ?? [];
         JsonArray messages = sanitized?["messages"] as JsonArray ?? [];
@@ -410,7 +432,7 @@ internal static class LlamaAgentLoopDiagnostics
             .Distinct(StringComparer.Ordinal));
 
         Logger.Log(
-            $"[AGENT_LOOP #{requestId}] route={SafeLogValue(route)},request_chars={originalBody.Length},messages_hash={HashNode(original?["messages"])},tools_hash={HashNode(original?["tools"])},sanitized_messages_hash={HashNode(sanitized?["messages"])},original_system_hash={HashNode(originalSystem)},sanitized_system_hash={HashNode(sanitizedSystem)},system_prompt_changed={!string.Equals(HashNode(originalSystem), HashNode(sanitizedSystem), StringComparison.Ordinal)},native_tool_definitions={tools.Count},legacy_tool_rules_injected={SmartPromptOptimizationSettings.InjectStrictToolCallingRules && tools.Count == 0},last_message_hash={HashNode(last)},last_tool_result_hash={HashNode(lastToolResult)},latest_assistant_toolcall_hash={HashNode(latestAssistantToolCall)},sanitized_chars={sanitizedBody.Length},original_message_count={originalMessages.Count},message_count={messages.Count},assistant_count={CountRole("assistant")},tool_count={CountRole("tool")},user_count={CountRole("user")},last_role={SafeLogValue(last?["role"]?.ToString() ?? "<none>")},last_assistant_toolcall_count={latestCalls?.Count ?? 0},last_message_toolcall_count={lastCalls?.Count ?? 0},previous_assistant_tool_call_ids=[{ids}],incoming_tool_result_ids=[{results}],latest_tool_result_matches_latest_call={latestResultMatches?.ToString() ?? "<none>"},last_tool_result_call_id={SafeLogValue(lastResultId)},tool_names=[{names}],tool_choice={SafeLogValue(SummarizeToolChoice(original?["tool_choice"]))},parallel_tool_calls={SafeLogValue(original?["parallel_tool_calls"]?.ToString() ?? "<absent>")},stream={SafeLogValue(original?["stream"]?.ToString() ?? "<absent>")},max_tokens={SafeLogValue(original?["max_tokens"]?.ToString() ?? "<absent>")},max_completion_tokens={SafeLogValue(original?["max_completion_tokens"]?.ToString() ?? "<absent>")},n_predict={SafeLogValue(original?["n_predict"]?.ToString() ?? "<absent>")},validation={validationStatus}.");
+            $"[AGENT_LOOP #{requestId}] route={SafeLogValue(route)},inbound_chars={inboundRequestBody.Length},inbound_request_hash={HashRequestBody(inboundRequestBody)},normalized_request_hash={HashRequestBody(originalBody)},request_chars={originalBody.Length},sanitized_request_hash={HashRequestBody(sanitizedBody)},messages_hash={HashNode(original?["messages"])},tools_hash={HashNode(original?["tools"])},sanitized_messages_hash={HashNode(sanitized?["messages"])},original_system_hash={HashNode(originalSystem)},sanitized_system_hash={HashNode(sanitizedSystem)},system_prompt_changed={!string.Equals(HashNode(originalSystem), HashNode(sanitizedSystem), StringComparison.Ordinal)},native_tool_definitions={tools.Count},legacy_tool_rules_injected={SmartPromptOptimizationSettings.InjectStrictToolCallingRules && tools.Count == 0},last_message_hash={HashNode(last)},last_tool_result_hash={HashNode(lastToolResult)},latest_assistant_toolcall_hash={HashNode(latestAssistantToolCall)},sanitized_chars={sanitizedBody.Length},original_message_count={originalMessages.Count},message_count={messages.Count},assistant_count={CountRole("assistant")},tool_count={CountRole("tool")},user_count={CountRole("user")},last_role={SafeLogValue(last?["role"]?.ToString() ?? "<none>")},last_assistant_toolcall_count={latestCalls?.Count ?? 0},last_message_toolcall_count={lastCalls?.Count ?? 0},previous_assistant_tool_call_ids=[{ids}],incoming_tool_result_ids=[{results}],latest_tool_result_matches_latest_call={latestResultMatches?.ToString() ?? "<none>"},last_tool_result_call_id={SafeLogValue(lastResultId)},tool_names=[{names}],tool_choice={SafeLogValue(SummarizeToolChoice(original?["tool_choice"]))},parallel_tool_calls={SafeLogValue(original?["parallel_tool_calls"]?.ToString() ?? "<absent>")},stream={SafeLogValue(original?["stream"]?.ToString() ?? "<absent>")},max_tokens={SafeLogValue(original?["max_tokens"]?.ToString() ?? "<absent>")},max_completion_tokens={SafeLogValue(original?["max_completion_tokens"]?.ToString() ?? "<absent>")},n_predict={SafeLogValue(original?["n_predict"]?.ToString() ?? "<absent>")},validation={validationStatus}.");
     }
 
     private static string SummarizeToolChoice(JsonNode? toolChoice)

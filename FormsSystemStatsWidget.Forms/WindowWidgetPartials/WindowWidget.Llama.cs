@@ -46,10 +46,13 @@ namespace FormsSystemStatsWidget.Forms
             menuItem.Enabled = true;
         }
 
-        private async Task EnableBridgeRouteAsync(ToolStripMenuItem menuItem)
+        private async Task EnableBridgeRouteAsync(ToolStripMenuItem menuItem) 
         {
             var cur = this.Cursor;
-            this.Cursor = Cursors.WaitCursor;
+            this.Cursor = Cursors.WaitCursor; 
+
+            // Trim conversation history before starting the bridge route
+            LlamaOllamaBridge.TrimHistory(LlamaOllamaBridge.Enabled, LlamaOllamaBridge.KeepLastMessages, LlamaOllamaBridge.TrimToolResults, LlamaOllamaBridge.ToolCallMode); 
 
             string apiUrl = this.toolStripTextBox_openAiApiUrl.Text.Trim();
             int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;

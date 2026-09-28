@@ -37,6 +37,11 @@ namespace FormsSystemStatsWidget.Core
             bool clientDisconnected = false;
             bool upstreamError = false;
             bool transformationError = false;
+            bool firstTokenLogged = false;
+            bool toolCallStartedLogged = false;
+            bool toolCallCompletedLogged = false;
+            bool finishReasonLogged = false;
+            bool upstreamIdentifiersLogged = false;
 
             void AddTrace(Queue<string> trace, string entry)
             {
@@ -188,9 +193,24 @@ namespace FormsSystemStatsWidget.Core
                     if (data == "[DONE]")
                     {
                         doneReceived = true;
+                        if (streamRequestId != null)
+                        {
+                            LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "DoneReceived");
+                        }
                         try
                         {
                             await EmitOllamaChunkAsync(CreateFinalChunk());
+                            if (streamRequestId != null)
+                            {
+                                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "DownstreamDoneWritten", "ollama_done=true");
+                                if (toolCalls.Count > 0)
+                                {
+                                    toolCallCompletedLogged = true;
+                                    LlamaAgentLoopDiagnostics.LogLifecycle(
+                                        streamRequestId, "ToolCallCompleted",
+                                        $"finish_reason={finalFinishReason ?? "<none>"},tool_call_count={toolCalls.Count}");
+                                }
+                            }
                         }
                         catch (JsonException ex)
                         {
@@ -217,6 +237,18 @@ namespace FormsSystemStatsWidget.Core
                     {
                         LlamaAgentLoopDiagnostics.ObserveResponseChunk(streamRequestId, chunk);
                     }
+                    string? upstreamResponseId = chunk["id"]?.ToString();
+                    string? upstreamTaskId = chunk["task_id"]?.ToString();
+                    string? upstreamRequestId = chunk["request_id"]?.ToString();
+                    if (streamRequestId != null &&
+                        !upstreamIdentifiersLogged &&
+                        (upstreamResponseId != null || upstreamTaskId != null || upstreamRequestId != null))
+                    {
+                        upstreamIdentifiersLogged = true;
+                        LlamaAgentLoopDiagnostics.LogLifecycle(
+                            streamRequestId, "UpstreamSseIdentifiers",
+                            $"id={SafeTraceValue(upstreamResponseId)},task_id={SafeTraceValue(upstreamTaskId)},request_id={SafeTraceValue(upstreamRequestId)}");
+                    }
 
                     if (chunk["choices"] is not JsonArray choices)
                     {
@@ -228,6 +260,11 @@ namespace FormsSystemStatsWidget.Core
                         if (choice?["finish_reason"] != null)
                         {
                             finalFinishReason = choice["finish_reason"]!.ToString();
+                            if (streamRequestId != null && !finishReasonLogged)
+                            {
+                                finishReasonLogged = true;
+                                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "FinishReason", $"value={finalFinishReason}");
+                            }
                         }
 
                         if (choice?["delta"] is not JsonObject delta)
@@ -236,6 +273,14 @@ namespace FormsSystemStatsWidget.Core
                         }
 
                         string content = delta["content"]?.ToString() ?? string.Empty;
+                        if (streamRequestId != null &&
+                            !firstTokenLogged &&
+                            (content.Length > 0 || delta["reasoning_content"]?.ToString().Length > 0 ||
+                             delta["tool_calls"] is JsonArray { Count: > 0 }))
+                        {
+                            firstTokenLogged = true;
+                            LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "FirstToken");
+                        }
                         if (content.Length > 0)
                         {
                             await EmitOllamaChunkAsync(new JsonObject
@@ -249,6 +294,13 @@ namespace FormsSystemStatsWidget.Core
                         if (delta["tool_calls"] is not JsonArray deltaToolCalls)
                         {
                             continue;
+                        }
+                        if (streamRequestId != null && deltaToolCalls.Count > 0 && !toolCallStartedLogged)
+                        {
+                            toolCallStartedLogged = true;
+                            string calls = string.Join(";", deltaToolCalls.Select(call =>
+                                $"index={call?["index"]?.ToString() ?? "<none>"},id={call?["id"]?.ToString() ?? "<none>"},type={call?["type"]?.ToString() ?? "<none>"},name={call?["function"]?["name"]?.ToString() ?? "<fragment>"},arguments_length={call?["function"]?["arguments"]?.ToString().Length ?? 0}"));
+                            LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "ToolCallStarted", calls);
                         }
 
                         foreach (JsonNode? toolCall in deltaToolCalls)
@@ -307,6 +359,28 @@ namespace FormsSystemStatsWidget.Core
 
             if (streamRequestId != null)
             {
+                if (!firstTokenLogged)
+                {
+                    LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "FirstToken", "received=false");
+                }
+                if (!toolCallStartedLogged)
+                {
+                    LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "ToolCallStarted", "received=false");
+                }
+                if (!toolCallCompletedLogged)
+                {
+                    LlamaAgentLoopDiagnostics.LogLifecycle(
+                        streamRequestId, "ToolCallCompleted",
+                        toolCallStartedLogged ? "completed=false" : "applicable=false");
+                }
+                if (!finishReasonLogged)
+                {
+                    LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "FinishReason", "received=false");
+                }
+                if (!doneReceived)
+                {
+                    LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "DoneReceived", "received=false");
+                }
                 LlamaAgentLoopDiagnostics.CompleteResponse(streamRequestId, doneReceived && !clientDisconnected, finalFinishReason);
             }
             string responseHashValue = Convert.ToHexString(responseHash.GetHashAndReset());
