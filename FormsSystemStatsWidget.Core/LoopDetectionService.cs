@@ -63,7 +63,7 @@ public class LoopDetectionConfig
 /// </summary>
 public class LoopDetectionService
 {
-    private readonly LoopDetectionConfig _config;
+    private LoopDetectionConfig _config;
     private readonly object _gate = new();
     private readonly Dictionary<string, List<string>> _recentToolCalls = new();
     private readonly Dictionary<string, int> _callCounts = new();
@@ -184,6 +184,14 @@ public class LoopDetectionService
     public LoopDetectionConfig GetConfig()
     {
         return _config;
+    }
+
+    /// <summary>
+    /// Replaces the current configuration with the provided one.
+    /// </summary>
+    public void SetConfig(LoopDetectionConfig config)
+    {
+        _config = config;
     }
 }
 

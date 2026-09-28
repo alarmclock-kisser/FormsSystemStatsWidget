@@ -7,6 +7,25 @@
         /// </summary>
         private System.ComponentModel.IContainer components = null;
 
+        // Loop detection submenu controls
+        private ToolStripMenuItem toolStripMenuItem_reRouteToOllama;
+        private ToolStripMenuItem toolStripMenuItem_loopDetectionEnabled;
+        private ToolStripSeparator toolStripSeparator_loopDetection;
+        private ToolStripMenuItem toolStripMenuItem_triggerAfter;
+        private ToolStripTextBox toolStripTextBox_triggerAfter;
+        private ToolStripMenuItem toolStripMenuItem_detectionWindow;
+        private ToolStripTextBox toolStripTextBox_detectionWindow;
+        private ToolStripMenuItem toolStripMenuItem_similarityThreshold;
+        private ToolStripTextBox toolStripTextBox_similarityThreshold;
+        private ToolStripSeparator toolStripSeparator_loopOptions;
+        private ToolStripMenuItem toolStripMenuItem_interjectionEnabled;
+        private ToolStripTextBox toolStripTextBox_interjectionMessage;
+        private ToolStripMenuItem toolStripMenuItem_maxInterjections;
+        private ToolStripTextBox toolStripTextBox_maxInterjections;
+        private ToolStripMenuItem toolStripMenuItem_abortEnabled;
+        private ToolStripMenuItem toolStripMenuItem_abortAfterInterjections;
+        private ToolStripTextBox toolStripTextBox_abortAfterInterjections;
+
         /// <summary>
         ///  Clean up any resources being used.
         /// </summary>
@@ -66,6 +85,41 @@
             toolStripTextBox_modelsDirectory = new ToolStripTextBox();
             toolStripComboBox_ggufModels = new ToolStripComboBox();
             toolStripMenuItem_loadMmproj = new ToolStripMenuItem();
+            toolStripMenuItem_reRouteToOllama = new ToolStripMenuItem();
+            toolStripMenuItem_loopDetectionEnabled = new ToolStripMenuItem();
+            toolStripSeparator_loopDetection = new ToolStripSeparator();
+            toolStripMenuItem_triggerAfter = new ToolStripMenuItem();
+            toolStripTextBox_triggerAfter = new ToolStripTextBox();
+            toolStripMenuItem_detectionWindow = new ToolStripMenuItem();
+            toolStripTextBox_detectionWindow = new ToolStripTextBox();
+            toolStripMenuItem_similarityThreshold = new ToolStripMenuItem();
+            toolStripTextBox_similarityThreshold = new ToolStripTextBox();
+            toolStripSeparator_loopOptions = new ToolStripSeparator();
+            toolStripMenuItem_interjectionEnabled = new ToolStripMenuItem();
+            toolStripTextBox_interjectionMessage = new ToolStripTextBox();
+            toolStripMenuItem_maxInterjections = new ToolStripMenuItem();
+            toolStripTextBox_maxInterjections = new ToolStripTextBox();
+            toolStripMenuItem_abortEnabled = new ToolStripMenuItem();
+            toolStripMenuItem_abortAfterInterjections = new ToolStripMenuItem();
+            toolStripTextBox_abortAfterInterjections = new ToolStripTextBox();
+            // Add Re-route to Ollama submenu to context menu
+            contextMenuStrip_widget.Items.Add(toolStripMenuItem_reRouteToOllama);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_loopDetectionEnabled);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripSeparator_loopDetection);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_triggerAfter);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_triggerAfter);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_detectionWindow);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_detectionWindow);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_similarityThreshold);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_similarityThreshold);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripSeparator_loopOptions);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_interjectionEnabled);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_interjectionMessage);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_maxInterjections);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_maxInterjections);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_abortEnabled);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripMenuItem_abortAfterInterjections);
+            toolStripMenuItem_reRouteToOllama.DropDownItems.Add(toolStripTextBox_abortAfterInterjections);
             toolStripMenuItem_contextSize = new ToolStripMenuItem();
             toolStripTextBox_contextSize = new ToolStripTextBox();
             toolStripMenuItem_batchSize = new ToolStripMenuItem();

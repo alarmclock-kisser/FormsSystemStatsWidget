@@ -24,6 +24,7 @@ namespace FormsSystemStatsWidget.Forms
         private int _updateIntervalMs = 420;
         private Color _diagramColor = Color.White;
         private Color? _percentageColor = Color.BlueViolet;
+        private LoopDetectionService _loopDetectionService;
 
         public bool AppendGenerationStats => this.printGenerationStatsToolStripMenuItem.Checked;
 
@@ -108,6 +109,10 @@ namespace FormsSystemStatsWidget.Forms
             this._persistentSettings = WidgetPersistentSettingsStore.Load();
             // Initialize FontSizeScale from persistent settings (default 1.0f if not set)
             this.FontSizeScale = this._persistentSettings.FontSizeScale != 0f ? this._persistentSettings.FontSizeScale : 1.0f;
+            // Initialize LoopDetectionService
+            this._loopDetectionService = new LoopDetectionService(new LoopDetectionConfig());
+            // Hook loop detection menu events
+            this.HookLoopDetectionMenuEvents();
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
             this.ApplyApplicationIcon();
             this.ConfigureContextMenuAutoCloseBehavior();

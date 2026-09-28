@@ -14,8 +14,98 @@ namespace FormsSystemStatsWidget.Forms
         [GeneratedRegex(@" (?=-)")]
         private static partial Regex ArgsSplitRegex();
 
+        /// <summary>
+        /// Binds the loop-detection ToolStrip controls to the current LoopDetectionConfig values.
+        /// Call this after InitializeComponent() so the controls exist.
+        /// </summary>
+        private void HookLoopDetectionMenuEvents()
+        {
+            // Loop detection toggle
+            toolStripMenuItem_loopDetectionEnabled.Checked = this._loopDetectionService.GetConfig().Enabled;
+            toolStripMenuItem_loopDetectionEnabled.CheckedChanged += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                cfg.Enabled = toolStripMenuItem_loopDetectionEnabled.Checked;
+                this._loopDetectionService.SetConfig(cfg);
+            };
 
-        
+            // Trigger after
+            toolStripTextBox_triggerAfter.Text = this._loopDetectionService.GetConfig().TriggerAfter.ToString();
+            toolStripTextBox_triggerAfter.Leave += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                if (int.TryParse(toolStripTextBox_triggerAfter.Text, out var val) && val >= 1)
+                    cfg.TriggerAfter = val;
+                this._loopDetectionService.SetConfig(cfg);
+            };
+
+            // Detection window
+            toolStripTextBox_detectionWindow.Text = this._loopDetectionService.GetConfig().DetectionWindow.ToString();
+            toolStripTextBox_detectionWindow.Leave += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                if (int.TryParse(toolStripTextBox_detectionWindow.Text, out var val) && val >= 1)
+                    cfg.DetectionWindow = val;
+                this._loopDetectionService.SetConfig(cfg);
+            };
+
+            // Similarity threshold
+            toolStripTextBox_similarityThreshold.Text = this._loopDetectionService.GetConfig().SimilarityThreshold.ToString("F2");
+            toolStripTextBox_similarityThreshold.Leave += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                if (double.TryParse(toolStripTextBox_similarityThreshold.Text, out var val) && val >= 0 && val <= 1)
+                    cfg.SimilarityThreshold = val;
+                this._loopDetectionService.SetConfig(cfg);
+            };
+
+            // Interjection enabled
+            toolStripMenuItem_interjectionEnabled.Checked = this._loopDetectionService.GetConfig().InterjectionEnabled;
+            toolStripMenuItem_interjectionEnabled.CheckedChanged += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                cfg.InterjectionEnabled = toolStripMenuItem_interjectionEnabled.Checked;
+                this._loopDetectionService.SetConfig(cfg);
+            };
+
+            // Interjection message
+            toolStripTextBox_interjectionMessage.Text = this._loopDetectionService.GetConfig().InterjectionMessage;
+            toolStripTextBox_interjectionMessage.Leave += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                cfg.InterjectionMessage = toolStripTextBox_interjectionMessage.Text;
+                this._loopDetectionService.SetConfig(cfg);
+            };
+
+            // Max interjections
+            toolStripTextBox_maxInterjections.Text = this._loopDetectionService.GetConfig().MaxInterjections.ToString();
+            toolStripTextBox_maxInterjections.Leave += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                if (int.TryParse(toolStripTextBox_maxInterjections.Text, out var val) && val >= 1)
+                    cfg.MaxInterjections = val;
+                this._loopDetectionService.SetConfig(cfg);
+            };
+
+            // Abort enabled
+            toolStripMenuItem_abortEnabled.Checked = this._loopDetectionService.GetConfig().AbortEnabled;
+            toolStripMenuItem_abortEnabled.CheckedChanged += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                cfg.AbortEnabled = toolStripMenuItem_abortEnabled.Checked;
+                this._loopDetectionService.SetConfig(cfg);
+            };
+
+            // Abort after interjections
+            toolStripTextBox_abortAfterInterjections.Text = this._loopDetectionService.GetConfig().AbortAfterInterjections.ToString();
+            toolStripTextBox_abortAfterInterjections.Leave += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                if (int.TryParse(toolStripTextBox_abortAfterInterjections.Text, out var val) && val >= 1)
+                    cfg.AbortAfterInterjections = val;
+                this._loopDetectionService.SetConfig(cfg);
+            };
+        }
 
 
         private async void rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged(object? sender, EventArgs e)
