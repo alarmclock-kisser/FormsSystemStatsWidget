@@ -30,6 +30,7 @@ namespace FormsSystemStatsWidget.Core
         private const int WS_EX_LAYERED = 0x80000;
 
         private static HttpListener? _listener;
+        private static long _nextStreamRequestId;
         private static bool _isRunning;
         private static string _detectedModelId = "local-llama-model";
         private static string _detectedModelName
@@ -465,7 +466,8 @@ namespace FormsSystemStatsWidget.Core
                 return false;
             }
 
-            Logger.Log("[LlamaBridge] Processing OpenAI-compatible direct stream...");
+            string streamRequestId = Interlocked.Increment(ref _nextStreamRequestId).ToString(CultureInfo.InvariantCulture);
+            Logger.Log($"[LlamaBridge][OpenAI #{streamRequestId}] Processing OpenAI-compatible direct stream...");
             using var reader = new StreamReader(request.InputStream);
             string requestBody = await reader.ReadToEndAsync();
             string sanitizedBody = LlamaStreamTransformer.SanitizeIncomingRequest(requestBody, _modelFamily, _detectedNumCtx, UserDefinedTemperature, UserDefinedRepetitionPenalty, UserDefinedPresencePenalty, UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget);
@@ -473,6 +475,7 @@ namespace FormsSystemStatsWidget.Core
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE]");
             LogMessageLayout(sanitizedBody);
+            LogUpstreamRequestMetadata("/v1/chat/completions", sanitizedBody);
             Logger.Log("========================================");
 
             if (GetGenerationStatsText)
@@ -493,10 +496,11 @@ namespace FormsSystemStatsWidget.Core
 
             using Stream upstreamStream = await upstreamRes.Content.ReadAsStreamAsync();
             LlamaStreamTransformer.OpenAiStreamTransformResult streamResult =
-                await LlamaStreamTransformer.TransformOpenAiStreamWithDiagnosticsAsync(upstreamStream, response.OutputStream, _detectedModelName, GetGenerationStatsText);
+                await LlamaStreamTransformer.TransformOpenAiStreamWithDiagnosticsAsync(upstreamStream, response.OutputStream, _detectedModelName, GetGenerationStatsText, streamRequestId);
 
             if (streamResult.ClientDisconnected)
             {
+                Logger.Log($"[COPILOT_CONNECTION_CLOSED #{streamRequestId}] Bridge detected downstream write failure; stream status={streamResult.Status}.");
                 response.Abort();
             }
             else
@@ -504,7 +508,7 @@ namespace FormsSystemStatsWidget.Core
                 response.OutputStream.Close();
             }
 
-            Logger.Log($"[LlamaBridge] OpenAI direct stream ended: {streamResult.Status}.");
+            Logger.Log($"[LlamaBridge][OpenAI #{streamRequestId}] Direct stream ended: {streamResult.Status}.");
             return true;
         }
 
@@ -527,6 +531,131 @@ namespace FormsSystemStatsWidget.Core
             {
                 Logger.Log($"[LlamaBridge] Could not inspect sanitized message layout: {ex.Message}");
             }
+        }
+
+        private static void LogUpstreamRequestMetadata(string route, string requestBody)
+        {
+            JsonObject? root;
+            try
+            {
+                root = JsonNode.Parse(requestBody) as JsonObject;
+            }
+            catch (JsonException ex)
+            {
+                Logger.Log($"[LlamaBridge][Request Metadata] Could not parse outbound JSON ({ex.GetType().Name}, length={requestBody.Length}).");
+                return;
+            }
+
+            if (root == null)
+            {
+                Logger.Log($"[LlamaBridge][Request Metadata] Outbound JSON was not an object (length={requestBody.Length}).");
+                return;
+            }
+
+            static string SafeValue(string? value)
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    return "<absent>";
+                }
+
+                string safeValue = value.Replace("\r", " ").Replace("\n", " ");
+                return safeValue.Length <= 120 ? safeValue : string.Concat(safeValue.AsSpan(0, 120), "...");
+            }
+
+            static string Scalar(JsonNode? value)
+            {
+                if (value == null)
+                {
+                    return "<absent>";
+                }
+
+                if (value is JsonObject obj)
+                {
+                    return $"object(keys={string.Join(",", obj.Select(pair => SafeValue(pair.Key)))})";
+                }
+                if (value is JsonArray array)
+                {
+                    return $"array(count={array.Count})";
+                }
+
+                return SafeValue(value.ToString());
+            }
+
+            static int ToolCallCount(JsonObject? message)
+            {
+                return message?["tool_calls"] is JsonArray calls ? calls.Count : 0;
+            }
+
+            static int ArgumentsLength(JsonNode? arguments)
+            {
+                return arguments?.ToString().Length ?? 0;
+            }
+
+            JsonArray messages = root["messages"] as JsonArray ?? [];
+            JsonArray tools = root["tools"] as JsonArray ?? [];
+            JsonObject? lastMessage = messages.LastOrDefault() as JsonObject;
+            JsonObject? latestAssistantToolMessage = null;
+            JsonObject? lastToolResult = null;
+            for (int index = 0; index < messages.Count; index++)
+            {
+                if (messages[index] is not JsonObject message)
+                {
+                    continue;
+                }
+
+                string role = message["role"]?.ToString() ?? string.Empty;
+                if (string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase) && ToolCallCount(message) > 0)
+                {
+                    latestAssistantToolMessage = message;
+                }
+                if (string.Equals(role, "tool", StringComparison.OrdinalIgnoreCase))
+                {
+                    lastToolResult = message;
+                }
+            }
+
+            JsonArray? latestToolCalls = latestAssistantToolMessage?["tool_calls"] as JsonArray;
+            string toolCallDetails = latestToolCalls == null
+                ? "<none>"
+                : string.Join(";", latestToolCalls.Select(call =>
+                {
+                    JsonObject? function = call?["function"] as JsonObject;
+                    return $"id={SafeValue(call?["id"]?.ToString())},type={SafeValue(call?["type"]?.ToString())},name={SafeValue(function?["name"]?.ToString())},arguments_length={ArgumentsLength(function?["arguments"])}";
+                }));
+
+            string latestCallId = latestToolCalls?.LastOrDefault()?["id"]?.ToString() ?? string.Empty;
+            string lastToolCallId = lastToolResult?["tool_call_id"]?.ToString() ?? string.Empty;
+            string correlation = lastToolResult == null
+                ? "<no tool result>"
+                : latestToolCalls?.Any(call => string.Equals(call?["id"]?.ToString(), lastToolCallId, StringComparison.Ordinal)) == true
+                    ? "true"
+                    : "false";
+            JsonObject? templateKwargs = root["chat_template_kwargs"] as JsonObject;
+            string templateKwargKeys = templateKwargs == null
+                ? "<absent>"
+                : string.Join(",", templateKwargs.Select(pair => SafeValue(pair.Key)));
+            JsonNode? toolChoice = root["tool_choice"];
+            string toolChoiceSummary = toolChoice is JsonObject toolChoiceObject
+                ? $"type={Scalar(toolChoiceObject["type"])},name={Scalar(toolChoiceObject["function"]?["name"])}"
+                : Scalar(toolChoice);
+
+            Logger.Log(
+                $"[LlamaBridge][Request Metadata] route={route}, model={SafeValue(root["model"]?.ToString())}, stream={Scalar(root["stream"])}, " +
+                $"max_tokens={Scalar(root["max_tokens"])}, max_completion_tokens={Scalar(root["max_completion_tokens"])}, n_predict={Scalar(root["n_predict"])}, " +
+                $"temperature={Scalar(root["temperature"])}, top_p={Scalar(root["top_p"])}, top_k={Scalar(root["top_k"])}, min_p={Scalar(root["min_p"])}, " +
+                $"repetition_penalty={Scalar(root["repetition_penalty"])}, repeat_penalty={Scalar(root["repeat_penalty"])}, " +
+                $"reasoning_effort={Scalar(root["reasoning_effort"])}, reasoning_budget={Scalar(root["reasoning_budget"])}, thinking_budget_tokens={Scalar(root["thinking_budget_tokens"])}, " +
+                $"reasoning={Scalar(root["reasoning"])}, reasoning_format={Scalar(root["reasoning_format"])}, chat_template_kwargs_keys=[{templateKwargKeys}], " +
+                $"enable_thinking={Scalar(templateKwargs?["enable_thinking"])}, force_nonempty_content={Scalar(templateKwargs?["force_nonempty_content"])}, " +
+                $"parallel_tool_calls={Scalar(root["parallel_tool_calls"])}, tool_choice={toolChoiceSummary}, number_of_tools={tools.Count}, " +
+                $"number_of_messages={messages.Count}, last_message_role={SafeValue(lastMessage?["role"]?.ToString())}, " +
+                $"last_message_has_tool_calls={ToolCallCount(lastMessage) > 0}, last_message_tool_call_count={ToolCallCount(lastMessage)}, " +
+                $"last_tool_result_present={lastToolResult != null}, last_tool_result_call_id={SafeValue(lastToolCallId)}, " +
+                $"last_tool_result_content_length={lastToolResult?["content"]?.ToString().Length ?? 0}, " +
+                $"latest_assistant_tool_call_id={SafeValue(latestCallId)}, last_tool_result_matches_latest_assistant_call={correlation}, " +
+                $"latest_assistant_tool_calls=[{toolCallDetails}], bridge_reasoning_effort={SafeValue(LlamaOllamaBridge.UserDefinedReasoningEffort)}, " +
+                $"bridge_reasoning_budget={LlamaOllamaBridge.UserDefinedReasoningBudget}.");
         }
 
         private static async Task<bool> TryHandleOllamaChatAsync(HttpListenerRequest request, HttpListenerResponse response)
@@ -603,6 +732,7 @@ namespace FormsSystemStatsWidget.Core
             Logger.Log("========================================");
             Logger.Log("[REQUEST TO LLAMA - AFTER SANITIZE (OLLAMA PATH)]");
             LogMessageLayout(sanitizedBody);
+            LogUpstreamRequestMetadata("/api/chat->/v1/chat/completions", sanitizedBody);
             Logger.Log("========================================");
 
             using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")

@@ -968,14 +968,20 @@ namespace FormsSystemStatsWidget.Core
             return TransformOpenAiStreamWithDiagnosticsAsync(upstreamStream, downstreamStream, detectedModelName, getGenerationStatsText);
         }
 
-        public static async Task<OpenAiStreamTransformResult> TransformOpenAiStreamWithDiagnosticsAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false)
+        public static async Task<OpenAiStreamTransformResult> TransformOpenAiStreamWithDiagnosticsAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false, string? streamRequestId = null)
         {
             const int traceLimit = 12;
+            streamRequestId ??= "untracked";
             using var streamReader = new StreamReader(upstreamStream);
 
             var llamaServerTrace = new Queue<string>();
             var copilotTrace = new Queue<string>();
+            var llamaToolDeltas = new ToolDeltaMetrics();
+            var copilotToolDeltas = new ToolDeltaMetrics();
+            var forwardedNativeToolDeltas = new ToolDeltaMetrics();
+            var intentionallyTransformedToolDeltas = new ToolDeltaMetrics();
             var outputToolCallKeys = new HashSet<string>(StringComparer.Ordinal);
+            bool isEmittingLegacyToolCall = false;
             bool isReceivingReasoning = false;
             bool inToolCall = false;
             bool toolCallTriggered = false;
@@ -1007,16 +1013,19 @@ namespace FormsSystemStatsWidget.Core
                 }
                 catch (IOException)
                 {
+                    LogToolDeltaDispositionFromLine("DROPPED_TOOL_DELTA", streamRequestId, outputLine, "downstream_write_failed");
                     clientDisconnected = true;
                     throw new DownstreamDisconnectedException();
                 }
                 catch (System.Net.HttpListenerException)
                 {
+                    LogToolDeltaDispositionFromLine("DROPPED_TOOL_DELTA", streamRequestId, outputLine, "downstream_write_failed");
                     clientDisconnected = true;
                     throw new DownstreamDisconnectedException();
                 }
                 catch (ObjectDisposedException)
                 {
+                    LogToolDeltaDispositionFromLine("DROPPED_TOOL_DELTA", streamRequestId, outputLine, "downstream_write_failed");
                     clientDisconnected = true;
                     throw new DownstreamDisconnectedException();
                 }
@@ -1028,6 +1037,18 @@ namespace FormsSystemStatsWidget.Core
                     if (data != "[DONE]")
                     {
                         TrackOpenAiOutput(data, outputToolCallKeys, ref generatedContentLength, ref finalFinishReason);
+                        JsonNode? forwardedChunk = JsonNode.Parse(data);
+                        RecordToolDeltas(forwardedChunk, copilotToolDeltas);
+                        if (isEmittingLegacyToolCall)
+                        {
+                            RecordToolDeltas(forwardedChunk, intentionallyTransformedToolDeltas);
+                            LogToolDeltaDispositionForChunk("INTENTIONALLY_TRANSFORMED_TOOL_DELTA", streamRequestId, forwardedChunk, "legacy_content_to_native_tool_call");
+                        }
+                        else
+                        {
+                            RecordToolDeltas(forwardedChunk, forwardedNativeToolDeltas);
+                            LogToolDeltaDispositionForChunk("COPILOT_FORWARDED_TOOL_DELTA", streamRequestId, forwardedChunk);
+                        }
                     }
                 }
             }
@@ -1083,7 +1104,15 @@ namespace FormsSystemStatsWidget.Core
                     }
                 };
 
-                await EmitChunkAsync(chunk);
+                isEmittingLegacyToolCall = true;
+                try
+                {
+                    await EmitChunkAsync(chunk);
+                }
+                finally
+                {
+                    isEmittingLegacyToolCall = false;
+                }
                 var finishChunk = new JsonObject
                 {
                     ["choices"] = new JsonArray
@@ -1167,9 +1196,12 @@ namespace FormsSystemStatsWidget.Core
                     catch (JsonException ex)
                     {
                         transformationError = true;
-                        Logger.Log($"[OpenAI SSE] Invalid upstream JSON ({ex.GetType().Name}, {data.Length} chars).");
+                        Logger.Log($"[OpenAI SSE][{streamRequestId}] Invalid upstream JSON ({ex.GetType().Name}, {data.Length} chars).");
                         break;
                     }
+
+                    RecordToolDeltas(chunk, llamaToolDeltas);
+                    LogToolDeltaDispositionForChunk("LLAMA_RECEIVED_TOOL_DELTA", streamRequestId, chunk);
 
                     if (chunk["choices"] is not JsonArray choicesArray || choicesArray.Count == 0)
                     {
@@ -1177,6 +1209,14 @@ namespace FormsSystemStatsWidget.Core
                         {
                             await EmitChunkAsync(chunk);
                         }
+                        continue;
+                    }
+
+                    bool hasNativeToolCallInAdditionalChoice = choicesArray.Skip(1).Any(choiceNode =>
+                        choiceNode?["delta"]?["tool_calls"] is JsonArray calls && calls.Count > 0);
+                    if (hasNativeToolCallInAdditionalChoice)
+                    {
+                        await EmitChunkAsync(chunk);
                         continue;
                     }
 
@@ -1189,12 +1229,18 @@ namespace FormsSystemStatsWidget.Core
                         continue;
                     }
 
-                    if (toolCallTriggered)
+                    bool hasNativeToolCalls = delta["tool_calls"] is JsonArray nativeToolCalls && nativeToolCalls.Count > 0;
+                    if (toolCallTriggered && !hasNativeToolCalls)
                     {
+                        if (choice["finish_reason"] != null)
+                        {
+                            JsonObject finishChunk = chunk.DeepClone().AsObject();
+                            finishChunk["choices"]![0]!["delta"] = new JsonObject();
+                            await EmitChunkAsync(finishChunk);
+                        }
                         continue;
                     }
 
-                    bool hasNativeToolCalls = delta["tool_calls"] is JsonArray nativeToolCalls && nativeToolCalls.Count > 0;
                     bool hasReasoning = delta["reasoning_content"] != null &&
                                         !string.IsNullOrEmpty(delta["reasoning_content"]?.ToString());
                     bool hasContent = delta["content"] != null &&
@@ -1223,15 +1269,15 @@ namespace FormsSystemStatsWidget.Core
                         isReceivingReasoning = false;
                     }
 
+                    if (hasNativeToolCalls)
+                    {
+                        await EmitChunkAsync(chunk);
+                        continue;
+                    }
+
                     if (hasContent && !string.IsNullOrEmpty(delta["content"]?.ToString()))
                     {
                         string content = delta["content"]!.ToString();
-                        if (hasNativeToolCalls)
-                        {
-                            await EmitChunkAsync(chunk);
-                            continue;
-                        }
-
                         if (inToolCall)
                         {
                             toolBuffer += content;
@@ -1300,9 +1346,11 @@ namespace FormsSystemStatsWidget.Core
                                 ? OpenAiStreamCompletionStatus.CompletedByLlm
                                 : OpenAiStreamCompletionStatus.CompletedByDone;
 
-            Logger.Log($"[OpenAI SSE][LLAMA SERVER] {string.Join(" || ", llamaServerTrace)}");
-            Logger.Log($"[OpenAI SSE][COPILOT] {string.Join(" || ", copilotTrace)}");
-            Logger.Log($"[OpenAI SSE][Summary] DoneReceived={doneReceived}, FinalFinishReason={finalFinishReason ?? "<none>"}, ToolCallCount={outputToolCallKeys.Count}, GeneratedContentLength={generatedContentLength}, ClientDisconnected={clientDisconnected}, Completion={status}.");
+            string parity = llamaToolDeltas.SemanticallyMatches(forwardedNativeToolDeltas) ? "PASS" : "FAIL";
+            Logger.Log($"[OpenAI SSE][LLAMA #{streamRequestId}] {string.Join(" || ", llamaServerTrace)}");
+            Logger.Log($"[OpenAI SSE][COPILOT #{streamRequestId}] {string.Join(" || ", copilotTrace)}");
+            Logger.Log($"[OpenAI SSE][ToolDeltaParity #{streamRequestId}] ToolDeltaParity={parity}; LLAMA: {llamaToolDeltas}; COPILOT: {copilotToolDeltas}; native_forwarded={forwardedNativeToolDeltas}; intentionally_transformed={intentionallyTransformedToolDeltas}.");
+            Logger.Log($"[OpenAI SSE][Summary #{streamRequestId}] DoneReceived={doneReceived}, FinalFinishReason={finalFinishReason ?? "<none>"}, ToolCallCount={outputToolCallKeys.Count}, GeneratedContentLength={generatedContentLength}, ClientDisconnected={clientDisconnected}, Completion={status}.");
 
             return new OpenAiStreamTransformResult(
                 doneReceived,
@@ -1315,6 +1363,92 @@ namespace FormsSystemStatsWidget.Core
 
         private sealed class DownstreamDisconnectedException : Exception
         {
+        }
+
+        private sealed class ToolDeltaMetrics
+        {
+            public int DeltaCount { get; private set; }
+            public int IdsPresent { get; private set; }
+            public int TypesPresent { get; private set; }
+            public int NamesPresent { get; private set; }
+            public int ArgumentCharacters { get; private set; }
+            public HashSet<string> Indices { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> Ids { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> Types { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> Names { get; } = new(StringComparer.Ordinal);
+            public List<string> CallPayloads { get; } = new();
+
+            public void Add(JsonArray calls)
+            {
+                if (calls.Count == 0)
+                {
+                    return;
+                }
+
+                DeltaCount++;
+                foreach (JsonNode? call in calls)
+                {
+                    CallPayloads.Add(call?.ToJsonString() ?? "<null>");
+                    string? index = call?["index"]?.ToString();
+                    string? id = call?["id"]?.ToString();
+                    string? type = call?["type"]?.ToString();
+                    JsonNode? nameNode = call?["function"]?["name"];
+                    string? name = nameNode?.ToString();
+                    JsonNode? arguments = call?["function"]?["arguments"];
+                    if (index != null) _ = Indices.Add(index);
+                    if (!string.IsNullOrEmpty(id)) { IdsPresent++; _ = Ids.Add(id); }
+                    if (!string.IsNullOrEmpty(type)) { TypesPresent++; _ = Types.Add(type); }
+                    if (!string.IsNullOrEmpty(name)) { NamesPresent++; _ = Names.Add(name); }
+                    ArgumentCharacters += arguments?.ToString().Length ?? 0;
+                }
+            }
+
+            public bool SemanticallyMatches(ToolDeltaMetrics other) =>
+                DeltaCount == other.DeltaCount && IdsPresent == other.IdsPresent && TypesPresent == other.TypesPresent &&
+                NamesPresent == other.NamesPresent && ArgumentCharacters == other.ArgumentCharacters &&
+                Indices.SetEquals(other.Indices) && Ids.SetEquals(other.Ids) && Types.SetEquals(other.Types) &&
+                Names.SetEquals(other.Names) && CallPayloads.SequenceEqual(other.CallPayloads, StringComparer.Ordinal);
+
+            public override string ToString() =>
+                $"tool_deltas={DeltaCount},indices=[{string.Join(",", Indices.OrderBy(value => value, StringComparer.Ordinal))}],ids_present={IdsPresent},types_present={TypesPresent},names_present={NamesPresent},argument_chars={ArgumentCharacters}";
+        }
+
+        private static void RecordToolDeltas(JsonNode? chunk, ToolDeltaMetrics metrics)
+        {
+            if (chunk?["choices"] is not JsonArray choices)
+            {
+                return;
+            }
+
+            foreach (JsonNode? choice in choices)
+            {
+                if (choice?["delta"]?["tool_calls"] is JsonArray calls)
+                {
+                    metrics.Add(calls);
+                }
+            }
+        }
+
+        private static void LogToolDeltaDispositionFromLine(string eventName, string requestId, string line, string reason)
+        {
+            if (!line.StartsWith("data: ", StringComparison.Ordinal)) return;
+            JsonNode? chunk = JsonNode.Parse(line["data: ".Length..].Trim());
+            LogToolDeltaDispositionForChunk(eventName, requestId, chunk, reason);
+        }
+
+        private static void LogToolDeltaDispositionForChunk(string eventName, string requestId, JsonNode? chunk, string? reason = null)
+        {
+            if (chunk?["choices"] is not JsonArray choices) return;
+            foreach (JsonNode? choice in choices)
+            {
+                if (choice?["delta"]?["tool_calls"] is not JsonArray calls) continue;
+                foreach (JsonNode? call in calls)
+                {
+                    JsonNode? function = call?["function"];
+                    int argumentLength = function?["arguments"]?.ToString().Length ?? 0;
+                    Logger.Log($"[{eventName} #{requestId}] index={call?["index"]?.ToString() ?? "<none>"},has_id={!string.IsNullOrEmpty(call?["id"]?.ToString())},has_type={!string.IsNullOrEmpty(call?["type"]?.ToString())},has_function_name={!string.IsNullOrEmpty(function?["name"]?.ToString())},arguments_length={argumentLength}{(reason == null ? string.Empty : $",reason={reason}")}");
+                }
+            }
         }
 
         private static string SummarizeOpenAiSseData(string data)

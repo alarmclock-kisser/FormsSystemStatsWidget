@@ -59,6 +59,49 @@ public sealed class LlamaStreamTransformerTests
     }
 
     [TestMethod]
+    public async Task TransformOpenAiStreamAsync_NullContentMetadataChunk_PreservesToolCallAndFragments()
+    {
+        string stream = CreateSse(
+            "{\"choices\":[{\"delta\":{\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"abc123\",\"type\":\"function\",\"function\":{\"name\":\"task_complete\",\"arguments\":\"{\\\"x\\\"\"}}]},\"finish_reason\":null}]}",
+            "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":1}\"}}]},\"finish_reason\":null}]}",
+            "{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}",
+            "[DONE]");
+
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) = await TransformAsync(stream);
+        JsonObject[] chunks = ParseChunks(output).ToArray();
+        JsonObject[] toolChunks = chunks.Where(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray).ToArray();
+
+        Assert.AreEqual(2, toolChunks.Length);
+        Assert.AreEqual("abc123", toolChunks[0]["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["id"]?.ToString());
+        Assert.AreEqual("function", toolChunks[0]["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["type"]?.ToString());
+        Assert.AreEqual("task_complete", toolChunks[0]["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["function"]?["name"]?.ToString());
+        Assert.AreEqual("{\"x\":1}", string.Concat(toolChunks.Select(chunk =>
+            chunk["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["function"]?["arguments"]?.ToString())));
+        Assert.AreEqual("tool_calls", result.FinalFinishReason);
+        Assert.IsTrue(result.DoneReceived);
+        StringAssert.Contains(output, "[DONE]");
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_NativeToolDeltaAfterLegacyToolCall_IsStillForwarded()
+    {
+        string stream = CreateSse(
+            "{\"choices\":[{\"delta\":{\"content\":\"{\\\"name\\\":\\\"legacy_tool\\\",\\\"arguments\\\":\\\"{}\\\"}\"},\"finish_reason\":null}]}",
+            "{\"choices\":[{\"delta\":{\"content\":null,\"tool_calls\":[{\"index\":0,\"id\":\"abc123\",\"type\":\"function\",\"function\":{\"name\":\"task_complete\",\"arguments\":\"{\\\"x\\\"\"}}]},\"finish_reason\":null}]}",
+            "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":1}\"}}]},\"finish_reason\":null}]}",
+            "{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}",
+            "[DONE]");
+
+        (string output, _) = await TransformAsync(stream);
+        JsonObject[] nativeChunks = ParseChunks(output)
+            .Where(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["id"]?.ToString() == "abc123")
+            .ToArray();
+
+        Assert.AreEqual(1, nativeChunks.Length);
+        Assert.AreEqual("task_complete", nativeChunks[0]["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["function"]?["name"]?.ToString());
+    }
+
+    [TestMethod]
     public async Task TransformOpenAiStreamAsync_ContentAlongsideNativeToolCall_PreservesBothDeltas()
     {
         string stream = CreateSse(
@@ -179,8 +222,76 @@ public sealed class LlamaStreamTransformerTests
         Assert.IsFalse(sanitized["parallel_tool_calls"]!.GetValue<bool>());
         Assert.AreEqual("prior reasoning", messages[0]?["reasoning_content"]?.ToString());
         Assert.AreEqual("call-1", messages[0]?["tool_calls"]?[0]?["id"]?.ToString());
+        Assert.AreEqual("function", messages[0]?["tool_calls"]?[0]?["type"]?.ToString());
+        Assert.AreEqual("read_file", messages[0]?["tool_calls"]?[0]?["function"]?["name"]?.ToString());
+        Assert.AreEqual("{}", messages[0]?["tool_calls"]?[0]?["function"]?["arguments"]?.ToString());
         Assert.AreEqual("tool", messages[1]?["role"]?.ToString());
         Assert.AreEqual("call-1", messages[1]?["tool_call_id"]?.ToString());
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_PreservesTokenLimitsAndNemotronTemplateKwargs()
+    {
+        var request = new JsonObject
+        {
+            ["max_tokens"] = 448,
+            ["max_completion_tokens"] = 512,
+            ["n_predict"] = 448,
+            ["reasoning_effort"] = "medium",
+            ["reasoning_budget"] = 0,
+            ["parallel_tool_calls"] = false,
+            ["tool_choice"] = "auto",
+            ["chat_template_kwargs"] = new JsonObject
+            {
+                ["enable_thinking"] = false,
+                ["force_nonempty_content"] = true
+            },
+            ["tools"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "function",
+                    ["function"] = new JsonObject { ["name"] = "lookup_project" }
+                }
+            },
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "user", ["content"] = "Check project alpha." }
+            }
+        };
+
+        JsonObject sanitized = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(request.ToJsonString(), "llama", reasoningEffort: null))!.AsObject();
+
+        Assert.AreEqual(448, sanitized["max_tokens"]!.GetValue<int>());
+        Assert.AreEqual(512, sanitized["max_completion_tokens"]!.GetValue<int>());
+        Assert.AreEqual(448, sanitized["n_predict"]!.GetValue<int>());
+        Assert.AreEqual("medium", sanitized["reasoning_effort"]!.GetValue<string>());
+        Assert.AreEqual(0, sanitized["reasoning_budget"]!.GetValue<int>());
+        Assert.IsFalse(sanitized["parallel_tool_calls"]!.GetValue<bool>());
+        Assert.AreEqual("auto", sanitized["tool_choice"]!.GetValue<string>());
+        Assert.IsFalse(sanitized["chat_template_kwargs"]!["enable_thinking"]!.GetValue<bool>());
+        Assert.IsTrue(sanitized["chat_template_kwargs"]!["force_nonempty_content"]!.GetValue<bool>());
+        Assert.AreEqual("lookup_project", sanitized["tools"]?[0]?["function"]?["name"]?.ToString());
+    }
+
+    [TestMethod]
+    public void SanitizeIncomingRequest_DoesNotInventAnOutputTokenLimit()
+    {
+        var request = new JsonObject
+        {
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "user", ["content"] = "Continue." }
+            }
+        };
+
+        JsonObject sanitized = JsonNode.Parse(
+            LlamaStreamTransformer.SanitizeIncomingRequest(request.ToJsonString(), "llama"))!.AsObject();
+
+        Assert.IsFalse(sanitized.ContainsKey("max_tokens"));
+        Assert.IsFalse(sanitized.ContainsKey("max_completion_tokens"));
+        Assert.IsFalse(sanitized.ContainsKey("n_predict"));
     }
 
     private static string CreateToolCallResponse(string id, string name)
