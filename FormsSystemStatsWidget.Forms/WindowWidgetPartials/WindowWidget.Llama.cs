@@ -603,6 +603,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             Size size = this._persistentSettings.CmdWindowSize;
             Point position = this._persistentSettings.CmdWindowPosition;
+            bool recoveredLegacyBounds = false;
             Screen[] screens = Screen.AllScreens;
             Screen screen = screens.FirstOrDefault(candidate => string.Equals(
                     candidate.DeviceName,
@@ -629,16 +630,37 @@ namespace FormsSystemStatsWidget.Forms
                 position = recoveredBounds.Location;
                 size = recoveredBounds.Size;
                 dockState = recoveredDockState;
+                recoveredLegacyBounds = true;
             }
 
-            Rectangle bounds = GetCmdWindowRestoreBounds(position, size, dockState, screen.WorkingArea);
-            Rectangle outerBounds = bounds;
+            Rectangle bounds;
+            Rectangle outerBounds;
             if (dockState != 0 &&
                 GetWindowRect(handle, out NativeWindowRect outerNativeRect) &&
                 DwmGetWindowAttribute(handle, DwmwaExtendedFrameBounds, out NativeWindowRect visibleNativeRect, (uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeWindowRect>()) == 0)
             {
+                bounds = GetCmdWindowRestoreBounds(position, size, dockState, screen.WorkingArea);
+                if (!recoveredLegacyBounds)
+                {
+                    Rectangle savedOuterBounds = new(position, size);
+                    Rectangle savedVisibleBounds = ConvertSavedOuterBoundsToVisibleBounds(
+                        savedOuterBounds, outerNativeRect.ToRectangle(), visibleNativeRect.ToRectangle());
+                    bounds = GetCmdWindowRestoreBoundsPreservingSavedSize(
+                        savedVisibleBounds.Location, savedVisibleBounds.Size, dockState, screen.WorkingArea);
+                }
+
                 outerBounds = GetCmdWindowOuterRestoreBounds(
                     dockState, bounds, outerNativeRect.ToRectangle(), visibleNativeRect.ToRectangle());
+            }
+            else if (recoveredLegacyBounds || dockState != 0)
+            {
+                bounds = GetCmdWindowRestoreBounds(position, size, dockState, screen.WorkingArea);
+                outerBounds = bounds;
+            }
+            else
+            {
+                bounds = GetCmdWindowRestoreBoundsPreservingSavedSize(position, size, dockState, screen.WorkingArea);
+                outerBounds = bounds;
             }
 
             _ = SetWindowPos(handle, IntPtr.Zero, outerBounds.X, outerBounds.Y, outerBounds.Width, outerBounds.Height, SwpNoZOrder | SwpNoActivate);
@@ -688,6 +710,92 @@ namespace FormsSystemStatsWidget.Forms
             int x = Math.Clamp(position.X, workingArea.Left, workingArea.Right - width);
             int y = Math.Clamp(position.Y, workingArea.Top, workingArea.Bottom - height);
             return new Rectangle(x, y, width, height);
+        }
+
+        internal static Rectangle GetCmdWindowRestoreBoundsPreservingSavedSize(Point position, Size size, int dockState, Rectangle workingArea)
+        {
+            if (dockState == 0)
+            {
+                return GetCmdWindowRestoreBounds(position, size, dockState, workingArea);
+            }
+
+            if (dockState == 1)
+            {
+                return workingArea;
+            }
+
+            int width = Math.Clamp(size.Width, 1, workingArea.Width);
+            int height = Math.Clamp(size.Height, 1, workingArea.Height);
+            int x = Math.Clamp(position.X, workingArea.Left, workingArea.Right - width);
+            int y = Math.Clamp(position.Y, workingArea.Top, workingArea.Bottom - height);
+
+            return dockState switch
+            {
+                2 => new Rectangle(workingArea.Left, y, width, height),
+                3 => new Rectangle(workingArea.Right - width, y, width, height),
+                4 => new Rectangle(x, workingArea.Top, width, height),
+                5 => new Rectangle(x, workingArea.Bottom - height, width, height),
+                _ => GetCmdWindowRestoreBounds(position, size, dockState, workingArea)
+            };
+        }
+
+        internal static Rectangle ConvertSavedOuterBoundsToVisibleBounds(Rectangle savedOuterBounds, Rectangle currentOuterBounds, Rectangle currentVisibleBounds)
+        {
+            int leftInset = currentVisibleBounds.Left - currentOuterBounds.Left;
+            int topInset = currentVisibleBounds.Top - currentOuterBounds.Top;
+            int rightInset = currentOuterBounds.Right - currentVisibleBounds.Right;
+            int bottomInset = currentOuterBounds.Bottom - currentVisibleBounds.Bottom;
+            return Rectangle.FromLTRB(
+                savedOuterBounds.Left + leftInset,
+                savedOuterBounds.Top + topInset,
+                savedOuterBounds.Right - rightInset,
+                savedOuterBounds.Bottom - bottomInset);
+        }
+
+        internal static int GetCmdWindowDockStateFromBounds(Rectangle bounds, Rectangle workingArea)
+        {
+            if (workingArea.Width <= 0 || workingArea.Height <= 0)
+            {
+                return 0;
+            }
+
+            int tolerance = Math.Max(10, SystemInformation.BorderSize.Width * 2);
+            bool atLeft = Math.Abs(bounds.Left - workingArea.Left) <= tolerance;
+            bool atRight = Math.Abs(bounds.Right - workingArea.Right) <= tolerance;
+            bool atTop = Math.Abs(bounds.Top - workingArea.Top) <= tolerance;
+            bool atBottom = Math.Abs(bounds.Bottom - workingArea.Bottom) <= tolerance;
+            if (atLeft && atRight && atTop && atBottom)
+            {
+                return 1;
+            }
+
+            double horizontalCoverage = (double)bounds.Width / workingArea.Width;
+            double verticalCoverage = (double)bounds.Height / workingArea.Height;
+            if (verticalCoverage >= 0.5 && verticalCoverage >= horizontalCoverage)
+            {
+                if (atLeft)
+                {
+                    return 2;
+                }
+                if (atRight)
+                {
+                    return 3;
+                }
+            }
+
+            if (horizontalCoverage >= 0.5 && horizontalCoverage > verticalCoverage)
+            {
+                if (atTop)
+                {
+                    return 4;
+                }
+                if (atBottom)
+                {
+                    return 5;
+                }
+            }
+
+            return 0;
         }
 
         internal static Rectangle ConvertNativeWindowRect(int left, int top, int right, int bottom) =>
@@ -791,11 +899,17 @@ namespace FormsSystemStatsWidget.Forms
                     return;
                 }
 
+                Rectangle dockDetectionBounds = rect;
+                if (DwmGetWindowAttribute(handle, DwmwaExtendedFrameBounds, out NativeWindowRect visibleNativeRect, (uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeWindowRect>()) == 0)
+                {
+                    dockDetectionBounds = visibleNativeRect.ToRectangle();
+                }
+
                 var position = new Point(rect.X, rect.Y);
                 var size = new Size(rect.Width, rect.Height);
-                int monitorId = this.GetMonitorIdFromLocation(position);
-                int dockState = this.GetDockStateFromBounds(rect);
-                string monitorDeviceName = Screen.FromRectangle(rect).DeviceName;
+                int monitorId = this.GetMonitorIdFromLocation(dockDetectionBounds.Location);
+                int dockState = GetCmdWindowDockStateFromBounds(dockDetectionBounds, Screen.FromRectangle(dockDetectionBounds).WorkingArea);
+                string monitorDeviceName = Screen.FromRectangle(dockDetectionBounds).DeviceName;
                 if (this._persistentSettings.CmdWindowPosition != position ||
                     this._persistentSettings.CmdWindowSize != size ||
                     this._persistentSettings.CmdWindowMonitorId != monitorId ||

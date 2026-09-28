@@ -137,6 +137,41 @@ namespace FormsSystemStatsWidget.Tests
         }
 
         [TestMethod]
+        public void CmdWindowRestore_ShouldPreserveResizedDockedBounds()
+        {
+            var area = new Rectangle(0, 0, 1920, 1080);
+
+            Assert.AreEqual(new Rectangle(0, 100, 1250, 900),
+                WindowWidget.GetCmdWindowRestoreBoundsPreservingSavedSize(new Point(0, 100), new Size(1250, 900), 2, area));
+            Assert.AreEqual(new Rectangle(1200, 80, 720, 900),
+                WindowWidget.GetCmdWindowRestoreBoundsPreservingSavedSize(new Point(1200, 80), new Size(720, 900), 3, area));
+            Assert.AreEqual(new Rectangle(100, 0, 1500, 500),
+                WindowWidget.GetCmdWindowRestoreBoundsPreservingSavedSize(new Point(100, 0), new Size(1500, 500), 4, area));
+            Assert.AreEqual(new Rectangle(100, 580, 1500, 500),
+                WindowWidget.GetCmdWindowRestoreBoundsPreservingSavedSize(new Point(100, 580), new Size(1500, 500), 5, area));
+        }
+
+        [TestMethod]
+        public void CmdWindowRestore_ShouldTranslateSavedOuterFrameToVisibleBounds()
+        {
+            Rectangle savedVisibleBounds = WindowWidget.ConvertSavedOuterBoundsToVisibleBounds(
+                new Rectangle(-7, -7, 974, 1094),
+                new Rectangle(100, 100, 420, 320),
+                new Rectangle(107, 107, 406, 306));
+
+            Assert.AreEqual(new Rectangle(0, 0, 960, 1080), savedVisibleBounds);
+        }
+
+        [TestMethod]
+        public void CmdWindowCapture_ShouldKeepWideResizedSnapDocked()
+        {
+            var area = new Rectangle(0, 0, 1920, 1080);
+
+            Assert.AreEqual(2, WindowWidget.GetCmdWindowDockStateFromBounds(new Rectangle(0, 0, 1300, 1080), area));
+            Assert.AreEqual(4, WindowWidget.GetCmdWindowDockStateFromBounds(new Rectangle(0, 0, 1500, 600), area));
+        }
+
+        [TestMethod]
         public void CmdWindowCapture_ShouldConvertNativeRectEdgesToPositionAndSize()
         {
             Rectangle captured = WindowWidget.ConvertNativeWindowRect(-1080, 0, 0, 936);
