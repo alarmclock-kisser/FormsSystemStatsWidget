@@ -94,7 +94,7 @@ public class LoopDetectionService
         List<AssistantAction> recentActions = GetRecentAssistantActions(messages, Math.Max(1, _config.DetectionWindow));
         int repeats = CountTrailingRepeats(recentActions, _config.SimilarityThreshold);
         int triggerAfter = Math.Max(2, _config.TriggerAfter);
-        int interjectionCount = Math.Max(CountCurrentTurnInterjections(messages), Math.Max(0, repeats - triggerAfter));
+        int interjectionCount = CountCurrentTurnInterjections(messages);
         bool detected = repeats >= triggerAfter;
         var result = new LoopDetectionResult
         {
@@ -108,15 +108,13 @@ public class LoopDetectionService
             return result;
         }
 
-        bool maxInterjectionsReached = interjectionCount >= Math.Max(1, _config.MaxInterjections);
-        if (_config.AbortEnabled &&
-            (interjectionCount >= Math.Max(1, _config.AbortAfterInterjections) || maxInterjectionsReached))
+        if (_config.AbortEnabled && interjectionCount >= Math.Max(1, _config.AbortAfterInterjections))
         {
             result.ShouldAbort = true;
             return result;
         }
 
-        if (_config.InterjectionEnabled && interjectionCount < Math.Max(0, _config.MaxInterjections))
+        if (_config.InterjectionEnabled && interjectionCount < Math.Max(1, _config.MaxInterjections))
         {
             result.InterjectionMessage = _config.InterjectionMessage;
         }
@@ -147,17 +145,23 @@ public class LoopDetectionService
         int count = 0;
         for (int index = messages.Count - 1; index >= 0; index--)
         {
-            if (messages[index] is not JsonObject message ||
-                !string.Equals(message["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+            if (messages[index] is not JsonObject message)
+            {
+                continue;
+            }
+            string role = message["role"]?.ToString() ?? string.Empty;
+            if (!string.Equals(role, "user", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
             if (string.Equals(message["name"]?.ToString(), InterjectionName, StringComparison.Ordinal))
             {
                 count++;
-                continue;
             }
-            break;
+            else
+            {
+                break;
+            }
         }
         return count;
     }
@@ -247,7 +251,18 @@ public class LoopDetectionService
         for (int index = actions.Count - 2; index >= 0; index--)
         {
             AssistantAction previous = actions[index];
-            if (previous.IsToolCall != latest.IsToolCall || !AreSimilar(previous.Signature, latest.Signature, threshold, latest.IsToolCall))
+            if (previous.IsToolCall != latest.IsToolCall)
+            {
+                break;
+            }
+            if (latest.IsToolCall)
+            {
+                if (!string.Equals(previous.Signature, latest.Signature, StringComparison.Ordinal))
+                {
+                    break;
+                }
+            }
+            else if (!AreTextSimilar(previous.Signature, latest.Signature, threshold))
             {
                 break;
             }
@@ -256,13 +271,13 @@ public class LoopDetectionService
         return count;
     }
 
-    private static bool AreSimilar(string left, string right, double threshold, bool exact)
+    private static bool AreTextSimilar(string left, string right, double threshold)
     {
         if (string.Equals(left, right, StringComparison.Ordinal))
         {
             return true;
         }
-        if (exact || string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right))
+        if (string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right))
         {
             return false;
         }
@@ -275,6 +290,150 @@ public class LoopDetectionService
     }
 
     private sealed record AssistantAction(bool IsToolCall, string Signature);
+}
+
+/// <summary>
+/// Classifies the kind of repeating pattern observed in a stream.
+/// </summary>
+public enum StreamingLoopKind
+{
+    TextOutput,
+    ToolCall
+}
+
+/// <summary>
+/// Decision produced by <see cref="StreamingLoopDetector"/> for a single observed chunk.
+/// </summary>
+public sealed class StreamingLoopDecision
+{
+    public bool ShouldAbort { get; set; }
+    public string? InterjectionMessage { get; set; }
+    public int RepeatCount { get; set; }
+    public StreamingLoopKind LoopKind { get; set; }
+}
+
+/// <summary>
+/// Detects repeating natural-language output patterns in a stream.
+/// Tool-call deltas are fragments; repeated complete tool actions are handled by
+/// <see cref="LoopDetectionService"/> across conversation turns.
+/// </summary>
+public class StreamingLoopDetector
+{
+    private readonly LoopDetectionConfig _config;
+    private readonly Queue<string> _contentSignatures = new();
+    private int _contentRepeatCount;
+    private int _interjectionCount;
+    private bool _hasSeenToolCallInCurrentStream;
+
+    public StreamingLoopDetector(LoopDetectionConfig config)
+    {
+        _config = config ?? throw new ArgumentNullException(nameof(config));
+    }
+
+    /// <summary>
+    /// Observes a single upstream chunk. Returns a decision when a loop is detected,
+    /// or null when no loop has been reached yet.
+    /// </summary>
+    public StreamingLoopDecision? ObserveChunk(JsonNode? chunk)
+    {
+        if (!_config.Enabled || chunk is not JsonObject)
+        {
+            return null;
+        }
+
+        if (chunk["choices"] is not JsonArray choices)
+        {
+            return null;
+        }
+
+        foreach (JsonNode? choice in choices)
+        {
+            if (choice is not JsonObject choiceObj)
+            {
+                continue;
+            }
+            if (choiceObj["delta"] is not JsonObject delta)
+            {
+                continue;
+            }
+
+            if (delta["tool_calls"] is JsonArray toolCalls && toolCalls.Count > 0)
+            {
+                _hasSeenToolCallInCurrentStream = true;
+                continue;
+            }
+
+            if (_hasSeenToolCallInCurrentStream)
+            {
+                continue;
+            }
+
+            string? content = delta["content"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(content) && delta["reasoning_content"] == null)
+            {
+                string signature = NormalizeText(content);
+                if (!string.IsNullOrEmpty(signature))
+                {
+                    ObserveSignature(signature, out StreamingLoopDecision? decision);
+                    if (decision is not null)
+                    {
+                        return decision;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private void ObserveSignature(string signature, out StreamingLoopDecision? decision)
+    {
+        decision = null;
+        if (_contentSignatures.Count > 0 && _contentSignatures.Peek() == signature)
+        {
+            _contentRepeatCount++;
+        }
+        else
+        {
+            _contentRepeatCount = 1;
+        }
+
+        if (_contentSignatures.Count == Math.Max(1, _config.DetectionWindow))
+        {
+            _ = _contentSignatures.Dequeue();
+        }
+        _contentSignatures.Enqueue(signature);
+
+        int triggerAfter = Math.Max(2, _config.TriggerAfter);
+        if (_contentRepeatCount < triggerAfter)
+        {
+            return;
+        }
+
+        if (_config.AbortEnabled && _interjectionCount >= Math.Max(1, _config.AbortAfterInterjections))
+        {
+            decision = new StreamingLoopDecision
+            {
+                ShouldAbort = true,
+                RepeatCount = _contentRepeatCount,
+                LoopKind = StreamingLoopKind.TextOutput
+            };
+            return;
+        }
+
+        if (_config.InterjectionEnabled && _interjectionCount < Math.Max(1, _config.MaxInterjections))
+        {
+            _interjectionCount++;
+            decision = new StreamingLoopDecision
+            {
+                InterjectionMessage = _config.InterjectionMessage,
+                RepeatCount = _contentRepeatCount,
+                LoopKind = StreamingLoopKind.TextOutput
+            };
+        }
+    }
+
+    private static string NormalizeText(string value) => string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
 }
 
 /// <summary>

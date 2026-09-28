@@ -56,6 +56,7 @@ namespace FormsSystemStatsWidget.Core
         private static string _modelParentModel = "";
         private static string _modelDescription = "";
         private static List<string> _modelTags = new();
+        private static LlamaChatTemplateProfile? _chatTemplateProfile;
         private static string _llamaServerBaseUrl = "http://localhost:8080";
         private static string _bridgeBaseUrl = "http://localhost:11434";
         private static string _lastStartError = string.Empty;
@@ -115,6 +116,7 @@ namespace FormsSystemStatsWidget.Core
         public static async Task<bool> StartAsync(string? apiUrl = null, int llamacppPort = 8080, int ollamaPort = 11434)
         {
             _lastStartError = string.Empty;
+            _chatTemplateProfile = null;
             _bridgeBaseUrl = $"http://localhost:{ollamaPort}";
             Logger.Log($"[LlamaBridge] Starting Bridge: llama-server ({llamacppPort}) -> Ollama ({ollamaPort})");
             Logger.Log($"[LlamaBridge] Configured Source API URL: '{apiUrl ?? "<null>"}'");
@@ -265,6 +267,11 @@ namespace FormsSystemStatsWidget.Core
                     {
                         var propsContent = await propsResponse.Content.ReadAsStringAsync();
                         var propsJson = JsonNode.Parse(propsContent);
+                        _chatTemplateProfile = LlamaChatTemplateProfile.FromProps(propsJson);
+                        if (_chatTemplateProfile is not null)
+                        {
+                            Logger.Log($"[LlamaBridge] Chat template loaded dynamically: chars={_chatTemplateProfile.TemplateLength}, supports_tools={_chatTemplateProfile.SupportsTools?.ToString() ?? "unknown"}, supports_tool_calls={_chatTemplateProfile.SupportsToolCalls?.ToString() ?? "unknown"}, supports_parallel_tool_calls={_chatTemplateProfile.SupportsParallelToolCalls?.ToString() ?? "unknown"}, supports_reasoning_effort={_chatTemplateProfile.SupportsReasoningEffort?.ToString() ?? "unknown"}");
+                        }
 
                         bool? supportsVisionFromProps = TryReadVisionSupportFromProps(propsJson);
                         if (supportsVisionFromProps.HasValue)
@@ -495,6 +502,76 @@ namespace FormsSystemStatsWidget.Core
 
         private static string GetBridgeCorrelationId(string requestId) => $"{_bridgeInstanceId}:{requestId}";
 
+        private static string ApplyChatTemplateCompatibility(string requestBody, string requestId)
+        {
+            if (_chatTemplateProfile is null)
+            {
+                return requestBody;
+            }
+
+            JsonObject request = JsonNode.Parse(requestBody) as JsonObject
+                ?? throw new JsonException("Sanitized request is not a JSON object.");
+            if (!_chatTemplateProfile.ApplyCompatibility(request))
+            {
+                return requestBody;
+            }
+
+            Logger.Log($"[LlamaBridge][Template #{requestId}] Applied dynamic template compatibility: reasoning_effort_supported={_chatTemplateProfile.SupportsReasoningEffort?.ToString() ?? "unknown"},parallel_tool_calls_supported={_chatTemplateProfile.SupportsParallelToolCalls?.ToString() ?? "unknown"},enable_thinking_mapped={request["chat_template_kwargs"]?["enable_thinking"]?.ToString() ?? "<unchanged>"}.");
+            return request.ToJsonString();
+        }
+
+        private static async Task<HttpResponseMessage> SendUpstreamChatRequestAsync(string requestBody, string requestId, string route)
+        {
+            IReadOnlyList<string> fallbackCandidates = LlamaChatTemplateProfile.BuildCompatibilityRetryCandidates(requestBody);
+            for (int attempt = 0; attempt <= fallbackCandidates.Count; attempt++)
+            {
+                string candidateBody = attempt == 0 ? requestBody : fallbackCandidates[attempt - 1];
+                using var upstreamRequest = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
+                {
+                    Content = new StringContent(candidateBody, Encoding.UTF8, "application/json")
+                };
+                upstreamRequest.Headers.Add("X-Bridge-Request-ID", GetBridgeCorrelationId(requestId));
+
+                long upstreamOrdinal = Interlocked.Increment(ref _generationUpstreamSendCount);
+                LlamaAgentLoopDiagnostics.LogLifecycle(
+                    requestId, "UpstreamStarted",
+                    $"upstream_ordinal={upstreamOrdinal},attempt={attempt + 1},bridge_request_id={GetBridgeCorrelationId(requestId)},method=POST,path={route},sanitized_request_hash={LlamaAgentLoopDiagnostics.HashRequestBody(candidateBody)},sanitized_messages_hash={LlamaAgentLoopDiagnostics.HashRequestMessages(candidateBody)}");
+
+                HttpResponseMessage upstreamResponse = await _httpClient.SendAsync(upstreamRequest, HttpCompletionOption.ResponseHeadersRead);
+                bool retryableStatus = upstreamResponse.StatusCode == HttpStatusCode.BadRequest ||
+                                       upstreamResponse.StatusCode == HttpStatusCode.UnprocessableEntity;
+                if (!retryableStatus || attempt == fallbackCandidates.Count)
+                {
+                    return upstreamResponse;
+                }
+
+                _ = await upstreamResponse.Content.ReadAsByteArrayAsync();
+                Logger.Log($"[LlamaBridge #{requestId}] Upstream rejected request candidate {attempt + 1} with HTTP {(int)upstreamResponse.StatusCode}; retrying with compatibility candidate {attempt + 2}/{fallbackCandidates.Count + 1}.");
+                LlamaAgentLoopDiagnostics.LogLifecycle(
+                    requestId, "UpstreamCompatibilityRetry",
+                    $"rejected_attempt={attempt + 1},status={(int)upstreamResponse.StatusCode},next_attempt={attempt + 2},route={route}");
+                upstreamResponse.Dispose();
+            }
+
+            throw new InvalidOperationException("No llama-server request attempt produced a response.");
+        }
+
+        private static async Task WriteUpstreamErrorResponseAsync(HttpListenerResponse response, HttpResponseMessage upstreamResponse, string requestId)
+        {
+            byte[] errorBody = await upstreamResponse.Content.ReadAsByteArrayAsync();
+            response.StatusCode = (int)upstreamResponse.StatusCode;
+            response.ContentType = upstreamResponse.Content.Headers.ContentType?.ToString() ?? "application/json; charset=utf-8";
+            response.ContentLength64 = errorBody.Length;
+            if (errorBody.Length > 0)
+            {
+                await response.OutputStream.WriteAsync(errorBody);
+            }
+            response.Close();
+            LlamaAgentLoopDiagnostics.LogLifecycle(
+                requestId, "UpstreamErrorForwarded",
+                $"status={(int)upstreamResponse.StatusCode},body_length={errorBody.Length}");
+        }
+
         private static string ApplyLoopDetection(string requestId, string sanitizedBody, out bool shouldAbort)
         {
             JsonObject request = JsonNode.Parse(sanitizedBody) as JsonObject
@@ -561,6 +638,7 @@ namespace FormsSystemStatsWidget.Core
                 UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget,
                 trimThinkingBlocks: Enabled, keepLastMessages: KeepLastMessages,
                 trimToolResults: TrimToolResults, toolCallMode: ToolCallMode);
+            sanitizedBody = ApplyChatTemplateCompatibility(sanitizedBody, streamRequestId);
             ToolHistoryInspection history = LlamaAgentLoopDiagnostics.BeginRequest(
                 "/v1/chat/completions", streamRequestId, requestBody, sanitizedBody, _modelFamily);
             if (!history.IsValid)
@@ -590,18 +668,14 @@ namespace FormsSystemStatsWidget.Core
                 LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "StatsProbeCompleted", $"purpose=baseline_context_tokens,tokens={s_startContextTokens}");
             }
 
-            using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
-            {
-                Content = new StringContent(sanitizedBody, Encoding.UTF8, "application/json")
-            };
-            upstreamReq.Headers.Add("X-Bridge-Request-ID", GetBridgeCorrelationId(streamRequestId));
-
-            long upstreamOrdinal = Interlocked.Increment(ref _generationUpstreamSendCount);
-            LlamaAgentLoopDiagnostics.LogLifecycle(
-                streamRequestId, "UpstreamStarted",
-                $"upstream_ordinal={upstreamOrdinal},attempt=1,bridge_request_id={GetBridgeCorrelationId(streamRequestId)},method=POST,path=/v1/chat/completions,sanitized_request_hash={LlamaAgentLoopDiagnostics.HashRequestBody(sanitizedBody)},sanitized_messages_hash={LlamaAgentLoopDiagnostics.HashRequestMessages(sanitizedBody)}");
-            using HttpResponseMessage upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
+            using HttpResponseMessage upstreamRes = await SendUpstreamChatRequestAsync(sanitizedBody, streamRequestId, "/v1/chat/completions");
             LogUpstreamResponseHeaders(streamRequestId, upstreamRes);
+            if (!upstreamRes.IsSuccessStatusCode)
+            {
+                await WriteUpstreamErrorResponseAsync(response, upstreamRes, streamRequestId);
+                return true;
+            }
+
             response.StatusCode = (int) upstreamRes.StatusCode;
             response.ContentType = upstreamRes.Content.Headers.ContentType?.ToString() ?? "text/event-stream";
             response.SendChunked = true;
@@ -613,6 +687,13 @@ namespace FormsSystemStatsWidget.Core
             LlamaAgentLoopDiagnostics.LogLifecycle(
                 streamRequestId, "BridgeStreamProcessingEnded",
                 $"done_received={streamResult.DoneReceived},finish_reason={streamResult.FinalFinishReason ?? "<none>"},completion={streamResult.Status}");
+
+            if (streamResult.Status == LlamaStreamTransformer.OpenAiStreamCompletionStatus.LoopAborted)
+            {
+                Logger.Log($"[LlamaBridge][OpenAI #{streamRequestId}] Stream aborted by loop guard.");
+                response.Abort();
+                return true;
+            }
 
             if (streamResult.ClientDisconnected)
             {
@@ -788,7 +869,7 @@ namespace FormsSystemStatsWidget.Core
                 $"[LlamaBridge][Request Metadata] route={route}, model={SafeValue(root["model"]?.ToString())}, stream={Scalar(root["stream"])}, " +
                 $"max_tokens={Scalar(root["max_tokens"])}, max_completion_tokens={Scalar(root["max_completion_tokens"])}, n_predict={Scalar(root["n_predict"])}, " +
                 $"temperature={Scalar(root["temperature"])}, top_p={Scalar(root["top_p"])}, top_k={Scalar(root["top_k"])}, min_p={Scalar(root["min_p"])}, " +
-                $"repetition_penalty={Scalar(root["repetition_penalty"])}, repeat_penalty={Scalar(root["repeat_penalty"])}, " +
+                $"repeat_penalty={Scalar(root["repeat_penalty"])}, " +
                 $"reasoning_effort={Scalar(root["reasoning_effort"])}, reasoning_budget={Scalar(root["reasoning_budget"])}, thinking_budget_tokens={Scalar(root["thinking_budget_tokens"])}, " +
                 $"reasoning={Scalar(root["reasoning"])}, reasoning_format={Scalar(root["reasoning_format"])}, chat_template_kwargs_keys=[{templateKwargKeys}], " +
                 $"enable_thinking={Scalar(templateKwargs?["enable_thinking"])}, force_nonempty_content={Scalar(templateKwargs?["force_nonempty_content"])}, " +
@@ -874,6 +955,7 @@ namespace FormsSystemStatsWidget.Core
                 UserDefinedTopP, UserDefinedMinP, UserDefinedTopK, UserDefinedReasoningEffort, UserDefinedReasoningBudget,
                 trimThinkingBlocks: Enabled, keepLastMessages: KeepLastMessages,
                 trimToolResults: TrimToolResults, toolCallMode: ToolCallMode);
+            sanitizedBody = ApplyChatTemplateCompatibility(sanitizedBody, streamRequestId);
             ToolHistoryInspection history = LlamaAgentLoopDiagnostics.BeginRequest(
                 "/api/chat->/v1/chat/completions", streamRequestId, openAiReq.ToJsonString(), sanitizedBody, _modelFamily,
                 requireToolCallIds: false, inboundRequestBody: body);
@@ -896,18 +978,14 @@ namespace FormsSystemStatsWidget.Core
             LogUpstreamRequestMetadata("/api/chat->/v1/chat/completions", sanitizedBody);
             Logger.Log("========================================");
 
-            using var upstreamReq = new HttpRequestMessage(HttpMethod.Post, $"{_llamaServerBaseUrl}/v1/chat/completions")
-            {
-                Content = new StringContent(sanitizedBody, Encoding.UTF8, "application/json")
-            };
-            upstreamReq.Headers.Add("X-Bridge-Request-ID", GetBridgeCorrelationId(streamRequestId));
-
-            long upstreamOrdinal = Interlocked.Increment(ref _generationUpstreamSendCount);
-            LlamaAgentLoopDiagnostics.LogLifecycle(
-                streamRequestId, "UpstreamStarted",
-                $"upstream_ordinal={upstreamOrdinal},attempt=1,bridge_request_id={GetBridgeCorrelationId(streamRequestId)},method=POST,path=/v1/chat/completions,sanitized_request_hash={LlamaAgentLoopDiagnostics.HashRequestBody(sanitizedBody)},sanitized_messages_hash={LlamaAgentLoopDiagnostics.HashRequestMessages(sanitizedBody)}");
-            using HttpResponseMessage upstreamRes = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead);
+            using HttpResponseMessage upstreamRes = await SendUpstreamChatRequestAsync(sanitizedBody, streamRequestId, "/api/chat->/v1/chat/completions");
             LogUpstreamResponseHeaders(streamRequestId, upstreamRes);
+            if (!upstreamRes.IsSuccessStatusCode)
+            {
+                await WriteUpstreamErrorResponseAsync(response, upstreamRes, streamRequestId);
+                return true;
+            }
+
             response.ContentType = "application/x-ndjson; charset=utf-8";
             response.StatusCode = (int) upstreamRes.StatusCode;
             response.SendChunked = true;
@@ -920,6 +998,13 @@ namespace FormsSystemStatsWidget.Core
             else
             {
                 streamResult = await WriteStreamingOllamaResponseAsync(response, upstreamRes, streamRequestId);
+            }
+
+            if (streamResult?.Status == LlamaStreamTransformer.OpenAiStreamCompletionStatus.LoopAborted)
+            {
+                Logger.Log($"[LlamaBridge][Ollama #{streamRequestId}] Stream aborted by loop guard.");
+                response.Abort();
+                return true;
             }
 
             if (streamResult?.ClientDisconnected == true)

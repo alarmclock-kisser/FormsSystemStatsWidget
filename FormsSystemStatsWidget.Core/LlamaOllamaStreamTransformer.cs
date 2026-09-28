@@ -42,6 +42,8 @@ namespace FormsSystemStatsWidget.Core
             bool toolCallCompletedLogged = false;
             bool finishReasonLogged = false;
             bool upstreamIdentifiersLogged = false;
+            bool loopAborted = false;
+            StreamingLoopDetector? streamingLoopDetector = null;
 
             void AddTrace(Queue<string> trace, string entry)
             {
@@ -147,6 +149,7 @@ namespace FormsSystemStatsWidget.Core
 
             try
             {
+                streamingLoopDetector = new StreamingLoopDetector(LlamaOllamaBridge.LoopDetectionConfig);
                 while (true)
                 {
                     string? line;
@@ -231,6 +234,30 @@ namespace FormsSystemStatsWidget.Core
                         transformationError = true;
                         Logger.Log($"[Ollama SSE] Invalid upstream JSON ({ex.GetType().Name}, {data.Length} chars).");
                         break;
+                    }
+
+                    StreamingLoopDecision? loopDecision = streamingLoopDetector?.ObserveChunk(chunk);
+                    if (loopDecision is not null)
+                    {
+                        if (loopDecision.ShouldAbort)
+                        {
+                            loopAborted = true;
+                            if (streamRequestId != null)
+                            {
+                                LlamaAgentLoopDiagnostics.LogLifecycle(
+                                    streamRequestId, "StreamLoopAborted",
+                                    $"repeats={loopDecision.RepeatCount},kind={loopDecision.LoopKind}");
+                            }
+                            Logger.Log($"[Ollama SSE][{streamRequestId ?? "untracked"}] Loop guard aborted streaming generation (repeats={loopDecision.RepeatCount}, kind={loopDecision.LoopKind}).");
+                            break;
+                        }
+                        else if (loopDecision.InterjectionMessage is not null && streamRequestId != null)
+                        {
+                            LlamaAgentLoopDiagnostics.LogLifecycle(
+                                streamRequestId, "StreamLoopInterjectionDetected",
+                                $"repeats={loopDecision.RepeatCount},kind={loopDecision.LoopKind}");
+                        }
+                        continue;
                     }
 
                     if (streamRequestId != null)
@@ -345,17 +372,19 @@ namespace FormsSystemStatsWidget.Core
                 Logger.Log($"[Ollama SSE] Transformation failed ({ex.GetType().Name}).");
             }
 
-            OpenAiStreamCompletionStatus status = clientDisconnected
-                ? OpenAiStreamCompletionStatus.ClientDisconnected
-                : transformationError
-                    ? OpenAiStreamCompletionStatus.TransformationError
-                    : upstreamError || !doneReceived
-                        ? OpenAiStreamCompletionStatus.UpstreamError
-                        : string.Equals(finalFinishReason, "tool_calls", System.StringComparison.Ordinal)
-                            ? OpenAiStreamCompletionStatus.CompletedByToolCall
-                            : finalFinishReason != null
-                                ? OpenAiStreamCompletionStatus.CompletedByLlm
-                                : OpenAiStreamCompletionStatus.CompletedByDone;
+            OpenAiStreamCompletionStatus status = loopAborted
+                ? OpenAiStreamCompletionStatus.LoopAborted
+                : clientDisconnected
+                    ? OpenAiStreamCompletionStatus.ClientDisconnected
+                    : transformationError
+                        ? OpenAiStreamCompletionStatus.TransformationError
+                        : upstreamError || !doneReceived
+                            ? OpenAiStreamCompletionStatus.UpstreamError
+                            : string.Equals(finalFinishReason, "tool_calls", System.StringComparison.Ordinal)
+                                ? OpenAiStreamCompletionStatus.CompletedByToolCall
+                                : finalFinishReason != null
+                                    ? OpenAiStreamCompletionStatus.CompletedByLlm
+                                    : OpenAiStreamCompletionStatus.CompletedByDone;
 
             if (streamRequestId != null)
             {

@@ -86,12 +86,20 @@ namespace FormsSystemStatsWidget.Core
                     return node?.ToJsonString() ?? jsonInput;
                 }
 
-                root["temperature"] = temperature;
-                root["repetition_penalty"] = repetitionPenalty;
-                root["presence_penalty"] = presencePenalty;
-                root["top_p"] = userDefinedTopP;
-                root["min_p"] = userDefinedMinP;
-                root["top_k"] = userDefinedTopK;
+                SetNumericParameter(root, "temperature", temperature, static value => value >= 0);
+                _ = root.Remove("repetition_penalty");
+                SetNumericParameter(root, "repeat_penalty", repetitionPenalty, static value => value > 0);
+                SetNumericParameter(root, "presence_penalty", presencePenalty, static value => value is >= -2 and <= 2);
+                SetNumericParameter(root, "top_p", userDefinedTopP, static value => value is > 0 and <= 1);
+                SetNumericParameter(root, "min_p", userDefinedMinP, static value => value is > 0 and <= 1);
+                if (userDefinedTopK > 0)
+                {
+                    root["top_k"] = userDefinedTopK;
+                }
+                else
+                {
+                    _ = root.Remove("top_k");
+                }
                 if (!string.IsNullOrEmpty(reasoningEffort))
                 {
                     root["reasoning_effort"] = reasoningEffort;
@@ -209,6 +217,18 @@ namespace FormsSystemStatsWidget.Core
             }
         }
 
+        private static void SetNumericParameter(JsonObject request, string name, double value, Func<double, bool> isValid)
+        {
+            if (double.IsFinite(value) && isValid(value))
+            {
+                request[name] = value;
+            }
+            else
+            {
+                _ = request.Remove(name);
+            }
+        }
+
         private static bool TryRemoveOldestCompleteConversationUnit(JsonArray messages, int firstRemovableIndex)
         {
             if (firstRemovableIndex >= messages.Count)
@@ -309,7 +329,7 @@ namespace FormsSystemStatsWidget.Core
                 string inferenceParams = string.Join(
                     " ",
                     $"temperature={temperature.ToString("0.######", CultureInfo.InvariantCulture)}",
-                    $"repetition_penalty={repetitionPenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"repeat_penalty={repetitionPenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
                     $"presence_penalty={presencePenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
                     $"top_p={userDefinedTopP.ToString("0.######", CultureInfo.InvariantCulture)}",
                     $"min_p={userDefinedMinP.ToString("0.######", CultureInfo.InvariantCulture)}",
@@ -1196,7 +1216,8 @@ namespace FormsSystemStatsWidget.Core
             CompletedByDone,
             ClientDisconnected,
             UpstreamError,
-            TransformationError
+            TransformationError,
+            LoopAborted
         }
 
         public sealed record OpenAiStreamTransformResult(
@@ -1244,6 +1265,8 @@ namespace FormsSystemStatsWidget.Core
             int generatedContentLength = 0;
             string? finalFinishReason = null;
             string toolBuffer = string.Empty;
+            var streamingLoopDetector = new StreamingLoopDetector(LlamaOllamaBridge.LoopDetectionConfig);
+            bool loopAborted = false;
 
             void AddTrace(Queue<string> trace, string entry)
             {
@@ -1472,6 +1495,27 @@ namespace FormsSystemStatsWidget.Core
                         break;
                     }
 
+                    StreamingLoopDecision? loopDecision = streamingLoopDetector.ObserveChunk(chunk);
+                    if (loopDecision is not null)
+                    {
+                        if (loopDecision.ShouldAbort)
+                        {
+                            loopAborted = true;
+                            LlamaAgentLoopDiagnostics.LogLifecycle(
+                                streamRequestId, "StreamLoopAborted",
+                                $"repeats={loopDecision.RepeatCount},kind={loopDecision.LoopKind}");
+                            Logger.Log($"[OpenAI SSE][{streamRequestId}] Loop guard aborted streaming generation (repeats={loopDecision.RepeatCount}, kind={loopDecision.LoopKind}).");
+                            break;
+                        }
+                        else if (loopDecision.InterjectionMessage is not null)
+                        {
+                            LlamaAgentLoopDiagnostics.LogLifecycle(
+                                streamRequestId, "StreamLoopInterjectionDetected",
+                                $"repeats={loopDecision.RepeatCount},kind={loopDecision.LoopKind}");
+                        }
+                        continue;
+                    }
+
                     RecordToolDeltas(chunk, llamaToolDeltas);
                     LogToolDeltaDispositionForChunk("LLAMA_RECEIVED_TOOL_DELTA", streamRequestId, chunk);
                     string? upstreamResponseId = chunk["id"]?.ToString();
@@ -1652,17 +1696,19 @@ namespace FormsSystemStatsWidget.Core
                 Logger.Log($"[OpenAI SSE] Transformation failed ({ex.GetType().Name}).");
             }
 
-            OpenAiStreamCompletionStatus status = clientDisconnected
-                ? OpenAiStreamCompletionStatus.ClientDisconnected
-                : transformationError
-                    ? OpenAiStreamCompletionStatus.TransformationError
-                    : upstreamError || !doneReceived
-                        ? OpenAiStreamCompletionStatus.UpstreamError
-                        : string.Equals(finalFinishReason, "tool_calls", StringComparison.Ordinal)
-                            ? OpenAiStreamCompletionStatus.CompletedByToolCall
-                            : finalFinishReason != null
-                                ? OpenAiStreamCompletionStatus.CompletedByLlm
-                                : OpenAiStreamCompletionStatus.CompletedByDone;
+            OpenAiStreamCompletionStatus status = loopAborted
+                ? OpenAiStreamCompletionStatus.LoopAborted
+                : clientDisconnected
+                    ? OpenAiStreamCompletionStatus.ClientDisconnected
+                    : transformationError
+                        ? OpenAiStreamCompletionStatus.TransformationError
+                        : upstreamError || !doneReceived
+                            ? OpenAiStreamCompletionStatus.UpstreamError
+                            : string.Equals(finalFinishReason, "tool_calls", StringComparison.Ordinal)
+                                ? OpenAiStreamCompletionStatus.CompletedByToolCall
+                                : finalFinishReason != null
+                                    ? OpenAiStreamCompletionStatus.CompletedByLlm
+                                    : OpenAiStreamCompletionStatus.CompletedByDone;
 
             if (!firstTokenLogged)
             {

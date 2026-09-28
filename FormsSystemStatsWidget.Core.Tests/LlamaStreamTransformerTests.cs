@@ -157,12 +157,9 @@ public sealed class LlamaStreamTransformerTests
     {
         var service = new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 3, MaxInterjections = 2 });
         JsonArray firstGeneration = CreateRepeatedToolCalls("lookup", "{\"query\":\"same\"}");
-        JsonArray secondGeneration = CreateRepeatedToolCalls("lookup", "{\"query\":\"same\"}");
-        secondGeneration.Add(CreateToolMessage("tool-4", "lookup", "{\"query\":\"same\"}"));
         JsonArray independentConversation = CreateRepeatedToolCalls("lookup", "{\"query\":\"same\"}");
 
         Assert.AreEqual(1, service.ApplyToConversation(firstGeneration).InterjectionCount);
-        Assert.AreEqual(2, service.ApplyToConversation(secondGeneration).InterjectionCount);
         Assert.AreEqual(1, service.ApplyToConversation(independentConversation).InterjectionCount);
     }
 
@@ -179,6 +176,90 @@ public sealed class LlamaStreamTransformerTests
         };
 
         Assert.IsFalse(new LoopDetectionService(new LoopDetectionConfig { TriggerAfter = 3 }).DetectLoop(messages).IsLoopDetected);
+    }
+
+    [TestMethod]
+    public void LoopDetection_ExactRepeatedToolCallsTriggerInterjection()
+    {
+        var config = new LoopDetectionConfig { TriggerAfter = 3, DetectionWindow = 5, SimilarityThreshold = 0.95 };
+        JsonArray messages = CreateRepeatedToolCalls("build", "{}");
+
+        LoopDetectionResult result = new LoopDetectionService(config).ApplyToConversation(messages);
+
+        Assert.IsTrue(result.IsLoopDetected);
+        Assert.AreEqual(3, result.RepeatCount);
+        Assert.IsNotNull(result.InterjectionMessage);
+        Assert.AreEqual(1, result.InterjectionCount);
+    }
+
+    [TestMethod]
+    public void LoopDetection_ToolCallInterjectionAlreadyPresentTriggersAbort()
+    {
+        var config = new LoopDetectionConfig
+        {
+            TriggerAfter = 3,
+            DetectionWindow = 5,
+            AbortEnabled = true,
+            AbortAfterInterjections = 1
+        };
+        JsonArray messages = CreateRepeatedToolCalls("build", "{}");
+        messages.Add(new JsonObject { ["role"] = "user", ["name"] = "loop_detection_interjection", ["content"] = "hint" });
+
+        LoopDetectionResult result = new LoopDetectionService(config).DetectLoop(messages);
+
+        Assert.IsTrue(result.IsLoopDetected);
+        Assert.IsTrue(result.ShouldAbort);
+        Assert.AreEqual(1, result.InterjectionCount);
+    }
+
+    [TestMethod]
+    public void LoopDetection_InterjectionsBeforeLatestUserTurnAreNotCounted()
+    {
+        var config = new LoopDetectionConfig
+        {
+            TriggerAfter = 3,
+            DetectionWindow = 5,
+            AbortEnabled = true,
+            AbortAfterInterjections = 1
+        };
+        JsonArray messages = new JsonArray
+        {
+            CreateToolMessage("tool-1", "build", "{}"),
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "tool-1", ["content"] = "r1" },
+            CreateToolMessage("tool-2", "build", "{}"),
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "tool-2", ["content"] = "r2" },
+            CreateToolMessage("tool-3", "build", "{}"),
+            new JsonObject { ["role"] = "user", ["name"] = "loop_detection_interjection", ["content"] = "old hint" },
+            new JsonObject { ["role"] = "user", ["content"] = "new task" },
+            CreateToolMessage("tool-4", "build", "{}"),
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "tool-4", ["content"] = "r4" },
+            CreateToolMessage("tool-5", "build", "{}"),
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "tool-5", ["content"] = "r5" },
+            CreateToolMessage("tool-6", "build", "{}")
+        };
+
+        LoopDetectionResult result = new LoopDetectionService(config).DetectLoop(messages);
+
+        Assert.AreEqual(0, result.InterjectionCount);
+        Assert.IsFalse(result.ShouldAbort);
+    }
+
+    [TestMethod]
+    public void LoopDetection_TextOutputLoopTriggersInterjection()
+    {
+        var config = new LoopDetectionConfig { TriggerAfter = 3, DetectionWindow = 5, SimilarityThreshold = 0.95 };
+        JsonArray messages = new JsonArray
+        {
+            new JsonObject { ["role"] = "assistant", ["content"] = "The build is running, let me check again" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "The build is running, let me check again" },
+            new JsonObject { ["role"] = "assistant", ["content"] = "The build is running, let me check again" }
+        };
+
+        LoopDetectionResult result = new LoopDetectionService(config).ApplyToConversation(messages);
+
+        Assert.IsTrue(result.IsLoopDetected);
+        Assert.IsNotNull(result.InterjectionMessage);
+        Assert.AreEqual(1, result.InterjectionCount);
     }
 
     private static JsonArray CreateRepeatedToolCalls(string toolName, string arguments)
@@ -205,6 +286,246 @@ public sealed class LlamaStreamTransformerTests
             }
         }
     };
+
+    [TestMethod]
+    public void StreamingLoopDetector_RepeatedContentTriggersAbort()
+    {
+        var config = new LoopDetectionConfig
+        {
+            Enabled = true,
+            TriggerAfter = 3,
+            DetectionWindow = 5,
+            AbortEnabled = true,
+            AbortAfterInterjections = 1,
+            InterjectionEnabled = true,
+            MaxInterjections = 2
+        };
+        var detector = new StreamingLoopDetector(config);
+        JsonObject chunk = new()
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["delta"] = new JsonObject { ["content"] = "The build is running, let me check again" }
+                }
+            }
+        };
+
+        Assert.IsNull(detector.ObserveChunk(chunk));
+        Assert.IsNull(detector.ObserveChunk(chunk));
+        StreamingLoopDecision? decision = detector.ObserveChunk(chunk);
+
+        Assert.IsNotNull(decision);
+        Assert.AreEqual(3, decision!.RepeatCount);
+        Assert.AreEqual(StreamingLoopKind.TextOutput, decision.LoopKind);
+        Assert.IsTrue(decision.InterjectionMessage is not null);
+        Assert.IsFalse(decision.ShouldAbort);
+
+        decision = detector.ObserveChunk(chunk);
+        Assert.IsNotNull(decision);
+        Assert.IsTrue(decision!.ShouldAbort);
+    }
+
+    [TestMethod]
+    public void StreamingLoopDetector_RepeatedToolCallArgumentFragmentsDoNotTrigger()
+    {
+        var config = new LoopDetectionConfig
+        {
+            Enabled = true,
+            TriggerAfter = 3,
+            DetectionWindow = 5,
+            AbortEnabled = true,
+            AbortAfterInterjections = 1,
+            InterjectionEnabled = true,
+            MaxInterjections = 2
+        };
+        var detector = new StreamingLoopDetector(config);
+        JsonObject chunk = new()
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["delta"] = new JsonObject
+                    {
+                        ["tool_calls"] = new JsonArray
+                        {
+                            new JsonObject
+                            {
+                                ["index"] = 0,
+                                ["function"] = new JsonObject { ["name"] = "grep", ["arguments"] = "{\"pattern\":\"" }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        for (int index = 0; index < 5; index++)
+        {
+            Assert.IsNull(detector.ObserveChunk(chunk));
+        }
+    }
+
+    [TestMethod]
+    public async Task TransformOpenAiStreamAsync_RepeatedToolArgumentFragmentsArePreserved()
+    {
+        const string initialArguments = "{\"pattern\":\"";
+        var initialChunk = new JsonObject
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["index"] = 0,
+                    ["delta"] = new JsonObject
+                    {
+                        ["tool_calls"] = new JsonArray
+                        {
+                            new JsonObject
+                            {
+                                ["index"] = 0,
+                                ["id"] = "call-1",
+                                ["type"] = "function",
+                                ["function"] = new JsonObject { ["name"] = "grep", ["arguments"] = initialArguments }
+                            }
+                        }
+                    },
+                    ["finish_reason"] = null
+                }
+            }
+        };
+        var repeatedArgumentChunk = new JsonObject
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["index"] = 0,
+                    ["delta"] = new JsonObject
+                    {
+                        ["tool_calls"] = new JsonArray
+                        {
+                            new JsonObject
+                            {
+                                ["index"] = 0,
+                                ["function"] = new JsonObject { ["arguments"] = " " }
+                            }
+                        }
+                    },
+                    ["finish_reason"] = null
+                }
+            }
+        };
+        var finalArgumentChunk = new JsonObject
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["index"] = 0,
+                    ["delta"] = new JsonObject
+                    {
+                        ["tool_calls"] = new JsonArray
+                        {
+                            new JsonObject
+                            {
+                                ["index"] = 0,
+                                ["function"] = new JsonObject { ["arguments"] = string.Concat('"', '}') }
+                            }
+                        }
+                    },
+                    ["finish_reason"] = null
+                }
+            }
+        };
+        string[] frames = new[] { initialChunk.ToJsonString() }
+            .Concat(Enumerable.Repeat(repeatedArgumentChunk.ToJsonString(), 7))
+            .Append(finalArgumentChunk.ToJsonString())
+            .Append("{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}")
+            .Append("[DONE]")
+            .ToArray();
+        var config = new LoopDetectionConfig
+        {
+            Enabled = true,
+            TriggerAfter = 3,
+            DetectionWindow = 5,
+            AbortEnabled = true,
+            AbortAfterInterjections = 1
+        };
+
+        (string output, LlamaStreamTransformer.OpenAiStreamTransformResult result) =
+            await TransformAsync(CreateSse(frames), loopDetectionConfig: config);
+        JsonObject[] toolChunks = ParseChunks(output)
+            .Where(chunk => chunk["choices"]?[0]?["delta"]?["tool_calls"] is JsonArray)
+            .ToArray();
+        string arguments = string.Concat(toolChunks.Select(chunk =>
+            chunk["choices"]?[0]?["delta"]?["tool_calls"]?[0]?["function"]?["arguments"]?.ToString()));
+
+        Assert.AreEqual(9, toolChunks.Length);
+        JsonNode? parsedArguments = JsonNode.Parse(arguments);
+        Assert.AreEqual(new string(' ', 7), parsedArguments?["pattern"]?.ToString());
+        Assert.IsTrue(result.DoneReceived);
+        Assert.AreEqual("tool_calls", result.FinalFinishReason);
+        Assert.AreEqual(LlamaStreamTransformer.OpenAiStreamCompletionStatus.CompletedByToolCall, result.Status);
+        StringAssert.Contains(output, "[DONE]");
+    }
+
+    [TestMethod]
+    public void StreamingLoopDetector_DifferentContentDoesNotTrigger()
+    {
+        var config = new LoopDetectionConfig
+        {
+            Enabled = true,
+            TriggerAfter = 3,
+            DetectionWindow = 5,
+            AbortEnabled = true
+        };
+        var detector = new StreamingLoopDetector(config);
+        JsonObject chunk1 = new()
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject { ["delta"] = new JsonObject { ["content"] = "Reading the file" } }
+            }
+        };
+        JsonObject chunk2 = new()
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject { ["delta"] = new JsonObject { ["content"] = "Editing the file" } }
+            }
+        };
+
+        Assert.IsNull(detector.ObserveChunk(chunk1));
+        Assert.IsNull(detector.ObserveChunk(chunk2));
+        Assert.IsNull(detector.ObserveChunk(chunk1));
+        Assert.IsNull(detector.ObserveChunk(chunk2));
+    }
+
+    [TestMethod]
+    public void StreamingLoopDetector_DisabledConfigDoesNotTrigger()
+    {
+        var config = new LoopDetectionConfig
+        {
+            Enabled = false,
+            TriggerAfter = 3,
+            AbortEnabled = true
+        };
+        var detector = new StreamingLoopDetector(config);
+        JsonObject chunk = new()
+        {
+            ["choices"] = new JsonArray
+            {
+                new JsonObject { ["delta"] = new JsonObject { ["content"] = "repeat" } }
+            }
+        };
+
+        Assert.IsNull(detector.ObserveChunk(chunk));
+        Assert.IsNull(detector.ObserveChunk(chunk));
+        Assert.IsNull(detector.ObserveChunk(chunk));
+    }
 
     private static JsonObject CreateParallelToolMessage(string firstName, string secondName) => new()
     {
@@ -1298,6 +1619,143 @@ public sealed class LlamaStreamTransformerTests
     }
 
     [TestMethod]
+    public void SanitizeIncomingRequest_UsesLlamaSamplingNamesAndOmitsUnsetOverrides()
+    {
+        var request = new JsonObject
+        {
+            ["repetition_penalty"] = 0,
+            ["top_p"] = 0,
+            ["min_p"] = 0,
+            ["top_k"] = 0,
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "user", ["content"] = "Continue." }
+            }
+        };
+
+        JsonObject sanitized = JsonNode.Parse(LlamaStreamTransformer.SanitizeIncomingRequest(
+            request.ToJsonString(), "llama", temperature: 0.6, repetitionPenalty: 0,
+            presencePenalty: 0, userDefinedTopP: 0, userDefinedMinP: 0, userDefinedTopK: 0))!.AsObject();
+
+        Assert.AreEqual(0.6, sanitized["temperature"]!.GetValue<double>(), 0.0001);
+        Assert.AreEqual(0, sanitized["presence_penalty"]!.GetValue<double>());
+        Assert.IsFalse(sanitized.ContainsKey("repetition_penalty"));
+        Assert.IsFalse(sanitized.ContainsKey("repeat_penalty"));
+        Assert.IsFalse(sanitized.ContainsKey("top_p"));
+        Assert.IsFalse(sanitized.ContainsKey("min_p"));
+        Assert.IsFalse(sanitized.ContainsKey("top_k"));
+    }
+
+    [TestMethod]
+    public void ChatTemplateProfile_MapsUnsupportedReasoningEffortToTemplateKeyword()
+    {
+        var props = new JsonObject
+        {
+            ["chat_template"] = "{% set enable_thinking = enable_thinking if enable_thinking is defined else True %}",
+            ["chat_template_caps"] = new JsonObject
+            {
+                ["supports_reasoning_effort"] = false,
+                ["supports_parallel_tool_calls"] = false,
+                ["supports_tools"] = true,
+                ["supports_tool_calls"] = true
+            }
+        };
+        LlamaChatTemplateProfile profile = LlamaChatTemplateProfile.FromProps(props)!;
+        var request = new JsonObject
+        {
+            ["reasoning_effort"] = "xhigh",
+            ["parallel_tool_calls"] = true,
+            ["tools"] = new JsonArray { new JsonObject { ["type"] = "function" } }
+        };
+
+        bool changed = profile.ApplyCompatibility(request);
+
+        Assert.IsTrue(changed);
+        Assert.IsFalse(request.ContainsKey("reasoning_effort"));
+        Assert.IsTrue(request["chat_template_kwargs"]!["enable_thinking"]!.GetValue<bool>());
+        Assert.IsFalse(request["parallel_tool_calls"]!.GetValue<bool>());
+        Assert.AreEqual(1, request["tools"]!.AsArray().Count);
+        Assert.AreEqual(false, profile.SupportsReasoningEffort);
+        Assert.AreEqual(props["chat_template"]!.ToString(), profile.Template);
+    }
+
+    [TestMethod]
+    public void ChatTemplateProfile_UsesLegacyPromptWhenNativeToolsAreUnsupported()
+    {
+        LlamaChatTemplateProfile profile = LlamaChatTemplateProfile.FromProps(new JsonObject
+        {
+            ["chat_template"] = "basic-template",
+            ["chat_template_caps"] = new JsonObject
+            {
+                ["supports_tools"] = false,
+                ["supports_tool_calls"] = false
+            }
+        })!;
+        var request = new JsonObject
+        {
+            ["tool_choice"] = "auto",
+            ["parallel_tool_calls"] = true,
+            ["tools"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["type"] = "function",
+                    ["function"] = new JsonObject
+                    {
+                        ["name"] = "grep",
+                        ["description"] = "Search text",
+                        ["parameters"] = new JsonObject { ["type"] = "object" }
+                    }
+                }
+            },
+            ["messages"] = new JsonArray
+            {
+                new JsonObject { ["role"] = "system", ["content"] = "Work carefully." },
+                new JsonObject { ["role"] = "user", ["content"] = "Find a symbol." }
+            }
+        };
+
+        bool changed = profile.ApplyCompatibility(request);
+        string systemPrompt = request["messages"]![0]!["content"]!.ToString();
+
+        Assert.IsTrue(changed);
+        Assert.IsFalse(request.ContainsKey("tools"));
+        Assert.IsFalse(request.ContainsKey("tool_choice"));
+        Assert.IsFalse(request.ContainsKey("parallel_tool_calls"));
+        StringAssert.Contains(systemPrompt, "[Bridge legacy tool definitions]");
+        StringAssert.Contains(systemPrompt, "\"name\":\"grep\"");
+        StringAssert.Contains(systemPrompt, "emit one JSON object");
+    }
+
+    [TestMethod]
+    public void ChatTemplateProfile_RetryCandidatesRemoveOptionalControlsIncrementally()
+    {
+        var request = new JsonObject
+        {
+            ["reasoning_effort"] = "xhigh",
+            ["reasoning_budget"] = 1024,
+            ["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = true },
+            ["tool_choice"] = "auto",
+            ["parallel_tool_calls"] = true,
+            ["tools"] = new JsonArray { new JsonObject { ["type"] = "function" } },
+            ["messages"] = new JsonArray { new JsonObject { ["role"] = "user", ["content"] = "Hi" } }
+        };
+
+        IReadOnlyList<string> candidates = LlamaChatTemplateProfile.BuildCompatibilityRetryCandidates(request.ToJsonString());
+        JsonObject first = JsonNode.Parse(candidates[0])!.AsObject();
+        JsonObject second = JsonNode.Parse(candidates[1])!.AsObject();
+        JsonObject third = JsonNode.Parse(candidates[2])!.AsObject();
+
+        Assert.AreEqual(3, candidates.Count);
+        Assert.IsFalse(first.ContainsKey("reasoning_effort"));
+        Assert.IsTrue(first.ContainsKey("chat_template_kwargs"));
+        Assert.IsFalse(second.ContainsKey("chat_template_kwargs"));
+        Assert.IsFalse(third.ContainsKey("tool_choice"));
+        Assert.IsFalse(third.ContainsKey("parallel_tool_calls"));
+        Assert.AreEqual(1, third["tools"]!.AsArray().Count);
+    }
+
+    [TestMethod]
     public void SanitizeIncomingRequest_NativeToolsDoNotReceiveLegacyJsonOnlyInstructions()
     {
         var request = new JsonObject
@@ -1378,13 +1836,39 @@ public sealed class LlamaStreamTransformerTests
             "[DONE]");
     }
 
-    private static async Task<(string Output, LlamaStreamTransformer.OpenAiStreamTransformResult Result)> TransformAsync(string stream, bool getGenerationStatsText = false)
+    private static LoopDetectionConfig? _savedLoopDetectionConfig;
+
+    private static void SaveAndDisableLoopDetection()
     {
-        using var input = new MemoryStream(Encoding.UTF8.GetBytes(stream));
-        using var output = new MemoryStream();
-        LlamaStreamTransformer.OpenAiStreamTransformResult result =
-            await LlamaStreamTransformer.TransformOpenAiStreamWithDiagnosticsAsync(input, output, ModelName, getGenerationStatsText);
-        return (Encoding.UTF8.GetString(output.ToArray()), result);
+        _savedLoopDetectionConfig = LlamaOllamaBridge.LoopDetectionConfig;
+        LlamaOllamaBridge.LoopDetectionConfig = new LoopDetectionConfig { Enabled = false };
+    }
+
+    private static void RestoreLoopDetection()
+    {
+        LlamaOllamaBridge.LoopDetectionConfig = _savedLoopDetectionConfig ?? new LoopDetectionConfig { Enabled = false };
+    }
+
+    private static async Task<(string Output, LlamaStreamTransformer.OpenAiStreamTransformResult Result)> TransformAsync(string stream, bool getGenerationStatsText = false, LoopDetectionConfig? loopDetectionConfig = null)
+    {
+        SaveAndDisableLoopDetection();
+        try
+        {
+            if (loopDetectionConfig is not null)
+            {
+                LlamaOllamaBridge.LoopDetectionConfig = loopDetectionConfig;
+            }
+
+            using var input = new MemoryStream(Encoding.UTF8.GetBytes(stream));
+            using var output = new MemoryStream();
+            LlamaStreamTransformer.OpenAiStreamTransformResult result =
+                await LlamaStreamTransformer.TransformOpenAiStreamWithDiagnosticsAsync(input, output, ModelName, getGenerationStatsText);
+            return (Encoding.UTF8.GetString(output.ToArray()), result);
+        }
+        finally
+        {
+            RestoreLoopDetection();
+        }
     }
 
     private static string CreateSse(params string[] dataFrames) =>
