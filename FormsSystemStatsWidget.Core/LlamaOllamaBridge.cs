@@ -239,10 +239,21 @@ namespace FormsSystemStatsWidget.Core
                         _modelFamily = ExtractModelFamily(_detectedModelName);
                         _supportsVision = DetectVisionSupportByModelName(_detectedModelName);
 
-                        // n_ctx aus meta als Fallback für /props
+                        // n_ctx aus meta als Fallback für /props (llama.cpp /v1/models liefert n_ctx nicht im meta, sondern n_ctx_train)
+                        // Priorität: Zuerst /props nehmen, da das die tatsächliche Konfiguration des laufenden Servers ist
                         if (_modelNCtx > 0)
                         {
                             _detectedNumCtx = _modelNCtx;
+                        }
+                        // Zusätzlicher Fallback: n_ctx_train aus /v1/models meta nutzen
+                        if (_modelNCtxTrain > 0 && _detectedNumCtx == 4096)
+                        {
+                            _detectedNumCtx = _modelNCtxTrain;
+                        },
+                        // Wenn immer noch der Standardwert verwendet wird, versuche /props zu lesen
+                        if (_detectedNumCtx == 4096)
+                        {
+                            Logger.Log("[LlamaBridge] Using /props for context size detection...");
                         }
 
                         Logger.Log($"[LlamaBridge] Model detected: {_detectedModelName} (raw ID: {modelId})");
@@ -279,11 +290,18 @@ namespace FormsSystemStatsWidget.Core
                             _supportsVision = supportsVisionFromProps.Value;
                         }
 
-                        // Path-tolerant read of n_ctx
+                        // Path-tolerant read of n_ctx - prioritisieren /props, da /v1/models meta n_ctx nicht enthält
                         var nCtxNode = propsJson?["default_generation_settings"]?["n_ctx"] ?? propsJson?["n_ctx"];
                         if (nCtxNode != null && int.TryParse(nCtxNode.ToString(), out int parsedCtx))
                         {
                             _detectedNumCtx = parsedCtx;
+                            Logger.Log($"[LlamaBridge] Context size from /props: {_detectedNumCtx}");
+                        }
+                        // Fallback: n_ctx_train aus /v1/models meta, falls /props fehlschlägt
+                        if (_detectedNumCtx == 4096 && _modelNCtxTrain > 0)
+                        {
+                            _detectedNumCtx = _modelNCtxTrain;
+                            Logger.Log($"[LlamaBridge] Context size from /v1/models n_ctx_train: {_detectedNumCtx}");
                         }
 
                         // Path-tolerant read of n_ctx_train (nur wenn /v1/models meta es nicht geliefert hat)
@@ -1330,7 +1348,9 @@ namespace FormsSystemStatsWidget.Core
                     ["family"] = _modelFamily,
                     ["families"] = BuildJsonArray(new[] { _modelFamily }),
                     ["parameter_size"] = _parameterSize,
-                    ["quantization_level"] = _quantizationLevel
+                    ["quantization_level"] = _quantizationLevel,
+                    ["n_ctx"] = _detectedNumCtx,
+                    ["context_length"] = _detectedNumCtx
                 }
             });
 
