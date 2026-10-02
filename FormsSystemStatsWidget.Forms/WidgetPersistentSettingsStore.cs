@@ -102,6 +102,33 @@ namespace FormsSystemStatsWidget.Forms
         public double OnnxRepeatPenalty { get; set; } = 1.1;
         public string OnnxExecutionProvider { get; set; } = "Dml";
         public bool OnnxHideConsole { get; set; } = true;
+        public double OnnxMinP { get; set; } = 0.0;
+        public double OnnxTypicalP { get; set; } = 1.0;
+        public double OnnxPresencePenalty { get; set; } = 0.0;
+        public double OnnxFrequencyPenalty { get; set; } = 0.0;
+        public int OnnxRepeatLastN { get; set; } = 0;
+        public string OnnxSeed { get; set; } = string.Empty;
+        public string OnnxStopSequences { get; set; } = string.Empty;
+        public bool OnnxEnableThinking { get; set; } = false;
+        public string OnnxSystemPrompt { get; set; } = string.Empty;
+        public int OnnxStage0Device { get; set; } = 0;
+        public int OnnxStage1Device { get; set; } = 1;
+        public int OnnxIntraOpThreads { get; set; } = 0;
+        public int OnnxInterOpThreads { get; set; } = 0;
+        public string OnnxExecutionMode { get; set; } = "sequential";
+        public string OnnxGraphOptimization { get; set; } = "all";
+        public bool OnnxEnableMemPattern { get; set; } = true;
+        public bool OnnxEnableCpuMemArena { get; set; } = true;
+        public bool OnnxEnableProfiling { get; set; } = false;
+        public bool OnnxDisablePrepacking { get; set; } = false;
+        public long OnnxGpuMemLimitMb { get; set; } = 0;
+        public string OnnxArenaExtendStrategy { get; set; } = "kNextPowerOfTwo";
+        public string OnnxCudnnConvAlgoSearch { get; set; } = "EXHAUSTIVE";
+        public bool OnnxCopyInDefaultStream { get; set; } = true;
+        public bool OnnxUseCudaGraphs { get; set; } = false;
+        public bool OnnxUseTf32 { get; set; } = true;
+        public bool OnnxAllowCpuFallback { get; set; } = false;
+        public int OnnxMaxConcurrentGenerations { get; set; } = 1;
 
         // CMD/Terminal window persistence (for llama-server .BAT launched windows)
         public Point CmdWindowPosition { get; set; } = new(0, 0);

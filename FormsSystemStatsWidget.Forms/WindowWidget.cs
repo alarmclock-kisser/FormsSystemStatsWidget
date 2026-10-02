@@ -254,6 +254,7 @@ namespace FormsSystemStatsWidget.Forms
 
             this.EnsureModelLoadBatsDirectory();
 
+            this.BuildOnnxParameterSubmenus();
             this.ApplyPersistentSettings();
 
             // Python-Env für ONNX-Genai-Server initial checken (einmalig am Startup)
@@ -749,6 +750,8 @@ namespace FormsSystemStatsWidget.Forms
             }
 
             this.toolStripMenuItem_onnxHideCmd.Checked = this._persistentSettings.OnnxHideConsole;
+
+            this.ApplyOnnxSubmenuSettings();
 
             this.toolStripTextBox_opacity.Text = this._persistentSettings.WindowOpacity.ToString() + "%";
             this.toolStripTextBox_opacity_KeyDown(this.toolStripTextBox_opacity, new KeyEventArgs(Keys.Enter));

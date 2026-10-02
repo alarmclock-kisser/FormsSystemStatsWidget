@@ -32,6 +32,13 @@ from werkzeug.serving import BaseWSGIServer, make_server
 from .engine import InferenceEngine
 from .errors import ContextExceededError, OnnxEngineError
 from .generation import GenerationRequest, SamplingConfig, StopConfig
+from .runtime import CudaRuntimeConfig, SessionRuntimeConfig
+from .runtime.options import (
+    normalize_cuda_options,
+    normalize_max_concurrent,
+    normalize_providers,
+    normalize_session_options,
+)
 
 logger = logging.getLogger("onnx_engine.server")
 
@@ -42,6 +49,40 @@ _engine_lock = threading.Lock()
 _shutdown_event = threading.Event()
 _http_server: BaseWSGIServer | None = None
 _instance_id = ""
+
+# Concurrency gate: at most N generations run at once, further requests
+# wait (queue) instead of trashing each other's decode throughput.
+# Rebuilt at /load; only ever replaced while the engine lock is held.
+_generation_semaphore = threading.Semaphore(1)
+_generation_waiters = 0
+_generation_waiters_lock = threading.Lock()
+_max_concurrent_generations = 1
+
+
+def _set_max_concurrent(value: int) -> None:
+    global _generation_semaphore, _max_concurrent_generations
+    _max_concurrent_generations = max(1, int(value))
+    _generation_semaphore = threading.Semaphore(_max_concurrent_generations)
+
+
+def _queue_depth() -> int:
+    with _generation_waiters_lock:
+        return _generation_waiters
+
+
+def _acquire_generation_slot() -> bool:
+    """Block until a generation slot frees up; False only on shutdown."""
+    global _generation_waiters
+    with _generation_waiters_lock:
+        _generation_waiters += 1
+    try:
+        while not _shutdown_event.is_set():
+            if _generation_semaphore.acquire(timeout=0.5):
+                return True
+        return False
+    finally:
+        with _generation_waiters_lock:
+            _generation_waiters -= 1
 
 
 class EngineLifecycle:
@@ -198,6 +239,28 @@ def _error_response(code: str, message: str, status: int = 500) -> Response:
     return jsonify({"error": {"code": code, "message": message}}), status
 
 
+def _parse_device_id(value: Any, field: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a non-negative integer, got {value!r}.") from exc
+    if parsed < 0:
+        raise ValueError(f"{field} must be a non-negative integer, got {value!r}.")
+    return parsed
+
+
+def _parse_stop_sequences(value: Any) -> tuple[str, ...]:
+    """OpenAI-style stop (string | string[]) into StopConfig stop_strings."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,) if value else ()
+    if isinstance(value, (list, tuple)):
+        cleaned = tuple(v for v in (str(v) for v in value) if v)
+        return cleaned
+    raise ValueError("stop must be a string or list of strings")
+
+
 def _parse_generation_request(data: dict[str, Any]) -> GenerationRequest:
     """
     Parse the C# IPC payload into a GenerationRequest.
@@ -243,10 +306,13 @@ def _parse_generation_request(data: dict[str, Any]) -> GenerationRequest:
         frequency_penalty=float(data.get("frequency_penalty", 0.0)),
         presence_penalty=float(data.get("presence_penalty", 0.0)),
         seed=int(data["seed"]) if data.get("seed") is not None else None,
+        repeat_last_n=int(data.get("repeat_last_n", 0) or 0),
     )
 
+    stop_strings = _parse_stop_sequences(data.get("stop"))
     stopping = StopConfig(
         max_new_tokens=int(data.get("max_tokens", 256)),
+        stop_strings=stop_strings,
     )
 
     return GenerationRequest(
@@ -339,6 +405,19 @@ def load() -> Response:
         _lifecycle.end_operation("Loading", loaded=_engine is not None)
         return _error_response("INVALID_CONTEXT_LENGTH", "context_length must be a non-negative integer", 400)
 
+    # Tunables: validated pure (fail fast with 400), defaults = previous behaviour.
+    try:
+        session_opts = normalize_session_options(data.get("session_options"))
+        cuda_opts = normalize_cuda_options(data.get("cuda_options"))
+        allow_cpu_fallback = bool(data.get("allow_cpu_fallback", False))
+        providers = normalize_providers(data.get("provider", "cuda"), allow_cpu_fallback)
+        max_concurrent = normalize_max_concurrent(data.get("max_concurrent_generations"))
+        stage0_device = _parse_device_id(data.get("stage0_device", 0), "stage0_device")
+        stage1_device = _parse_device_id(data.get("stage1_device", 1), "stage1_device")
+    except ValueError as ex:
+        _lifecycle.end_operation("Loading", loaded=_engine is not None)
+        return _error_response("INVALID_OPTIONS", str(ex), 400)
+
     try:
         with _engine_lock:
             if _engine is not None:
@@ -350,16 +429,29 @@ def load() -> Response:
                     model_path,
                     model_layout=model_layout,
                     context_length=context_length,
+                    cuda=CudaRuntimeConfig(
+                        device_id=stage0_device,
+                        stage1_device_id=stage1_device,
+                        **cuda_opts,
+                    ),
+                    session=SessionRuntimeConfig(**session_opts),
+                    allow_cpu_fallback=allow_cpu_fallback,
+                    providers=providers,
                 )
                 candidate.load()
                 _engine = candidate
                 candidate = None
-                logger.info("Model loaded: %s (context_length=%d)", model_path, context_length)
+                _set_max_concurrent(max_concurrent)
+                logger.info(
+                    "Model loaded: %s (context_length=%d, providers=%s, max_concurrent=%d)",
+                    model_path, context_length, providers, max_concurrent,
+                )
                 return jsonify({
                     "status": "loaded",
                     "model_path": model_path,
                     "context_length": context_length,
                     "providers": list(_engine.active_providers()),
+                    "max_concurrent_generations": max_concurrent,
                 }), 200
             except OnnxEngineError as ex:
                 logger.error("Model load failed: %s", ex)
@@ -417,6 +509,11 @@ def generate() -> Response:
         _lifecycle.end_operation("Generating", loaded=_engine is not None)
         return _error_response("ENGINE_NOT_READY", "Model was unloaded before generation began", 503)
 
+    # Queue: wait for a free slot instead of running unthrottled in parallel.
+    if not _acquire_generation_slot():
+        _lifecycle.end_operation("Generating", loaded=_engine is not None)
+        return _error_response("SHUTTING_DOWN", "Engine process is shutting down", 503)
+
     request_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     model_id = "onnx-engine"
 
@@ -466,9 +563,10 @@ def generate() -> Response:
             yield _sse_chunk(request_id, model_id, "", "error", 0, 0)
             yield "data: [DONE]\n\n"
         finally:
+            _generation_semaphore.release()
             _lifecycle.end_operation("Generating", loaded=_engine is not None)
 
-    return Response(
+    response = Response(
         stream_with_context(stream()),
         mimetype="text/event-stream",
         headers={
@@ -477,6 +575,7 @@ def generate() -> Response:
             "X-Accel-Buffering": "no",
         },
     )
+    return response
 
 
 @app.route("/stats", methods=["GET"])
@@ -487,7 +586,12 @@ def generation_stats() -> Response:
     except OnnxEngineError as ex:
         return _error_response("ENGINE_NOT_READY", str(ex), 503)
     try:
-        return jsonify(engine.get_generation_stats()), 200
+        stats = engine.get_generation_stats()
+        stats["server"] = {
+            "max_concurrent_generations": _max_concurrent_generations,
+            "queue_depth": _queue_depth(),
+        }
+        return jsonify(stats), 200
     except Exception as ex:
         logger.exception("Error reading generation stats")
         return _error_response("STATS_FAILED", str(ex), 500)

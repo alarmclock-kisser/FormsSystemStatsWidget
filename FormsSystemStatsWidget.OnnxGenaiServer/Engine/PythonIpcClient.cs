@@ -21,13 +21,44 @@ public sealed class PythonIpcClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Lädt das Modell in der Python-Engine.
+    /// Lädt das Modell in der Python-Engine (inkl. Ausführungs-Tunables).
     /// </summary>
-    public async Task<bool> LoadModelAsync(string modelPath, string modelLayout = "Auto", int contextLength = 0, CancellationToken ct = default)
+    public async Task<bool> LoadModelAsync(string modelPath, string modelLayout = "Auto", int contextLength = 0, OnnxExecutionOptions? execution = null, CancellationToken ct = default)
     {
         try
         {
-            var payload = new { model_path = modelPath, model_layout = modelLayout.ToLowerInvariant(), context_length = Math.Max(0, contextLength) };
+            execution ??= new OnnxExecutionOptions();
+            var payload = new
+            {
+                model_path = modelPath,
+                model_layout = modelLayout.ToLowerInvariant(),
+                context_length = Math.Max(0, contextLength),
+                provider = execution.Provider,
+                allow_cpu_fallback = execution.AllowCpuFallback,
+                stage0_device = execution.Stage0Device,
+                stage1_device = execution.Stage1Device,
+                max_concurrent_generations = Math.Max(1, execution.MaxConcurrentGenerations),
+                session_options = new
+                {
+                    graph_optimization_level = execution.GraphOptimization,
+                    execution_mode = execution.ExecutionMode,
+                    intra_op_num_threads = execution.IntraOpThreads,
+                    inter_op_num_threads = execution.InterOpThreads,
+                    enable_mem_pattern = execution.EnableMemPattern,
+                    enable_cpu_mem_arena = execution.EnableCpuMemArena,
+                    enable_profiling = execution.EnableProfiling,
+                    disable_prepacking = execution.DisablePrepacking,
+                },
+                cuda_options = new
+                {
+                    arena_extend_strategy = execution.ArenaExtendStrategy,
+                    gpu_mem_limit = execution.GpuMemLimitBytes,
+                    cudnn_conv_algo_search = execution.CudnnConvAlgoSearch,
+                    do_copy_in_default_stream = execution.CopyInDefaultStream,
+                    enable_cuda_graph = execution.UseCudaGraphs,
+                    use_tf32 = execution.UseTf32,
+                },
+            };
             var json = JsonSerializer.Serialize(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var response = await _httpClient.PostAsync($"{_baseUrl}/load", content, ct);
@@ -102,10 +133,12 @@ public sealed class PythonIpcClient : IAsyncDisposable
             top_k = parameters.TopK,
             max_tokens = parameters.MaxNewTokens,
             repeat_penalty = parameters.RepeatPenalty,
+            repeat_last_n = parameters.RepeatLastN,
             min_p = parameters.MinP,
             presence_penalty = parameters.PresencePenalty,
             frequency_penalty = parameters.FrequencyPenalty,
             seed = parameters.Seed,
+            stop = parameters.StopSequences,
             stream = true
         };
         return GenerateCoreAsync(payload, ct);
@@ -132,10 +165,12 @@ public sealed class PythonIpcClient : IAsyncDisposable
             top_k = parameters.TopK,
             max_tokens = parameters.MaxNewTokens,
             repeat_penalty = parameters.RepeatPenalty,
+            repeat_last_n = parameters.RepeatLastN,
             min_p = parameters.MinP,
             presence_penalty = parameters.PresencePenalty,
             frequency_penalty = parameters.FrequencyPenalty,
             seed = parameters.Seed,
+            stop = parameters.StopSequences,
             stream = true
         };
         return GenerateCoreAsync(payload, ct);
@@ -273,8 +308,7 @@ public sealed class PythonIpcClient : IAsyncDisposable
         }
     }
 
-    private static GenerationTimings? ParseTimings(JsonElement timings)
-    {
+    private static GenerationTimings? ParseTimings(JsonElement timings)    {
         try
         {
             static int GetInt(JsonElement e, string name) =>
@@ -304,6 +338,32 @@ public sealed class PythonIpcClient : IAsyncDisposable
         await Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// Ausführungs-Tunables für /load (Session-/CUDA-Optionen, Devices, Queue).
+/// </summary>
+public sealed record OnnxExecutionOptions
+{
+    public string Provider { get; init; } = "cuda";
+    public bool AllowCpuFallback { get; init; }
+    public int Stage0Device { get; init; }
+    public int Stage1Device { get; init; } = 1;
+    public int MaxConcurrentGenerations { get; init; } = 1;
+    public int IntraOpThreads { get; init; }
+    public int InterOpThreads { get; init; }
+    public string ExecutionMode { get; init; } = "sequential";
+    public string GraphOptimization { get; init; } = "all";
+    public bool EnableMemPattern { get; init; } = true;
+    public bool EnableCpuMemArena { get; init; } = true;
+    public bool EnableProfiling { get; init; }
+    public bool DisablePrepacking { get; init; }
+    public string ArenaExtendStrategy { get; init; } = "kNextPowerOfTwo";
+    public long GpuMemLimitBytes { get; init; }
+    public string CudnnConvAlgoSearch { get; init; } = "EXHAUSTIVE";
+    public bool CopyInDefaultStream { get; init; } = true;
+    public bool UseCudaGraphs { get; init; }
+    public bool UseTf32 { get; init; } = true;
+};
 
 /// <summary>
 /// Ergebnis einer Python-Generation.

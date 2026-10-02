@@ -39,16 +39,20 @@ public static class OpenAiApiHandler
             return;
         }
 
-        var messages = request.Messages
-            .Select(message => new PythonChatMessage(message.Role, message.Content, message.Name))
-            .ToArray();
+        var messages = ApplySystemPrompt(
+            request.Messages
+                .Select(message => new PythonChatMessage(message.Role, message.Content, message.Name))
+                .ToArray(),
+            engine);
         var parameters = BuildParameters(
             request.Temperature, request.TopP, request.TypicalP, request.TopK,
             request.EffectiveMaxTokens, request.RepeatPenalty, request.MinP,
-            request.PresencePenalty, request.FrequencyPenalty, request.Seed, engine);
+            request.PresencePenalty, request.FrequencyPenalty, request.Seed,
+            ParseStopSequences(request.Stop), request.RepeatLastN, engine);
         var modelId = request.Model ?? engine.LoadedModelId ?? "fssw-onnx-genai";
         var id = $"chatcmpl-{Guid.NewGuid():N}"[..29];
         var created = (long)(DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
+        var enableThinking = request.EnableThinking ?? engine.Options.EnableThinking;
 
         if (request.Stream)
         {
@@ -59,7 +63,7 @@ public static class OpenAiApiHandler
             var streamPromptTokens = 0;
             var streamCompletionTokens = 0;
 
-            await foreach (var result in engine.GenerateChatAsync(messages, parameters, request.EnableThinking ?? false, ct))
+            await foreach (var result in engine.GenerateChatAsync(messages, parameters, enableThinking, ct))
             {
                 if (result.FinishReason == "error") { await WriteSseErrorAsync(stream, "Generation failed"); return; }
                 if (result.FinishReason == "ongoing")
@@ -140,10 +144,12 @@ public static class OpenAiApiHandler
         var parameters = BuildParameters(
             request.Temperature, request.TopP, request.TypicalP, null,
             request.MaxTokens, request.RepeatPenalty, request.MinP,
-            request.PresencePenalty, request.FrequencyPenalty, request.Seed, engine);
+            request.PresencePenalty, request.FrequencyPenalty, request.Seed,
+            ParseStopSequences(request.Stop), request.RepeatLastN, engine);
         var modelId = request.Model ?? engine.LoadedModelId ?? "fssw-onnx-genai";
         var id = $"cmpl-{Guid.NewGuid():N}"[..29];
         var created = (long)(DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
+        var prompt = ApplySystemPromptToText(request.Prompt, engine);
 
         if (request.Stream)
         {
@@ -154,7 +160,7 @@ public static class OpenAiApiHandler
             var streamPromptTokens = 0;
             var streamCompletionTokens = 0;
 
-            await foreach (var result in engine.GenerateAsync(request.Prompt, parameters, ct))
+            await foreach (var result in engine.GenerateAsync(prompt, parameters, ct))
             {
                 if (result.FinishReason == "error") { await WriteSseErrorAsync(stream, "Generation failed"); return; }
                 if (result.FinishReason == "ongoing")
@@ -301,22 +307,92 @@ public static class OpenAiApiHandler
     private static GenerationParameters BuildParameters(
         float? temperature, float? topP, float? typicalP, int? topK, int? maxTokens,
         float? repeatPenalty, float? minP, float? presencePenalty, float? frequencyPenalty,
-        int? seed, OnnxGenaiEngine engine)
+        int? seed, IReadOnlyList<string>? stopSequences, int? repeatLastN, OnnxGenaiEngine engine)
     {
         var opts = engine.Options;
         return new GenerationParameters
         {
             Temperature = temperature ?? opts.Temperature,
             TopP = topP ?? opts.TopP,
-            TypicalP = typicalP ?? 1.0f,
+            TypicalP = typicalP ?? opts.TypicalP,
             TopK = topK ?? opts.TopK,
             MaxNewTokens = maxTokens ?? opts.MaxTokens,
             RepeatPenalty = repeatPenalty ?? opts.RepeatPenalty,
-            MinP = minP ?? 0.0f,
-            PresencePenalty = presencePenalty ?? 0.0f,
-            FrequencyPenalty = frequencyPenalty ?? 0.0f,
-            Seed = seed
+            RepeatLastN = repeatLastN ?? opts.RepeatLastN,
+            MinP = minP ?? opts.MinP,
+            PresencePenalty = presencePenalty ?? opts.PresencePenalty,
+            FrequencyPenalty = frequencyPenalty ?? opts.FrequencyPenalty,
+            Seed = seed ?? opts.DefaultSeed,
+            StopSequences = MergeStopSequences(stopSequences, opts.StopSequences),
         };
+    }
+
+    internal static IReadOnlyList<string> MergeStopSequences(IReadOnlyList<string>? requestStops, string? configuredStops)
+    {
+        var merged = new List<string>();
+        if (requestStops is not null)
+        {
+            merged.AddRange(requestStops.Where(s => !string.IsNullOrEmpty(s)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuredStops))
+        {
+            merged.AddRange(configuredStops
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(s => s.Length > 0));
+        }
+
+        return merged.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    internal static IReadOnlyList<string> ParseStopSequences(JsonElement? stop)
+    {
+        if (stop is null || stop.Value.ValueKind == JsonValueKind.Null || stop.Value.ValueKind == JsonValueKind.Undefined)
+        {
+            return Array.Empty<string>();
+        }
+
+        if (stop.Value.ValueKind == JsonValueKind.String)
+        {
+            var text = stop.Value.GetString();
+            return string.IsNullOrEmpty(text) ? Array.Empty<string>() : new[] { text };
+        }
+
+        if (stop.Value.ValueKind == JsonValueKind.Array)
+        {
+            return stop.Value.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.String)
+                .Select(e => e.GetString()!)
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToArray();
+        }
+
+        return Array.Empty<string>();
+    }
+
+    internal static PythonChatMessage[] ApplySystemPrompt(PythonChatMessage[] messages, OnnxGenaiEngine engine)
+    {
+        var systemPrompt = engine.Options.SystemPrompt;
+        bool hasSystemMessage = messages.Any(m => string.Equals(m.Role, "system", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(systemPrompt) || hasSystemMessage)
+        {
+            return messages;
+        }
+
+        return new[] { new PythonChatMessage("system", systemPrompt.Trim(), null) }
+            .Concat(messages)
+            .ToArray();
+    }
+
+    internal static string ApplySystemPromptToText(string prompt, OnnxGenaiEngine engine)
+    {
+        var systemPrompt = engine.Options.SystemPrompt;
+        if (string.IsNullOrWhiteSpace(systemPrompt))
+        {
+            return prompt;
+        }
+
+        return $"{systemPrompt.Trim()}\n\n{prompt}";
     }
 
     private static async Task WriteJsonAsync<T>(HttpContext ctx, T data, int statusCode)

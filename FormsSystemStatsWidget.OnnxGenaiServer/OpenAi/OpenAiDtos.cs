@@ -57,6 +57,9 @@ public sealed class ChatCompletionRequest
     [JsonPropertyName("repeat_penalty")]
     public float? RepeatPenalty { get; set; }
 
+    [JsonPropertyName("repeat_last_n")]
+    public int? RepeatLastN { get; set; }
+
     [JsonPropertyName("min_p")]
     public float? MinP { get; set; }
 
@@ -187,6 +190,9 @@ public sealed class CompletionRequest
 
     [JsonPropertyName("repeat_penalty")]
     public float? RepeatPenalty { get; set; }
+
+    [JsonPropertyName("repeat_last_n")]
+    public int? RepeatLastN { get; set; }
 
     [JsonPropertyName("min_p")]
     public float? MinP { get; set; }

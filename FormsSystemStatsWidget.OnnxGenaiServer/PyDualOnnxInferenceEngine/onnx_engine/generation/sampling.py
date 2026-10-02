@@ -17,12 +17,21 @@ class SamplingConfig:
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     seed: int | None = None
+    repeat_last_n: int = 0
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.min_p <= 1.0:
             raise ValueError("min_p must be between 0 and 1.")
         if not 0.0 < self.typical_p <= 1.0:
             raise ValueError("typical_p must be greater than 0 and at most 1.")
+        if self.repeat_last_n < 0:
+            raise ValueError("repeat_last_n must be >= 0 (0 = full history).")
+
+    def penalty_window(self, history: Sequence[int]) -> Sequence[int]:
+        """History slice the repetition/frequency/presence penalties apply to."""
+        if self.repeat_last_n > 0:
+            return history[-self.repeat_last_n:]
+        return history
 
 
 class Sampler:
@@ -37,8 +46,9 @@ class Sampler:
         else:
             vector = scores.reshape(-1)
 
-        self._apply_repetition(vector, history)
-        self._apply_frequency_presence(vector, history)
+        window = self._config.penalty_window(history)
+        self._apply_repetition(vector, window)
+        self._apply_frequency_presence(vector, window)
 
         temperature = float(self._config.temperature)
         if temperature <= 0:

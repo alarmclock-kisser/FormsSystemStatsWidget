@@ -22,6 +22,261 @@ namespace FormsSystemStatsWidget.Forms
         }
 
         // ------------------------------------------------------------------
+        // ONNX parameter submenus (Sampling / Execution / Limits), built in code.
+        // Existing items are regrouped into them; new tunables follow the same
+        // textbox/combobox/check patterns as the rest of the menu.
+        // ------------------------------------------------------------------
+
+        private static readonly string[] OnnxKvExecutionModes = ["sequential", "parallel"];
+        private static readonly string[] OnnxKvGraphOptimizations = ["all", "extended", "basic", "disable_all"];
+        private static readonly string[] OnnxKvArenaStrategies = ["kNextPowerOfTwo", "kSameAsRequested"];
+        private static readonly string[] OnnxKvCudnnSearchModes = ["EXHAUSTIVE", "HEURISTIC", "DEFAULT"];
+
+        private ToolStripMenuItem? _menuOnnxSampling;
+        private ToolStripMenuItem? _menuOnnxExecution;
+        private ToolStripMenuItem? _menuOnnxLimits;
+
+        private ToolStripMenuItem? _menuOnnxMinP;
+        private ToolStripTextBox? _boxOnnxMinP;
+        private ToolStripMenuItem? _menuOnnxTypicalP;
+        private ToolStripTextBox? _boxOnnxTypicalP;
+        private ToolStripMenuItem? _menuOnnxPresencePenalty;
+        private ToolStripTextBox? _boxOnnxPresencePenalty;
+        private ToolStripMenuItem? _menuOnnxFrequencyPenalty;
+        private ToolStripTextBox? _boxOnnxFrequencyPenalty;
+        private ToolStripMenuItem? _menuOnnxRepeatLastN;
+        private ToolStripTextBox? _boxOnnxRepeatLastN;
+        private ToolStripMenuItem? _menuOnnxSeed;
+        private ToolStripTextBox? _boxOnnxSeed;
+        private ToolStripMenuItem? _menuOnnxStopSequences;
+        private ToolStripTextBox? _boxOnnxStopSequences;
+        private ToolStripMenuItem? _menuOnnxEnableThinking;
+        private ToolStripMenuItem? _menuOnnxSystemPrompt;
+        private ToolStripTextBox? _boxOnnxSystemPrompt;
+
+        private ToolStripMenuItem? _menuOnnxStage0Device;
+        private ToolStripTextBox? _boxOnnxStage0Device;
+        private ToolStripMenuItem? _menuOnnxStage1Device;
+        private ToolStripTextBox? _boxOnnxStage1Device;
+        private ToolStripMenuItem? _menuOnnxIntraOpThreads;
+        private ToolStripTextBox? _boxOnnxIntraOpThreads;
+        private ToolStripMenuItem? _menuOnnxInterOpThreads;
+        private ToolStripTextBox? _boxOnnxInterOpThreads;
+        private ToolStripMenuItem? _menuOnnxExecutionMode;
+        private ToolStripComboBox? _comboOnnxExecutionMode;
+        private ToolStripMenuItem? _menuOnnxGraphOptimization;
+        private ToolStripComboBox? _comboOnnxGraphOptimization;
+        private ToolStripMenuItem? _menuOnnxMemPattern;
+        private ToolStripMenuItem? _menuOnnxCpuMemArena;
+        private ToolStripMenuItem? _menuOnnxProfiling;
+        private ToolStripMenuItem? _menuOnnxDisablePrepacking;
+        private ToolStripMenuItem? _menuOnnxGpuMemLimitMb;
+        private ToolStripTextBox? _boxOnnxGpuMemLimitMb;
+        private ToolStripMenuItem? _menuOnnxArenaStrategy;
+        private ToolStripComboBox? _comboOnnxArenaStrategy;
+        private ToolStripMenuItem? _menuOnnxCudnnSearch;
+        private ToolStripComboBox? _comboOnnxCudnnSearch;
+        private ToolStripMenuItem? _menuOnnxCopyDefaultStream;
+        private ToolStripMenuItem? _menuOnnxCudaGraphs;
+        private ToolStripMenuItem? _menuOnnxTf32;
+        private ToolStripMenuItem? _menuOnnxCpuFallback;
+
+        private ToolStripMenuItem? _menuOnnxMaxConcurrent;
+        private ToolStripTextBox? _boxOnnxMaxConcurrent;
+
+        private void BuildOnnxParameterSubmenus()
+        {
+            var host = this.toolStripMenuItem_loadOnnxGenaiServer;
+
+            // Regroup existing items out of the top level (fields stay valid).
+            host.DropDownItems.Remove(this.toolStripMenuItem_onnxTemperature);
+            host.DropDownItems.Remove(this.toolStripMenuItem_onnxTopP);
+            host.DropDownItems.Remove(this.toolStripMenuItem_onnxTopK);
+            host.DropDownItems.Remove(this.toolStripMenuItem_onnxRepeatPenalty);
+            host.DropDownItems.Remove(this.toolStripMenuItem_onnxContextLength);
+            host.DropDownItems.Remove(this.toolStripMenuItem_onnxMaxTokens);
+            host.DropDownItems.Remove(this.toolStripComboBox_onnxExecutionProvider);
+
+            this._menuOnnxSampling = new ToolStripMenuItem { Text = "Sampling ..." };
+            this._menuOnnxSampling.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                this.toolStripMenuItem_onnxTemperature,
+                this.toolStripMenuItem_onnxTopP,
+                this.toolStripMenuItem_onnxTopK,
+                this.CreateOnnxInputMenu("Min P", out this._menuOnnxMinP, out this._boxOnnxMinP, "0.0"),
+                this.CreateOnnxInputMenu("Typical P", out this._menuOnnxTypicalP, out this._boxOnnxTypicalP, "1.0"),
+                this.toolStripMenuItem_onnxRepeatPenalty,
+                this.CreateOnnxInputMenu("Repeat Last N (0 = full history)", out this._menuOnnxRepeatLastN, out this._boxOnnxRepeatLastN, "0"),
+                this.CreateOnnxInputMenu("Presence Penalty", out this._menuOnnxPresencePenalty, out this._boxOnnxPresencePenalty, "0.0"),
+                this.CreateOnnxInputMenu("Frequency Penalty", out this._menuOnnxFrequencyPenalty, out this._boxOnnxFrequencyPenalty, "0.0"),
+                this.CreateOnnxInputMenu("Seed (empty = random)", out this._menuOnnxSeed, out this._boxOnnxSeed, string.Empty),
+                this.CreateOnnxInputMenu("Stop Sequences (; separated)", out this._menuOnnxStopSequences, out this._boxOnnxStopSequences, string.Empty, boxWidth: 200),
+                this.CreateOnnxCheckMenu("Enable Thinking", @default: false, out this._menuOnnxEnableThinking),
+                this.CreateOnnxInputMenu("System Prompt", out this._menuOnnxSystemPrompt, out this._boxOnnxSystemPrompt, string.Empty, boxWidth: 280),
+            });
+
+            this._menuOnnxExecution = new ToolStripMenuItem { Text = "Execution ..." };
+            this._menuOnnxExecution.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                this.toolStripComboBox_onnxExecutionProvider,
+                this.CreateOnnxInputMenu("Stage 0 Device", out this._menuOnnxStage0Device, out this._boxOnnxStage0Device, "0"),
+                this.CreateOnnxInputMenu("Stage 1 Device", out this._menuOnnxStage1Device, out this._boxOnnxStage1Device, "1"),
+                this.CreateOnnxInputMenu("Intra-Op Threads (0 = auto)", out this._menuOnnxIntraOpThreads, out this._boxOnnxIntraOpThreads, "0"),
+                this.CreateOnnxInputMenu("Inter-Op Threads (0 = auto)", out this._menuOnnxInterOpThreads, out this._boxOnnxInterOpThreads, "0"),
+                this.CreateOnnxComboMenu("Execution Mode", OnnxKvExecutionModes, "sequential", out this._menuOnnxExecutionMode, out this._comboOnnxExecutionMode),
+                this.CreateOnnxComboMenu("Graph Optimization", OnnxKvGraphOptimizations, "all", out this._menuOnnxGraphOptimization, out this._comboOnnxGraphOptimization),
+                this.CreateOnnxCheckMenu("Memory Pattern", @default: true, out this._menuOnnxMemPattern),
+                this.CreateOnnxCheckMenu("CPU Memory Arena", @default: true, out this._menuOnnxCpuMemArena),
+                this.CreateOnnxCheckMenu("Profiling (writes ORT profiles)", @default: false, out this._menuOnnxProfiling),
+                this.CreateOnnxCheckMenu("Disable Prepacking", @default: false, out this._menuOnnxDisablePrepacking),
+                this.CreateOnnxInputMenu("GPU Mem Limit MB (0 = unlimited)", out this._menuOnnxGpuMemLimitMb, out this._boxOnnxGpuMemLimitMb, "0"),
+                this.CreateOnnxComboMenu("Arena Strategy", OnnxKvArenaStrategies, "kNextPowerOfTwo", out this._menuOnnxArenaStrategy, out this._comboOnnxArenaStrategy),
+                this.CreateOnnxComboMenu("cuDNN Conv Search", OnnxKvCudnnSearchModes, "EXHAUSTIVE", out this._menuOnnxCudnnSearch, out this._comboOnnxCudnnSearch),
+                this.CreateOnnxCheckMenu("Copy In Default Stream", @default: true, out this._menuOnnxCopyDefaultStream),
+                this.CreateOnnxCheckMenu("CUDA Graphs (experimental)", @default: false, out this._menuOnnxCudaGraphs),
+                this.CreateOnnxCheckMenu("TF32", @default: true, out this._menuOnnxTf32),
+                this.CreateOnnxCheckMenu("CPU Fallback", @default: false, out this._menuOnnxCpuFallback),
+            });
+
+            this._menuOnnxLimits = new ToolStripMenuItem { Text = "Limits ..." };
+            this._menuOnnxLimits.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                this.toolStripMenuItem_onnxContextLength,
+                this.toolStripMenuItem_onnxMaxTokens,
+                this.CreateOnnxInputMenu("Max Concurrent Generations", out this._menuOnnxMaxConcurrent, out this._boxOnnxMaxConcurrent, "1"),
+            });
+
+            // Top level keeps: Model Root Directory, models combo, submenus, Hide Console.
+            host.DropDownItems.Add(this._menuOnnxSampling);
+            host.DropDownItems.Add(this._menuOnnxExecution);
+            host.DropDownItems.Add(this._menuOnnxLimits);
+
+            foreach (var submenu in new[] { this._menuOnnxSampling, this._menuOnnxExecution, this._menuOnnxLimits })
+            {
+                submenu.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            }
+
+            this._comboOnnxExecutionMode!.SelectedIndexChanged += this.OnnxSubmenuSettingChanged;
+            this._comboOnnxGraphOptimization!.SelectedIndexChanged += this.OnnxSubmenuSettingChanged;
+            this._comboOnnxArenaStrategy!.SelectedIndexChanged += this.OnnxSubmenuSettingChanged;
+            this._comboOnnxCudnnSearch!.SelectedIndexChanged += this.OnnxSubmenuSettingChanged;
+
+            foreach (var check in new[]
+            {
+                this._menuOnnxEnableThinking!, this._menuOnnxMemPattern!, this._menuOnnxCpuMemArena!,
+                this._menuOnnxProfiling!, this._menuOnnxDisablePrepacking!, this._menuOnnxCopyDefaultStream!,
+                this._menuOnnxCudaGraphs!, this._menuOnnxTf32!, this._menuOnnxCpuFallback!,
+            })
+            {
+                check.CheckedChanged += this.OnnxSubmenuSettingChanged;
+            }
+        }
+
+        private ToolStripMenuItem CreateOnnxInputMenu(string text, out ToolStripMenuItem menu, out ToolStripTextBox box, string defaultText, int boxWidth = 100)
+        {
+            var localBox = new ToolStripTextBox { Size = new Size(boxWidth, 23), Text = defaultText };
+            localBox.KeyDown += (s, e) => this.PersistOnnxSettingsOnEnter(e);
+            menu = new ToolStripMenuItem { Text = text };
+            menu.DropDownItems.Add(localBox);
+            box = localBox;
+            return menu;
+        }
+
+        private ToolStripMenuItem CreateOnnxComboMenu(string text, string[] items, string defaultText, out ToolStripMenuItem menu, out ToolStripComboBox combo)
+        {
+            var localCombo = new ToolStripComboBox { Size = new Size(160, 23), Text = defaultText };
+            localCombo.Items.AddRange(items);
+            menu = new ToolStripMenuItem { Text = text };
+            menu.DropDownItems.Add(localCombo);
+            combo = localCombo;
+            return menu;
+        }
+
+        private ToolStripMenuItem CreateOnnxCheckMenu(string text, bool @default, out ToolStripMenuItem menu)
+        {
+            menu = new ToolStripMenuItem { Text = text, CheckOnClick = true, Checked = @default };
+            return menu;
+        }
+
+        private void OnnxSubmenuSettingChanged(object? sender, EventArgs e)
+        {
+            if (!this._onnxSettingsInitialized)
+            {
+                return;
+            }
+
+            if (this.TryPersistOnnxSettings(out _))
+            {
+                this.SavePersistentSettings();
+            }
+        }
+
+        private void ApplyOnnxSubmenuSettings()
+        {
+            var settings = this._persistentSettings;
+            SetOnnxBoxText(this._boxOnnxMinP, settings.OnnxMinP.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxTypicalP, settings.OnnxTypicalP.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxPresencePenalty, settings.OnnxPresencePenalty.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxFrequencyPenalty, settings.OnnxFrequencyPenalty.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxRepeatLastN, settings.OnnxRepeatLastN.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxSeed, settings.OnnxSeed);
+            SetOnnxBoxText(this._boxOnnxStopSequences, settings.OnnxStopSequences);
+            SetOnnxBoxText(this._boxOnnxSystemPrompt, settings.OnnxSystemPrompt);
+            SetOnnxBoxText(this._boxOnnxStage0Device, settings.OnnxStage0Device.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxStage1Device, settings.OnnxStage1Device.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxIntraOpThreads, settings.OnnxIntraOpThreads.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxInterOpThreads, settings.OnnxInterOpThreads.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxGpuMemLimitMb, settings.OnnxGpuMemLimitMb.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SetOnnxBoxText(this._boxOnnxMaxConcurrent, settings.OnnxMaxConcurrentGenerations.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+            SetOnnxComboText(this._comboOnnxExecutionMode, settings.OnnxExecutionMode);
+            SetOnnxComboText(this._comboOnnxGraphOptimization, settings.OnnxGraphOptimization);
+            SetOnnxComboText(this._comboOnnxArenaStrategy, settings.OnnxArenaExtendStrategy);
+            SetOnnxComboText(this._comboOnnxCudnnSearch, settings.OnnxCudnnConvAlgoSearch);
+
+            SetOnnxCheckState(this._menuOnnxEnableThinking, settings.OnnxEnableThinking);
+            SetOnnxCheckState(this._menuOnnxMemPattern, settings.OnnxEnableMemPattern);
+            SetOnnxCheckState(this._menuOnnxCpuMemArena, settings.OnnxEnableCpuMemArena);
+            SetOnnxCheckState(this._menuOnnxProfiling, settings.OnnxEnableProfiling);
+            SetOnnxCheckState(this._menuOnnxDisablePrepacking, settings.OnnxDisablePrepacking);
+            SetOnnxCheckState(this._menuOnnxCopyDefaultStream, settings.OnnxCopyInDefaultStream);
+            SetOnnxCheckState(this._menuOnnxCudaGraphs, settings.OnnxUseCudaGraphs);
+            SetOnnxCheckState(this._menuOnnxTf32, settings.OnnxUseTf32);
+            SetOnnxCheckState(this._menuOnnxCpuFallback, settings.OnnxAllowCpuFallback);
+        }
+
+        private static void SetOnnxBoxText(ToolStripTextBox? box, string text)
+        {
+            if (box is not null)
+            {
+                box.Text = text;
+            }
+        }
+
+        private static void SetOnnxComboText(ToolStripComboBox? combo, string text)
+        {
+            if (combo is null)
+            {
+                return;
+            }
+
+            int index = combo.Items.IndexOf(text);
+            combo.SelectedIndex = index >= 0 ? index : -1;
+            if (index < 0)
+            {
+                combo.Text = text;
+            }
+        }
+
+        private static void SetOnnxCheckState(ToolStripMenuItem? menu, bool @checked)
+        {
+            if (menu is not null)
+            {
+                menu.Checked = @checked;
+            }
+        }
+
+        // ------------------------------------------------------------------
         // Contextmenu: "Load ONNX-Genai Server"
         // ------------------------------------------------------------------
 
@@ -124,6 +379,14 @@ namespace FormsSystemStatsWidget.Forms
             startInfo.ArgumentList.Add($"--OnnxGenaiServer:TopK={topK}");
             startInfo.ArgumentList.Add($"--OnnxGenaiServer:RepeatPenalty={repeatPenalty.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
             startInfo.ArgumentList.Add($"--OnnxGenaiServer:ExecutionProvider={executionProvider}");
+            foreach (string extraArg in this.BuildOnnxSamplingArgs())
+            {
+                startInfo.ArgumentList.Add(extraArg);
+            }
+            foreach (string extraArg in this.BuildOnnxExecutionArgs(executionProvider))
+            {
+                startInfo.ArgumentList.Add(extraArg);
+            }
 
             DialogResult result = MessageBox.Show(this,
                 $"Model package:\n{modelRootPath}\n\nLayout: {(modelLayout == "Partitioned" ? "partitioned; Stage 0 + Stage 1 on CUDA" : "main ONNX weights")}\nAPI server: {startInfo.FileName}\n\nStart the ONNX GenAI server?",
@@ -420,6 +683,83 @@ namespace FormsSystemStatsWidget.Forms
             this.SavePersistentSettings();
         }
 
+        private List<string> BuildOnnxSamplingArgs()
+        {
+            var args = new List<string>();
+            double minP = this.TryParseOnnxBoxDouble(this._boxOnnxMinP, out double parsedMinP) ? parsedMinP : 0.0;
+            double typicalP = this.TryParseOnnxBoxDouble(this._boxOnnxTypicalP, out double parsedTypicalP) ? parsedTypicalP : 1.0;
+            double presencePenalty = this.TryParseOnnxBoxDouble(this._boxOnnxPresencePenalty, out double parsedPresence) ? parsedPresence : 0.0;
+            double frequencyPenalty = this.TryParseOnnxBoxDouble(this._boxOnnxFrequencyPenalty, out double parsedFrequency) ? parsedFrequency : 0.0;
+            int repeatLastN = this.TryParseOnnxBoxInt(this._boxOnnxRepeatLastN, out int parsedRepeatLastN) ? parsedRepeatLastN : 0;
+
+            args.Add($"--OnnxGenaiServer:MinP={minP.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:TypicalP={typicalP.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:PresencePenalty={presencePenalty.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:FrequencyPenalty={frequencyPenalty.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:RepeatLastN={repeatLastN.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+
+            if (int.TryParse(this._boxOnnxSeed?.Text.Trim() ?? string.Empty, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int seed))
+            {
+                args.Add($"--OnnxGenaiServer:DefaultSeed={seed.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            }
+
+            string stopSequences = this._boxOnnxStopSequences?.Text.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(stopSequences))
+            {
+                args.Add($"--OnnxGenaiServer:StopSequences={stopSequences}");
+            }
+
+            if (this._menuOnnxEnableThinking?.Checked == true)
+            {
+                args.Add("--OnnxGenaiServer:EnableThinking=true");
+            }
+
+            string systemPrompt = this._boxOnnxSystemPrompt?.Text.Trim() ?? string.Empty;
+            if (!string.IsNullOrEmpty(systemPrompt))
+            {
+                args.Add($"--OnnxGenaiServer:SystemPrompt={systemPrompt}");
+            }
+
+            return args;
+        }
+
+        private List<string> BuildOnnxExecutionArgs(string executionProvider)
+        {
+            var args = new List<string>();
+            int stage0 = this.TryParseOnnxBoxInt(this._boxOnnxStage0Device, out int parsedStage0) ? parsedStage0 : 0;
+            int stage1 = this.TryParseOnnxBoxInt(this._boxOnnxStage1Device, out int parsedStage1) ? parsedStage1 : 1;
+            int intraThreads = this.TryParseOnnxBoxInt(this._boxOnnxIntraOpThreads, out int parsedIntra) ? parsedIntra : 0;
+            int interThreads = this.TryParseOnnxBoxInt(this._boxOnnxInterOpThreads, out int parsedInter) ? parsedInter : 0;
+            long gpuMemMb = long.TryParse(this._boxOnnxGpuMemLimitMb?.Text.Trim() ?? "0", System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out long parsedGpuMem) ? parsedGpuMem : 0;
+            int maxConcurrent = this.TryParseOnnxBoxInt(this._boxOnnxMaxConcurrent, out int parsedMaxConcurrent) ? parsedMaxConcurrent : 1;
+
+            args.Add($"--OnnxGenaiServer:Stage0Device={stage0.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:Stage1Device={stage1.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:IntraOpThreads={intraThreads.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:InterOpThreads={interThreads.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:ExecutionMode={this._comboOnnxExecutionMode?.Text.Trim() ?? "sequential"}");
+            args.Add($"--OnnxGenaiServer:GraphOptimization={this._comboOnnxGraphOptimization?.Text.Trim() ?? "all"}");
+            args.Add($"--OnnxGenaiServer:GpuMemLimitMb={gpuMemMb.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            args.Add($"--OnnxGenaiServer:ArenaExtendStrategy={this._comboOnnxArenaStrategy?.Text.Trim() ?? "kNextPowerOfTwo"}");
+            args.Add($"--OnnxGenaiServer:CudnnConvAlgoSearch={this._comboOnnxCudnnSearch?.Text.Trim() ?? "EXHAUSTIVE"}");
+            args.Add($"--OnnxGenaiServer:MaxConcurrentGenerations={Math.Max(1, maxConcurrent).ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+
+            AddOnnxBoolArg(args, "EnableMemPattern", this._menuOnnxMemPattern?.Checked ?? true);
+            AddOnnxBoolArg(args, "EnableCpuMemArena", this._menuOnnxCpuMemArena?.Checked ?? true);
+            AddOnnxBoolArg(args, "EnableProfiling", this._menuOnnxProfiling?.Checked ?? false);
+            AddOnnxBoolArg(args, "DisablePrepacking", this._menuOnnxDisablePrepacking?.Checked ?? false);
+            AddOnnxBoolArg(args, "CopyInDefaultStream", this._menuOnnxCopyDefaultStream?.Checked ?? true);
+            AddOnnxBoolArg(args, "UseCudaGraphs", this._menuOnnxCudaGraphs?.Checked ?? false);
+            AddOnnxBoolArg(args, "UseTf32", this._menuOnnxTf32?.Checked ?? true);
+            AddOnnxBoolArg(args, "AllowCpuFallback", this._menuOnnxCpuFallback?.Checked ?? false);
+            return args;
+        }
+
+        private static void AddOnnxBoolArg(List<string> args, string name, bool value)
+        {
+            args.Add($"--OnnxGenaiServer:{name}={(value ? "true" : "false")}");
+        }
+
         private void toolStripComboBox_onnxModels_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (!this._onnxSettingsInitialized || this._refreshingOnnxModels)
@@ -566,6 +906,17 @@ namespace FormsSystemStatsWidget.Forms
             double topP = 0;
             int topK = 0;
             double repeatPenalty = 0;
+            double minP = 0;
+            double typicalP = 0;
+            double presencePenalty = 0;
+            double frequencyPenalty = 0;
+            int repeatLastN = 0;
+            int stage0Device = 0;
+            int stage1Device = 0;
+            int intraOpThreads = 0;
+            int interOpThreads = 0;
+            long gpuMemLimitMb = 0;
+            int maxConcurrent = 0;
             if (!int.TryParse(this.toolStripTextBox_onnxContextLength.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int contextLength) || contextLength <= 0)
             {
                 error = "Context Length must be a positive whole number.";
@@ -590,6 +941,70 @@ namespace FormsSystemStatsWidget.Forms
             {
                 error = "Repeat Penalty must be greater than 0.";
             }
+            else if (!this.TryParseOnnxBoxDouble(this._boxOnnxMinP, out minP) || minP < 0 || minP > 1)
+            {
+                error = "Min P must be between 0 and 1.";
+            }
+            else if (!this.TryParseOnnxBoxDouble(this._boxOnnxTypicalP, out typicalP) || typicalP <= 0 || typicalP > 1)
+            {
+                error = "Typical P must be greater than 0 and at most 1.";
+            }
+            else if (!this.TryParseOnnxBoxDouble(this._boxOnnxPresencePenalty, out presencePenalty) || !double.IsFinite(presencePenalty))
+            {
+                error = "Presence Penalty must be a number.";
+            }
+            else if (!this.TryParseOnnxBoxDouble(this._boxOnnxFrequencyPenalty, out frequencyPenalty) || !double.IsFinite(frequencyPenalty))
+            {
+                error = "Frequency Penalty must be a number.";
+            }
+            else if (!this.TryParseOnnxBoxInt(this._boxOnnxRepeatLastN, out repeatLastN) || repeatLastN < 0)
+            {
+                error = "Repeat Last N must be a non-negative whole number (0 = full history).";
+            }
+            else if (!string.IsNullOrWhiteSpace(this._boxOnnxSeed?.Text) && !int.TryParse(this._boxOnnxSeed.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out _))
+            {
+                error = "Seed must be a whole number or empty (random).";
+            }
+            else if (!this.TryParseOnnxBoxInt(this._boxOnnxStage0Device, out stage0Device) || stage0Device < 0)
+            {
+                error = "Stage 0 Device must be a non-negative whole number.";
+            }
+            else if (!this.TryParseOnnxBoxInt(this._boxOnnxStage1Device, out stage1Device) || stage1Device < 0)
+            {
+                error = "Stage 1 Device must be a non-negative whole number.";
+            }
+            else if (!this.TryParseOnnxBoxInt(this._boxOnnxIntraOpThreads, out intraOpThreads) || intraOpThreads < 0)
+            {
+                error = "Intra-Op Threads must be a non-negative whole number (0 = auto).";
+            }
+            else if (!this.TryParseOnnxBoxInt(this._boxOnnxInterOpThreads, out interOpThreads) || interOpThreads < 0)
+            {
+                error = "Inter-Op Threads must be a non-negative whole number (0 = auto).";
+            }
+            else if (!long.TryParse(this._boxOnnxGpuMemLimitMb?.Text.Trim() ?? "0", System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out gpuMemLimitMb) || gpuMemLimitMb < 0)
+            {
+                error = "GPU Mem Limit must be a non-negative whole number of MB (0 = unlimited).";
+            }
+            else if (!this.TryParseOnnxBoxInt(this._boxOnnxMaxConcurrent, out maxConcurrent) || maxConcurrent < 1)
+            {
+                error = "Max Concurrent Generations must be at least 1.";
+            }
+            else if (!IsOnnxComboValue(this._comboOnnxExecutionMode, OnnxKvExecutionModes))
+            {
+                error = "Execution Mode must be sequential or parallel.";
+            }
+            else if (!IsOnnxComboValue(this._comboOnnxGraphOptimization, OnnxKvGraphOptimizations))
+            {
+                error = "Graph Optimization must be all, extended, basic or disable_all.";
+            }
+            else if (!IsOnnxComboValue(this._comboOnnxArenaStrategy, OnnxKvArenaStrategies))
+            {
+                error = "Arena Strategy must be kNextPowerOfTwo or kSameAsRequested.";
+            }
+            else if (!IsOnnxComboValue(this._comboOnnxCudnnSearch, OnnxKvCudnnSearchModes))
+            {
+                error = "cuDNN Conv Search must be EXHAUSTIVE, HEURISTIC or DEFAULT.";
+            }
 
             if (error.Length > 0)
             {
@@ -612,7 +1027,54 @@ namespace FormsSystemStatsWidget.Forms
             this._persistentSettings.OnnxRepeatPenalty = repeatPenalty;
             this._persistentSettings.OnnxExecutionProvider = this.toolStripComboBox_onnxExecutionProvider.SelectedItem as string ?? string.Empty;
             this._persistentSettings.OnnxHideConsole = this.toolStripMenuItem_onnxHideCmd.Checked;
+            this._persistentSettings.OnnxMinP = minP;
+            this._persistentSettings.OnnxTypicalP = typicalP;
+            this._persistentSettings.OnnxPresencePenalty = presencePenalty;
+            this._persistentSettings.OnnxFrequencyPenalty = frequencyPenalty;
+            this._persistentSettings.OnnxRepeatLastN = repeatLastN;
+            this._persistentSettings.OnnxSeed = this._boxOnnxSeed?.Text.Trim() ?? string.Empty;
+            this._persistentSettings.OnnxStopSequences = this._boxOnnxStopSequences?.Text.Trim() ?? string.Empty;
+            this._persistentSettings.OnnxEnableThinking = this._menuOnnxEnableThinking?.Checked ?? false;
+            this._persistentSettings.OnnxSystemPrompt = this._boxOnnxSystemPrompt?.Text.Trim() ?? string.Empty;
+            this._persistentSettings.OnnxStage0Device = stage0Device;
+            this._persistentSettings.OnnxStage1Device = stage1Device;
+            this._persistentSettings.OnnxIntraOpThreads = intraOpThreads;
+            this._persistentSettings.OnnxInterOpThreads = interOpThreads;
+            this._persistentSettings.OnnxExecutionMode = this._comboOnnxExecutionMode?.Text.Trim() ?? "sequential";
+            this._persistentSettings.OnnxGraphOptimization = this._comboOnnxGraphOptimization?.Text.Trim() ?? "all";
+            this._persistentSettings.OnnxEnableMemPattern = this._menuOnnxMemPattern?.Checked ?? true;
+            this._persistentSettings.OnnxEnableCpuMemArena = this._menuOnnxCpuMemArena?.Checked ?? true;
+            this._persistentSettings.OnnxEnableProfiling = this._menuOnnxProfiling?.Checked ?? false;
+            this._persistentSettings.OnnxDisablePrepacking = this._menuOnnxDisablePrepacking?.Checked ?? false;
+            this._persistentSettings.OnnxGpuMemLimitMb = gpuMemLimitMb;
+            this._persistentSettings.OnnxArenaExtendStrategy = this._comboOnnxArenaStrategy?.Text.Trim() ?? "kNextPowerOfTwo";
+            this._persistentSettings.OnnxCudnnConvAlgoSearch = this._comboOnnxCudnnSearch?.Text.Trim() ?? "EXHAUSTIVE";
+            this._persistentSettings.OnnxCopyInDefaultStream = this._menuOnnxCopyDefaultStream?.Checked ?? true;
+            this._persistentSettings.OnnxUseCudaGraphs = this._menuOnnxCudaGraphs?.Checked ?? false;
+            this._persistentSettings.OnnxUseTf32 = this._menuOnnxTf32?.Checked ?? true;
+            this._persistentSettings.OnnxAllowCpuFallback = this._menuOnnxCpuFallback?.Checked ?? false;
+            this._persistentSettings.OnnxMaxConcurrentGenerations = maxConcurrent;
             return true;
+        }
+
+        private bool TryParseOnnxBoxDouble(ToolStripTextBox? box, out double value)
+        {
+            value = 0;
+            return box is not null
+                && double.TryParse(box.Text.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value);
+        }
+
+        private bool TryParseOnnxBoxInt(ToolStripTextBox? box, out int value)
+        {
+            value = 0;
+            return box is not null
+                && int.TryParse(box.Text.Trim(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out value);
+        }
+
+        private static bool IsOnnxComboValue(ToolStripComboBox? combo, string[] allowed)
+        {
+            string text = combo?.Text.Trim() ?? string.Empty;
+            return allowed.Any(item => string.Equals(item, text, StringComparison.OrdinalIgnoreCase));
         }
     }
 

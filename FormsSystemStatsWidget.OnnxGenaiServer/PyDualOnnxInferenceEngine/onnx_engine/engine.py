@@ -108,6 +108,7 @@ class InferenceEngine:
         preload_cuda_dll_dependencies: bool = True,
         model_layout: str = "auto",
         context_length: int = 0,
+        providers: list[str] | None = None,
     ) -> None:
         self._model_path = Path(model_path)
         self._cuda = cuda or CudaRuntimeConfig()
@@ -116,6 +117,7 @@ class InferenceEngine:
         self._preload_cuda_dll_dependencies = preload_cuda_dll_dependencies
         self._model_layout = model_layout
         self._context_length = max(0, int(context_length or 0))
+        self._providers = [str(p).lower() for p in providers] if providers else None
         self._session_manager = self._new_session_manager(self._cuda)
         self._stage1_session_manager: OrtSessionManager | None = None
         self._trust_remote_code = trust_remote_code
@@ -143,6 +145,7 @@ class InferenceEngine:
             self._session_config,
             allow_cpu_fallback=self._allow_cpu_fallback,
             preload_dll_dependencies=self._preload_cuda_dll_dependencies,
+            providers=self._providers,
         )
 
     @property

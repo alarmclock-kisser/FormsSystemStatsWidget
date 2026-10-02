@@ -151,7 +151,7 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
                 _pythonServerBaseUrl = _pythonSupervisor.BaseUrl;
                 _logger.LogInformation("Lade Modell in Python-Engine: {Path}", model.RootDir);
                 _pythonSupervisor.SetModelState("Loading", model.RootDir);
-                var loaded = await _pythonIpc.LoadModelAsync(model.RootDir, modelLayout, _options.ContextLength);
+                var loaded = await _pythonIpc.LoadModelAsync(model.RootDir, modelLayout, _options.ContextLength, BuildExecutionOptions(_options));
                 _pythonSupervisor.SetModelState(loaded ? "Loaded" : "Unloaded", model.RootDir);
                 if (!loaded)
                 {
@@ -207,6 +207,32 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
         {
             yield return new GenerationResult(result.Text, result.PromptTokens, result.CompletionTokens, result.FinishReason, result.Timings);
         }
+    }
+
+    internal static OnnxExecutionOptions BuildExecutionOptions(OnnxGenaiServerOptions options)
+    {
+        return new OnnxExecutionOptions
+        {
+            Provider = options.ExecutionProvider,
+            AllowCpuFallback = options.AllowCpuFallback,
+            Stage0Device = options.Stage0Device,
+            Stage1Device = options.Stage1Device,
+            MaxConcurrentGenerations = options.MaxConcurrentGenerations,
+            IntraOpThreads = options.IntraOpThreads,
+            InterOpThreads = options.InterOpThreads,
+            ExecutionMode = options.ExecutionMode,
+            GraphOptimization = options.GraphOptimization,
+            EnableMemPattern = options.EnableMemPattern,
+            EnableCpuMemArena = options.EnableCpuMemArena,
+            EnableProfiling = options.EnableProfiling,
+            DisablePrepacking = options.DisablePrepacking,
+            ArenaExtendStrategy = options.ArenaExtendStrategy,
+            GpuMemLimitBytes = Math.Max(0, options.GpuMemLimitMb) * 1024L * 1024L,
+            CudnnConvAlgoSearch = options.CudnnConvAlgoSearch,
+            CopyInDefaultStream = options.CopyInDefaultStream,
+            UseCudaGraphs = options.UseCudaGraphs,
+            UseTf32 = options.UseTf32,
+        };
     }
 
     /// <summary>
@@ -267,10 +293,12 @@ public sealed class GenerationParameters
     public int TopK { get; init; } = 40;
     public int MaxNewTokens { get; init; } = 1024;
     public float RepeatPenalty { get; init; } = 1.1f;
+    public int RepeatLastN { get; init; }
     public float MinP { get; init; }
     public float PresencePenalty { get; init; }
     public float FrequencyPenalty { get; init; }
     public int? Seed { get; init; }
+    public IReadOnlyList<string> StopSequences { get; init; } = Array.Empty<string>();
 }
 
 public sealed class EngineInfo

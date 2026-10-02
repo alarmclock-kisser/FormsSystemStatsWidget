@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import onnxruntime as ort
 
@@ -33,11 +34,15 @@ class OrtSessionManager:
         *,
         allow_cpu_fallback: bool = False,
         preload_dll_dependencies: bool = True,
+        providers: list[str] | None = None,
     ) -> None:
         self._cuda = cuda
         self._config = session or SessionRuntimeConfig()
         self._allow_cpu_fallback = allow_cpu_fallback
         self._preload_dll_dependencies = preload_dll_dependencies
+        # Provider names: "cuda" | "cpu" | "dml". None = legacy behaviour
+        # (CUDA, plus CPU when allow_cpu_fallback is set).
+        self._providers = [p.lower() for p in providers] if providers else None
 
         self._session: ort.InferenceSession | None = None
 
@@ -63,17 +68,31 @@ class OrtSessionManager:
             "ORT_ENABLE_BASIC": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
             "ORT_ENABLE_EXTENDED": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
             "ORT_ENABLE_ALL": ort.GraphOptimizationLevel.ORT_ENABLE_ALL,
+            "disable_all": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
+            "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
+            "extended": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
+            "all": ort.GraphOptimizationLevel.ORT_ENABLE_ALL,
         }
 
         execution_modes = {
             "ORT_SEQUENTIAL": ort.ExecutionMode.ORT_SEQUENTIAL,
             "ORT_PARALLEL": ort.ExecutionMode.ORT_PARALLEL,
+            "sequential": ort.ExecutionMode.ORT_SEQUENTIAL,
+            "parallel": ort.ExecutionMode.ORT_PARALLEL,
         }
 
-        options.graph_optimization_level = optimization_levels[
-            self._config.graph_optimization_level
-        ]
-        options.execution_mode = execution_modes[self._config.execution_mode]
+        opt_level = optimization_levels.get(str(self._config.graph_optimization_level))
+        if opt_level is None:
+            raise ValueError(
+                f"Unknown graph_optimization_level: {self._config.graph_optimization_level!r}."
+            )
+        exec_mode = execution_modes.get(str(self._config.execution_mode))
+        if exec_mode is None:
+            raise ValueError(
+                f"Unknown execution_mode: {self._config.execution_mode!r}."
+            )
+        options.graph_optimization_level = opt_level
+        options.execution_mode = exec_mode
         options.enable_mem_pattern = self._config.enable_mem_pattern
         options.enable_cpu_mem_arena = self._config.enable_cpu_mem_arena
         options.enable_profiling = self._config.enable_profiling
@@ -92,8 +111,8 @@ class OrtSessionManager:
             self._cuda.provider_options(),
         )
 
-        providers = [provider]
-        if self._allow_cpu_fallback:
+        providers: list[Any] = self._build_providers(provider)
+        if self._providers is None and self._allow_cpu_fallback:
             providers.append("CPUExecutionProvider")
 
         self._session = ort.InferenceSession(
@@ -102,14 +121,34 @@ class OrtSessionManager:
             providers=providers,
         )
 
-        if "CUDAExecutionProvider" not in self._session.get_providers():
-            active = self._session.get_providers()
+        active = self._session.get_providers()
+        if self._wants_cuda() and "CUDAExecutionProvider" not in active:
             self.close()
             raise RuntimeError(
                 f"CUDAExecutionProvider was not activated. Active providers: {active}"
             )
 
         return self._session
+
+    def _wants_cuda(self) -> bool:
+        return self._providers is None or "cuda" in self._providers
+
+    def _build_providers(self, cuda_provider: tuple[str, dict[str, Any]]) -> list[Any]:
+        if self._providers is None:
+            return [cuda_provider]
+        result: list[Any] = []
+        for name in self._providers:
+            if name == "cuda":
+                result.append(cuda_provider)
+            elif name == "cpu":
+                result.append("CPUExecutionProvider")
+            elif name == "dml":
+                result.append("DmlExecutionProvider")
+            else:
+                raise ValueError(f"Unknown execution provider: {name!r}.")
+        if not result:
+            raise ValueError("No execution providers selected.")
+        return result
 
     def close(self) -> None:
         self._session = None

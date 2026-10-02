@@ -37,14 +37,10 @@ public sealed class OnnxGenaiServerOptions
     public string ExecutionProvider { get; set; } = "Dml";
 
     /// <summary>
-    /// Kontextlänge (n_ctx) für die KV-Cache-Allokation.
+    /// Context cap (n_ctx): prompt + max_tokens beyond this are rejected
+    /// with finish_reason "length" before any GPU work (0 = unlimited).
     /// </summary>
     public int ContextLength { get; set; } = 4096;
-
-    /// <summary>
-    /// Max. Anzahl paralleler Generationen (Sessions).
-    /// </summary>
-    public int MaxConcurrentGenerations { get; set; } = 1;
 
     /// <summary>
     /// Standard-Generierungsparameter (werden pro Request überschrieben).
@@ -54,6 +50,77 @@ public sealed class OnnxGenaiServerOptions
     public int TopK { get; set; } = 40;
     public int MaxTokens { get; set; } = 1024;
     public float RepeatPenalty { get; set; } = 1.1f;
+    public float MinP { get; set; } = 0.0f;
+    public float TypicalP { get; set; } = 1.0f;
+    public float PresencePenalty { get; set; } = 0.0f;
+    public float FrequencyPenalty { get; set; } = 0.0f;
+
+    /// <summary>
+    /// Default seed (null = random per request). Per-request "seed" wins.
+    /// </summary>
+    public int? DefaultSeed { get; set; }
+
+    /// <summary>
+    /// Stop sequences, semicolon-separated (in addition to per-request "stop").
+    /// </summary>
+    public string StopSequences { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Repetition-penalty window in tokens (0 = full history, like before).
+    /// </summary>
+    public int RepeatLastN { get; set; } = 0;
+
+    /// <summary>
+    /// Default for the model-specific "enable_thinking" template flag.
+    /// Per-request "enable_thinking" wins.
+    /// </summary>
+    public bool EnableThinking { get; set; }
+
+    // ---- Inference execution (load-time, needs model reload on change) ----
+
+    /// <summary>CUDA device for stage 0 (partitioned) / the single stage.</summary>
+    public int Stage0Device { get; set; } = 0;
+
+    /// <summary>CUDA device for stage 1 (partitioned models).</summary>
+    public int Stage1Device { get; set; } = 1;
+
+    /// <summary>Append CPUExecutionProvider after CUDA (slower, but won't hard-fail).</summary>
+    public bool AllowCpuFallback { get; set; }
+
+    public int IntraOpThreads { get; set; } = 0;
+    public int InterOpThreads { get; set; } = 0;
+
+    /// <summary>ORT_SEQUENTIAL or ORT_PARALLEL.</summary>
+    public string ExecutionMode { get; set; } = "sequential";
+
+    /// <summary>disable_all, basic, extended or all (ORT_-prefixed spellings accepted).</summary>
+    public string GraphOptimization { get; set; } = "all";
+
+    public bool EnableMemPattern { get; set; } = true;
+    public bool EnableCpuMemArena { get; set; } = true;
+    public bool EnableProfiling { get; set; }
+    public bool DisablePrepacking { get; set; }
+
+    /// <summary>CUDA arena memory limit in MB (0 = unlimited).</summary>
+    public long GpuMemLimitMb { get; set; } = 0;
+
+    /// <summary>kNextPowerOfTwo or kSameAsRequested.</summary>
+    public string ArenaExtendStrategy { get; set; } = "kNextPowerOfTwo";
+
+    /// <summary>EXHAUSTIVE, HEURISTIC or DEFAULT.</summary>
+    public string CudnnConvAlgoSearch { get; set; } = "EXHAUSTIVE";
+
+    public bool CopyInDefaultStream { get; set; } = true;
+
+    /// <summary>CUDA graphs for steady-state decode (experimental, needs reload).</summary>
+    public bool UseCudaGraphs { get; set; }
+
+    public bool UseTf32 { get; set; } = true;
+
+    /// <summary>
+    /// Max. Anzahl paralleler Generationen (Sessions).
+    /// </summary>
+    public int MaxConcurrentGenerations { get; set; } = 1;
 
     /// <summary>
     /// System-Prompt, der standardmäßig vorangestellt wird (wie AdditionalCopilotSystemPrompt im Widget).
