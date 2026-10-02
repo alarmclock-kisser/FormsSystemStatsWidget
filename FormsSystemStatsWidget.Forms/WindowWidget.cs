@@ -75,6 +75,13 @@ namespace FormsSystemStatsWidget.Forms
         private DynamicGradientProgressBar? _progRam;
         private DynamicGradientProgressBar? _progVram;
         private DynamicGradientProgressBar? _progVram2;
+        private ToolTip? _barToolTip;
+        private DynamicGradientProgressBar? _hoveredGpuBar;
+        private readonly Queue<BarHistory.RamSample> _ramHistory = new();
+        private readonly Queue<BarHistory.GpuSample> _gpu1History = new();
+        private readonly Queue<BarHistory.GpuSample> _gpu2History = new();
+        private double _lastRamTotalGb;
+        private double _lastRamUsedGb;
         private volatile bool _closing = false;
         private int _tickInProgress = 0;
         private CancellationTokenSource? _recordingCancellationTokenSource;
@@ -313,6 +320,182 @@ namespace FormsSystemStatsWidget.Forms
             this.progressBar_ram.Visible = false;
             this.progressBar_vram.Visible = false;
             this.progressBar_vram2.Visible = false;
+
+            this._barToolTip = new ToolTip
+            {
+                AutoPopDelay = 15000,
+                InitialDelay = 400,
+                ReshowDelay = 200,
+                ShowAlways = true,
+                UseFading = false,
+            };
+            this._barToolTip.SetToolTip(this._progRam, "RAM (last 5 min)\nno data yet");
+            this._barToolTip.SetToolTip(this._progVram, "GPU (last 5 min)\nno data yet");
+            this._barToolTip.SetToolTip(this._progVram2, "GPU2 (last 5 min)\nno data yet");
+
+            // Tooltip just-in-time auffrischen, damit Hover immer den aktuellen 5-Min-Stand zeigt.
+            // MouseMove: laufend beim Bewegen; MouseHover: kurz vor dem Aufpoppen (erfasst auch
+            // einen erst nach dem Anhalten gedrückten Strg); Tastendruck: Strg-Wechsel über Balken.
+            this._progRam.MouseMove += (s, e) => this.RefreshRamToolTip();
+            this._progVram.MouseMove += (s, e) => this.RefreshGpuToolTips();
+            this._progVram2.MouseMove += (s, e) => this.RefreshGpuToolTips();
+            this._progRam.MouseHover += (s, e) => this.RefreshRamToolTip();
+            this._progVram.MouseHover += (s, e) => this.RefreshGpuToolTips();
+            this._progVram2.MouseHover += (s, e) => this.RefreshGpuToolTips();
+            this._progVram.MouseEnter += (s, e) => this._hoveredGpuBar = this._progVram;
+            this._progVram2.MouseEnter += (s, e) => this._hoveredGpuBar = this._progVram2;
+            this._progVram.MouseLeave += (s, e) => this.ClearHoveredGpuBar(this._progVram);
+            this._progVram2.MouseLeave += (s, e) => this.ClearHoveredGpuBar(this._progVram2);
+            this.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.ControlKey && this._hoveredGpuBar is not null)
+                {
+                    this.RefreshGpuToolTips();
+                }
+            };
+            this.KeyUp += (s, e) =>
+            {
+                if (e.KeyCode == Keys.ControlKey && this._hoveredGpuBar is not null)
+                {
+                    this.RefreshGpuToolTips();
+                }
+            };
+        }
+
+        private void ClearHoveredGpuBar(DynamicGradientProgressBar? bar)
+        {
+            if (ReferenceEquals(this._hoveredGpuBar, bar))
+            {
+                this._hoveredGpuBar = null;
+            }
+        }
+
+        private static bool IsCtrlHeldForBarToolTip() => (Control.ModifierKeys & Keys.Control) == Keys.Control;
+
+        private string BuildCombinedGpuToolTipText()
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+            var combined = BarHistory.ComputeCombinedGpuStats(this._gpu1History, this._gpu2History, nowUtc, BarHistory.DefaultWindow);
+            (double used1, double total1) = this.GetCurrentGpuVramGb(this.Gpu);
+            (double used2, double total2) = this.GetCurrentGpuVramGb(this.Gpu2);
+            int gpuCount = this.Gpu2 != null ? 2 : 1;
+            return BarHistory.BuildCombinedGpuToolTip(combined, gpuCount, used1 + used2, total1 + total2, BarHistory.DefaultWindow);
+        }
+
+        private void RefreshRamToolTip()
+        {
+            if (this._barToolTip is null || this._progRam is null)
+            {
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            var stats = BarHistory.ComputeRamStats(this._ramHistory, nowUtc, BarHistory.DefaultWindow);
+            string text = BarHistory.BuildRamToolTip(stats, this._lastRamTotalGb, this._lastRamUsedGb, BarHistory.DefaultWindow);
+            this._barToolTip.SetToolTip(this._progRam, text);
+        }
+
+        private void RefreshGpuToolTips()
+        {
+            if (this._barToolTip is null)
+            {
+                return;
+            }
+
+            // Strg + Hover auf einem beliebigen GPU-Balken => Gesamt-Tooltip für alle GPUs.
+            if (IsCtrlHeldForBarToolTip() && this._progVram is not null)
+            {
+                string combinedText = this.BuildCombinedGpuToolTipText();
+                this._barToolTip.SetToolTip(this._progVram, combinedText);
+                if (this._progVram2 is not null)
+                {
+                    this._barToolTip.SetToolTip(this._progVram2, combinedText);
+                }
+
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (this._progVram is not null)
+            {
+                var stats1 = BarHistory.ComputeGpuStats(this._gpu1History, nowUtc, BarHistory.DefaultWindow);
+                (double used1, double total1) = this.GetCurrentGpuVramGb(this.Gpu);
+                this._barToolTip.SetToolTip(this._progVram, BarHistory.BuildGpuToolTip(stats1, "GPU", used1, total1, BarHistory.DefaultWindow));
+            }
+
+            if (this._progVram2 is not null)
+            {
+                var stats2 = BarHistory.ComputeGpuStats(this._gpu2History, nowUtc, BarHistory.DefaultWindow);
+                (double used2, double total2) = this.GetCurrentGpuVramGb(this.Gpu2);
+                this._barToolTip.SetToolTip(this._progVram2, BarHistory.BuildGpuToolTip(stats2, "GPU2", used2, total2, BarHistory.DefaultWindow));
+            }
+        }
+
+        private (double usedGb, double totalGb) GetCurrentGpuVramGb(GpuStats? gpu)
+        {
+            if (gpu is null)
+            {
+                return (0, 0);
+            }
+
+            try
+            {
+                double total = Math.Round(gpu.GetTotalVramBytes() / 1_073_741_824.0, 3);
+                double used = Math.Round(gpu.GetUsedVramBytes() / 1_073_741_824.0, 3);
+                if (total < 0)
+                {
+                    total = 0;
+                }
+
+                if (used < 0)
+                {
+                    used = 0;
+                }
+
+                return (used, total);
+            }
+            catch
+            {
+                return (0, 0);
+            }
+        }
+
+        private void RecordBarHistories(double ramUsedGb, double gpuUsagePct, double gpuWatts, double vramUsedGb, double vramTotalGb)
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+
+            this._ramHistory.Enqueue(new BarHistory.RamSample(nowUtc, ramUsedGb));
+            BarHistory.PruneOlderThan(this._ramHistory, s => s.Utc, nowUtc, BarHistory.DefaultWindow);
+
+            this._gpu1History.Enqueue(new BarHistory.GpuSample(nowUtc, gpuUsagePct, gpuWatts, vramUsedGb, vramTotalGb));
+            BarHistory.PruneOlderThan(this._gpu1History, s => s.Utc, nowUtc, BarHistory.DefaultWindow);
+
+            if (this.Gpu2 != null)
+            {
+                double gpu2LoadPct;
+                double gpu2Watts;
+                try
+                {
+                    gpu2LoadPct = this.Gpu2.CurrentLoad01 * 100.0;
+                    gpu2Watts = this.Gpu2.CurrentPowerWatts ?? 0.0;
+                }
+                catch
+                {
+                    gpu2LoadPct = 0;
+                    gpu2Watts = 0;
+                }
+
+                (double gpu2UsedGb, double gpu2TotalGb) = this.GetCurrentGpuVramGb(this.Gpu2);
+                this._gpu2History.Enqueue(new BarHistory.GpuSample(nowUtc, gpu2LoadPct, gpu2Watts, gpu2UsedGb, gpu2TotalGb));
+                BarHistory.PruneOlderThan(this._gpu2History, s => s.Utc, nowUtc, BarHistory.DefaultWindow);
+            }
+            else if (this._gpu2History.Count > 0)
+            {
+                this._gpu2History.Clear();
+            }
+
+            this.RefreshRamToolTip();
+            this.RefreshGpuToolTips();
         }
 
         private Timer InitializeUpdateTimer()
@@ -699,6 +882,8 @@ namespace FormsSystemStatsWidget.Forms
 
             try { this.Gpu?.Dispose(); } catch { }
             try { this.Gpu2?.Dispose(); } catch { }
+            try { this._barToolTip?.Dispose(); } catch { }
+            this._barToolTip = null;
         }
 
         protected override void WndProc(ref Message m)
@@ -995,6 +1180,10 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     return;
                 }
+
+                this._lastRamTotalGb = ramTotalGb;
+                this._lastRamUsedGb = ramUsedGb;
+                this.RecordBarHistories(ramUsedGb, gpuUsage, gpuWattage, vramUsedGb, vramTotalGb);
 
                 this.UpdateTitleWithTraffic();
 

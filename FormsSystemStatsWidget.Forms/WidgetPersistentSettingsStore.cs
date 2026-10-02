@@ -151,7 +151,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             catch (Exception ex)
             {
-                Logger.Log($"[Settings] Laden fehlgeschlagen: {ex.Message}");
+                Logger.Log($"[Settings] Load failed: {ex.Message}");
                 return new WidgetPersistentSettings();
             }
         }
@@ -166,7 +166,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             catch (Exception ex)
             {
-                Logger.Log($"[Settings] Speichern fehlgeschlagen: {ex.Message}");
+                Logger.Log($"[Settings] Save failed: {ex.Message}");
             }
         }
     }

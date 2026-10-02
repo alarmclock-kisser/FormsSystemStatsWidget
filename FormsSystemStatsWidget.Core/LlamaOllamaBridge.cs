@@ -249,7 +249,7 @@ namespace FormsSystemStatsWidget.Core
                         if (_modelNCtxTrain > 0 && _detectedNumCtx == 4096)
                         {
                             _detectedNumCtx = _modelNCtxTrain;
-                        },
+                        }
                         // Wenn immer noch der Standardwert verwendet wird, versuche /props zu lesen
                         if (_detectedNumCtx == 4096)
                         {

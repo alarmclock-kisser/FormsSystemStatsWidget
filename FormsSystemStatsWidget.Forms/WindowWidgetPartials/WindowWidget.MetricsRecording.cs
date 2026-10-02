@@ -449,7 +449,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (failure != null)
             {
-                _ = MessageBox.Show(this, $"Beim Aufzeichnen der Systemdaten ist ein Fehler aufgetreten.\n\n{failure.Message}", "Aufzeichnung fehlgeschlagen", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _ = MessageBox.Show(this, $"An error occurred while recording system data.\n\n{failure.Message}", "Recording failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
@@ -457,7 +457,7 @@ namespace FormsSystemStatsWidget.Forms
 
             if (!this._closing)
             {
-                _ = MessageBox.Show(this, summaryText, "Aufzeichnung beendet", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _ = MessageBox.Show(this, summaryText, "Recording finished", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
 
@@ -465,7 +465,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             if (!finalSummary.HasValue)
             {
-                return $"Die Aufzeichnung wurde beendet.\n\nCSV-Datei:\n{filePath}";
+                return $"Recording stopped.\n\nCSV file:\n{filePath}";
             }
 
             RecordingSummary summary = finalSummary.Value;
@@ -473,7 +473,7 @@ namespace FormsSystemStatsWidget.Forms
             string gpuWatts = FormatRecordingNullableNumber(summary.GpuAveragePowerWatts);
             string wattsPerHour = FormatRecordingNullableNumber(summary.TotalAveragePowerWatts);
 
-            return $"Die Aufzeichnung wurde beendet.\n\nCSV-Datei:\n{filePath}\n\nZusammenfassung:\n• Time: {summary.Duration:hh\\:mm\\:ss}\n• CPU Watts: {cpuWatts}\n• GPU(s) Watts: {gpuWatts}\n• ~W/h: {wattsPerHour}\n• ~Load (CPU): {summary.CpuAverageLoadPercent:0.00}%\n• ~Load (GPU(s)): {summary.GpuAverageLoadPercent:0.00}%";
+            return $"Recording stopped.\n\nCSV file:\n{filePath}\n\nSummary:\n• Time: {summary.Duration:hh\\:mm\\:ss}\n• CPU Watts: {cpuWatts}\n• GPU(s) Watts: {gpuWatts}\n• ~W/h: {wattsPerHour}\n• ~Load (CPU): {summary.CpuAverageLoadPercent:0.00}%\n• ~Load (GPU(s)): {summary.GpuAverageLoadPercent:0.00}%";
         }
 
         private static string FormatRecordingNumber(double value, string format = "0.00")
