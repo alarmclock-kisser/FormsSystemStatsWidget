@@ -23,11 +23,11 @@ public sealed class PythonIpcClient : IAsyncDisposable
     /// <summary>
     /// Lädt das Modell in der Python-Engine.
     /// </summary>
-    public async Task<bool> LoadModelAsync(string modelPath, string modelLayout = "Auto", CancellationToken ct = default)
+    public async Task<bool> LoadModelAsync(string modelPath, string modelLayout = "Auto", int contextLength = 0, CancellationToken ct = default)
     {
         try
         {
-            var payload = new { model_path = modelPath, model_layout = modelLayout.ToLowerInvariant() };
+            var payload = new { model_path = modelPath, model_layout = modelLayout.ToLowerInvariant(), context_length = Math.Max(0, contextLength) };
             var json = JsonSerializer.Serialize(payload);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var response = await _httpClient.PostAsync($"{_baseUrl}/load", content, ct);
@@ -197,6 +197,7 @@ public sealed class PythonIpcClient : IAsyncDisposable
                     var completionTokens = 0;
                     var lastFinishReason = "stop";
                     var finishReported = false;
+                    GenerationTimings? lastTimings = null;
 
                     string? line;
                     while ((line = await reader.ReadLineAsync(ct)) != null)
@@ -223,6 +224,10 @@ public sealed class PythonIpcClient : IAsyncDisposable
                             {
                                 promptTokens = usage.TryGetProperty("prompt_tokens", out var pt) ? pt.GetInt32() : promptTokens;
                                 completionTokens = usage.TryGetProperty("completion_tokens", out var ct2) ? ct2.GetInt32() : completionTokens;
+                            }
+                            if (root.TryGetProperty("timings", out var timings) && timings.ValueKind == JsonValueKind.Object)
+                            {
+                                lastTimings = ParseTimings(timings);
                             }
                             if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
                             {
@@ -251,7 +256,7 @@ public sealed class PythonIpcClient : IAsyncDisposable
                         {
                             lastFinishReason = chunkFinishReason;
                             finishReported = true;
-                            yield return new PythonGenerationResult(sb.ToString(), promptTokens, completionTokens, chunkFinishReason);
+                            yield return new PythonGenerationResult(sb.ToString(), promptTokens, completionTokens, chunkFinishReason, lastTimings);
                         }
                         else
                         {
@@ -261,10 +266,35 @@ public sealed class PythonIpcClient : IAsyncDisposable
 
                     if (sb.Length > 0 && !finishReported)
                     {
-                        yield return new PythonGenerationResult(sb.ToString(), promptTokens, completionTokens, lastFinishReason);
+                        yield return new PythonGenerationResult(sb.ToString(), promptTokens, completionTokens, lastFinishReason, lastTimings);
                     }
                 }
             }
+        }
+    }
+
+    private static GenerationTimings? ParseTimings(JsonElement timings)
+    {
+        try
+        {
+            static int GetInt(JsonElement e, string name) =>
+                e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
+            static double GetDouble(JsonElement e, string name) =>
+                e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetDouble() : 0.0;
+
+            return new GenerationTimings(
+                GetInt(timings, "prompt_tokens"),
+                GetInt(timings, "completion_tokens"),
+                GetInt(timings, "context_tokens"),
+                GetDouble(timings, "ttft_ms"),
+                GetDouble(timings, "decode_ms"),
+                GetDouble(timings, "total_ms"),
+                GetDouble(timings, "prompt_tps"),
+                GetDouble(timings, "gen_tps"));
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -278,6 +308,19 @@ public sealed class PythonIpcClient : IAsyncDisposable
 /// <summary>
 /// Ergebnis einer Python-Generation.
 /// </summary>
-public sealed record PythonGenerationResult(string Text, int PromptTokens, int CompletionTokens, string FinishReason);
+public sealed record PythonGenerationResult(string Text, int PromptTokens, int CompletionTokens, string FinishReason, GenerationTimings? Timings = null);
+
+/// <summary>
+/// Per-generation timings from the Python engine (PP/TG, TTFT, context size).
+/// </summary>
+public sealed record GenerationTimings(
+    int PromptTokens,
+    int CompletionTokens,
+    int ContextTokens,
+    double TtftMs,
+    double DecodeMs,
+    double TotalMs,
+    double PromptTps,
+    double GenTps);
 
 public sealed record PythonChatMessage(string Role, string? Content, string? Name);

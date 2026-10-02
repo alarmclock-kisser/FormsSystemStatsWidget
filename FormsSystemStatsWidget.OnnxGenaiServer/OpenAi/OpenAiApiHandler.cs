@@ -80,7 +80,8 @@ public static class OpenAiApiHandler
                     var finalChunk = new ChatCompletionStreamChunk
                     {
                         Id = id, Created = created, Model = modelId,
-                        Choices = [new ChatCompletionStreamChoice { Delta = new ChatMessageDelta { }, FinishReason = result.FinishReason }]
+                        Choices = [new ChatCompletionStreamChoice { Delta = new ChatMessageDelta { }, FinishReason = result.FinishReason }],
+                        Timings = ToTimings(result.Timings)
                     };
                     await WriteSseAsync(stream, finalChunk);
                     await WriteStringAsync(stream, "data: [DONE]\r\n\r");
@@ -93,6 +94,7 @@ public static class OpenAiApiHandler
         var nonStreamPromptTokens = 0;
         var nonStreamCompletionTokens = 0;
         var finishReason = "stop";
+        Engine.GenerationTimings? chatTimings = null;
         await foreach (var result in engine.GenerateChatAsync(messages, parameters, request.EnableThinking ?? false, ct))
         {
             if (result.FinishReason == "error")
@@ -104,13 +106,15 @@ public static class OpenAiApiHandler
             nonStreamPromptTokens = result.PromptTokens;
             nonStreamCompletionTokens = result.CompletionTokens;
             finishReason = result.FinishReason;
+            chatTimings = result.Timings;
         }
 
         var response = new ChatCompletionResponse
         {
             Id = id, Created = created, Model = modelId,
             Choices = [new ChatCompletionChoice { Message = new ChatMessage { Role = "assistant", Content = nonStreamSb.ToString() }, FinishReason = finishReason }],
-            Usage = new Usage { PromptTokens = nonStreamPromptTokens, CompletionTokens = nonStreamCompletionTokens, TotalTokens = nonStreamPromptTokens + nonStreamCompletionTokens }
+            Usage = new Usage { PromptTokens = nonStreamPromptTokens, CompletionTokens = nonStreamCompletionTokens, TotalTokens = nonStreamPromptTokens + nonStreamCompletionTokens },
+            Timings = ToTimings(chatTimings)
         };
         await WriteJsonAsync(ctx, response, 200);
     }
@@ -171,7 +175,8 @@ public static class OpenAiApiHandler
                     var finalChunk = new CompletionStreamChunk
                     {
                         Id = id, Created = created, Model = modelId,
-                        Choices = [new CompletionStreamChoice { Text = string.Empty, FinishReason = result.FinishReason }]
+                        Choices = [new CompletionStreamChoice { Text = string.Empty, FinishReason = result.FinishReason }],
+                        Timings = ToTimings(result.Timings)
                     };
                     await WriteSseAsync(stream, finalChunk);
                     await WriteStringAsync(stream, "data: [DONE]\r\n\r");
@@ -184,6 +189,7 @@ public static class OpenAiApiHandler
         var nonStreamPromptTokens = 0;
         var nonStreamCompletionTokens = 0;
         var finishReason = "stop";
+        Engine.GenerationTimings? completionTimings = null;
         await foreach (var result in engine.GenerateAsync(request.Prompt, parameters, ct))
         {
             if (result.FinishReason == "error")
@@ -195,13 +201,15 @@ public static class OpenAiApiHandler
             nonStreamPromptTokens = result.PromptTokens;
             nonStreamCompletionTokens = result.CompletionTokens;
             finishReason = result.FinishReason;
+            completionTimings = result.Timings;
         }
 
         var response = new CompletionResponse
         {
             Id = id, Created = created, Model = modelId,
             Choices = [new CompletionChoice { Text = nonStreamSb.ToString(), FinishReason = finishReason }],
-            Usage = new Usage { PromptTokens = nonStreamPromptTokens, CompletionTokens = nonStreamCompletionTokens, TotalTokens = nonStreamPromptTokens + nonStreamCompletionTokens }
+            Usage = new Usage { PromptTokens = nonStreamPromptTokens, CompletionTokens = nonStreamCompletionTokens, TotalTokens = nonStreamPromptTokens + nonStreamCompletionTokens },
+            Timings = ToTimings(completionTimings)
         };
         await WriteJsonAsync(ctx, response, 200);
     }
@@ -269,6 +277,26 @@ public static class OpenAiApiHandler
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
+
+    private static GenerationTimings? ToTimings(Engine.GenerationTimings? timings)
+    {
+        if (timings is null)
+        {
+            return null;
+        }
+
+        return new GenerationTimings
+        {
+            PromptN = timings.PromptTokens,
+            PromptMs = timings.TtftMs,
+            PredictedN = timings.CompletionTokens,
+            PredictedMs = timings.DecodeMs,
+            TtftMs = timings.TtftMs,
+            PromptTps = timings.PromptTps,
+            GenTps = timings.GenTps,
+            ContextN = timings.ContextTokens
+        };
+    }
 
     private static GenerationParameters BuildParameters(
         float? temperature, float? topP, float? typicalP, int? topK, int? maxTokens,

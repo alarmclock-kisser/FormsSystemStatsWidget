@@ -95,6 +95,9 @@ public sealed class ChatCompletionResponse
 
     [JsonPropertyName("usage")]
     public Usage Usage { get; set; } = new();
+
+    [JsonPropertyName("timings")]
+    public GenerationTimings? Timings { get; set; }
 }
 
 public sealed class ChatCompletionChoice
@@ -125,6 +128,9 @@ public sealed class ChatCompletionStreamChunk
 
     [JsonPropertyName("choices")]
     public required List<ChatCompletionStreamChoice> Choices { get; set; }
+
+    [JsonPropertyName("timings")]
+    public GenerationTimings? Timings { get; set; }
 }
 
 public sealed class ChatCompletionStreamChoice
@@ -214,6 +220,9 @@ public sealed class CompletionResponse
 
     [JsonPropertyName("usage")]
     public Usage Usage { get; set; } = new();
+
+    [JsonPropertyName("timings")]
+    public GenerationTimings? Timings { get; set; }
 }
 
 public sealed class CompletionChoice
@@ -244,6 +253,9 @@ public sealed class CompletionStreamChunk
 
     [JsonPropertyName("choices")]
     public required List<CompletionStreamChoice> Choices { get; set; }
+
+    [JsonPropertyName("timings")]
+    public GenerationTimings? Timings { get; set; }
 }
 
 public sealed class CompletionStreamChoice
@@ -346,6 +358,38 @@ public sealed class Usage
 
     [JsonPropertyName("total_tokens")]
     public int TotalTokens { get; set; }
+}
+
+/// <summary>
+/// Generation timings: llama.cpp-compatible counters (prompt_n/prompt_ms,
+/// predicted_n/predicted_ms) plus TTFT and PP/TG throughputs.
+/// prompt_ms is the time-to-first-token (prefill-dominated).
+/// </summary>
+public sealed class GenerationTimings
+{
+    [JsonPropertyName("prompt_n")]
+    public int PromptN { get; set; }
+
+    [JsonPropertyName("prompt_ms")]
+    public double PromptMs { get; set; }
+
+    [JsonPropertyName("predicted_n")]
+    public int PredictedN { get; set; }
+
+    [JsonPropertyName("predicted_ms")]
+    public double PredictedMs { get; set; }
+
+    [JsonPropertyName("ttft_ms")]
+    public double TtftMs { get; set; }
+
+    [JsonPropertyName("prompt_tps")]
+    public double PromptTps { get; set; }
+
+    [JsonPropertyName("gen_tps")]
+    public double GenTps { get; set; }
+
+    [JsonPropertyName("context_n")]
+    public int ContextN { get; set; }
 }
 
 public sealed class ErrorResponse

@@ -30,7 +30,7 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 from werkzeug.serving import BaseWSGIServer, make_server
 
 from .engine import InferenceEngine
-from .errors import OnnxEngineError
+from .errors import ContextExceededError, OnnxEngineError
 from .generation import GenerationRequest, SamplingConfig, StopConfig
 
 logger = logging.getLogger("onnx_engine.server")
@@ -267,6 +267,7 @@ def _sse_chunk(
     finish_reason: str | None,
     prompt_tokens: int,
     completion_tokens: int,
+    timings: dict[str, Any] | None = None,
 ) -> str:
     """Build an OpenAI-compatible SSE chunk."""
     chunk: dict[str, Any] = {
@@ -288,6 +289,8 @@ def _sse_chunk(
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
         }
+        if timings is not None:
+            chunk["timings"] = timings
     return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
 
@@ -327,6 +330,14 @@ def load() -> Response:
     if not isinstance(model_layout, str) or model_layout.strip().casefold() not in {"auto", "main", "partitioned"}:
         _lifecycle.end_operation("Loading", loaded=_engine is not None)
         return _error_response("INVALID_MODEL_LAYOUT", "model_layout must be auto, main, or partitioned", 400)
+    try:
+        context_length = int(data.get("context_length", 0) or 0)
+    except (TypeError, ValueError):
+        _lifecycle.end_operation("Loading", loaded=_engine is not None)
+        return _error_response("INVALID_CONTEXT_LENGTH", "context_length must be a non-negative integer", 400)
+    if context_length < 0:
+        _lifecycle.end_operation("Loading", loaded=_engine is not None)
+        return _error_response("INVALID_CONTEXT_LENGTH", "context_length must be a non-negative integer", 400)
 
     try:
         with _engine_lock:
@@ -335,14 +346,19 @@ def load() -> Response:
 
             candidate: InferenceEngine | None = None
             try:
-                candidate = InferenceEngine(model_path, model_layout=model_layout)
+                candidate = InferenceEngine(
+                    model_path,
+                    model_layout=model_layout,
+                    context_length=context_length,
+                )
                 candidate.load()
                 _engine = candidate
                 candidate = None
-                logger.info("Model loaded: %s", model_path)
+                logger.info("Model loaded: %s (context_length=%d)", model_path, context_length)
                 return jsonify({
                     "status": "loaded",
                     "model_path": model_path,
+                    "context_length": context_length,
                     "providers": list(_engine.active_providers()),
                 }), 200
             except OnnxEngineError as ex:
@@ -408,7 +424,14 @@ def generate() -> Response:
         prompt_tokens = 0
         completion_tokens = 0
         try:
-            context, chunks = engine.generate(gen_request)
+            try:
+                context, chunks, _tracker = engine.generate_checked(gen_request)
+            except ContextExceededError as ex:
+                # Fail fast BEFORE any GPU work: OpenAI-consistent
+                # finish_reason "length" (prompt + max_tokens > context_length).
+                yield _sse_chunk(request_id, model_id, "", "length", ex.prompt_tokens, 0)
+                yield "data: [DONE]\n\n"
+                return
             prompt_tokens = context.prompt_token_count
 
             for chunk in chunks:
@@ -426,10 +449,12 @@ def generate() -> Response:
                 finish_reason = "cancelled"
             elif chunk.finished:
                 finish_reason = "stop"
+            timings = engine.get_generation_stats().get("last")
             yield _sse_chunk(
                 request_id, model_id, "",
                 finish_reason,
                 prompt_tokens, completion_tokens,
+                timings=timings,
             )
             yield "data: [DONE]\n\n"
         except OnnxEngineError as ex:
@@ -452,6 +477,20 @@ def generate() -> Response:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.route("/stats", methods=["GET"])
+def generation_stats() -> Response:
+    """Last-generation timings (PP/TG, TTFT, context tokens) + totals + config."""
+    try:
+        engine = _get_engine()
+    except OnnxEngineError as ex:
+        return _error_response("ENGINE_NOT_READY", str(ex), 503)
+    try:
+        return jsonify(engine.get_generation_stats()), 200
+    except Exception as ex:
+        logger.exception("Error reading generation stats")
+        return _error_response("STATS_FAILED", str(ex), 500)
 
 
 @app.route("/shutdown", methods=["POST"])

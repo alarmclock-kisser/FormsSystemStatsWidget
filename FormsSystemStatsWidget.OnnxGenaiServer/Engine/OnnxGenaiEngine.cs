@@ -151,7 +151,7 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
                 _pythonServerBaseUrl = _pythonSupervisor.BaseUrl;
                 _logger.LogInformation("Lade Modell in Python-Engine: {Path}", model.RootDir);
                 _pythonSupervisor.SetModelState("Loading", model.RootDir);
-                var loaded = await _pythonIpc.LoadModelAsync(model.RootDir, modelLayout);
+                var loaded = await _pythonIpc.LoadModelAsync(model.RootDir, modelLayout, _options.ContextLength);
                 _pythonSupervisor.SetModelState(loaded ? "Loaded" : "Unloaded", model.RootDir);
                 if (!loaded)
                 {
@@ -172,7 +172,7 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
         await Task.CompletedTask;
     }
 
-    public sealed record GenerationResult(string Text, int PromptTokens, int CompletionTokens, string FinishReason);
+    public sealed record GenerationResult(string Text, int PromptTokens, int CompletionTokens, string FinishReason, GenerationTimings? Timings = null);
 
     public async IAsyncEnumerable<GenerationResult> GenerateAsync(
         string prompt, GenerationParameters parameters,
@@ -187,7 +187,7 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
         // Phase 3b: Forward request to Python-Engine via IPC
         await foreach (var result in _pythonIpc.GenerateAsync(prompt, parameters, ct))
         {
-            yield return new GenerationResult(result.Text, result.PromptTokens, result.CompletionTokens, result.FinishReason);
+            yield return new GenerationResult(result.Text, result.PromptTokens, result.CompletionTokens, result.FinishReason, result.Timings);
         }
     }
 
@@ -205,7 +205,35 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
 
         await foreach (var result in _pythonIpc.GenerateChatAsync(messages, parameters, enableThinking, ct))
         {
-            yield return new GenerationResult(result.Text, result.PromptTokens, result.CompletionTokens, result.FinishReason);
+            yield return new GenerationResult(result.Text, result.PromptTokens, result.CompletionTokens, result.FinishReason, result.Timings);
+        }
+    }
+
+    /// <summary>
+    /// Fragt die Generation-Stats der Python-Engine ab (letzte Timings + Totals).
+    /// Gibt den rohen JSON-Body zurück oder null, wenn nicht verfügbar.
+    /// </summary>
+    public async Task<string?> GetGenerationStatsAsync(CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(_pythonServerBaseUrl))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var response = await client.GetAsync($"{_pythonServerBaseUrl.TrimEnd('/')}/stats", ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content.ReadAsStringAsync(ct);
+        }
+        catch
+        {
+            return null;
         }
     }
 

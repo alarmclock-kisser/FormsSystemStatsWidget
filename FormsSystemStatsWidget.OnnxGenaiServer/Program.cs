@@ -181,6 +181,22 @@ app.MapGet("/ready", (HttpContext ctx) =>
     return Results.Ok(new { ready = true, loadedModelId = engine.LoadedModelId });
 });
 
+// Generation stats: last timings (PP/TG, TTFT, context tokens) + totals.
+// Proxied from the Python engine; 503 while no generation data is available.
+app.MapGet("/stats", async (HttpContext ctx) =>
+{
+    string? statsJson = await engine.GetGenerationStatsAsync(ctx.RequestAborted);
+    if (string.IsNullOrWhiteSpace(statsJson))
+    {
+        string reason = engine.IsReady ? "no generation stats yet" : (engine.LastError ?? "engine not ready");
+        return Results.Content(
+            System.Text.Json.JsonSerializer.Serialize(new { ready = false, reason }),
+            "application/json",
+            statusCode: 503);
+    }
+    return Results.Content(statsJson, "application/json", statusCode: 200);
+});
+
 app.MapGet("/metrics", () =>
 {
     var cuda = EnvironmentDiscovery.DiscoverCuda();

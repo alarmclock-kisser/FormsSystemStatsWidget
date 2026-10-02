@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from .context import ContextSnapshotStore, ContextState
-from .errors import EngineStateError, ModelValidationError
+from .errors import ContextExceededError, EngineStateError, ModelValidationError
 from .generation import (
     GenerationChunk,
     GenerationContext,
@@ -30,6 +31,64 @@ from .runtime import (
 from .tokenization import TokenizerService
 
 
+def check_context_limit(prompt_tokens: int, max_new_tokens: int, context_length: int) -> None:
+    """Fail fast when prompt + requested tokens exceed the configured context.
+
+    Pure function (no model needed) so it is unit-testable. Raises
+    ContextExceededError with the counts; ``context_length <= 0`` disables
+    the cap (unlimited, legacy behaviour).
+    """
+    ctx = int(context_length or 0)
+    if ctx <= 0:
+        return
+    if int(prompt_tokens) + int(max_new_tokens) > ctx:
+        raise ContextExceededError(int(prompt_tokens), int(max_new_tokens), ctx)
+
+
+class _GenerationTimingTracker:
+    """Records PP/TG/TTFT timings for one generation.
+
+    TTFT covers prompt tokenization is excluded (measured from generate start)
+    and includes prefill + first decode step, i.e. prompt_tps ~= prefill
+    throughput (PP), gen_tps = steady decode throughput (TG).
+    """
+
+    def __init__(self, prompt_tokens: int) -> None:
+        self._prompt_tokens = int(prompt_tokens)
+        self._start = time.perf_counter()
+        self._first_at: float | None = None
+        self._generated = 0
+        self._finished = False
+
+    def observe(self, chunk: GenerationChunk) -> None:
+        now = time.perf_counter()
+        if self._first_at is None:
+            self._first_at = now
+        self._generated = int(chunk.generated_tokens)
+        if chunk.finished:
+            self._finished = True
+
+    def snapshot(self, *, finish_reason: str) -> dict[str, Any]:
+        end = time.perf_counter()
+        first_at = self._first_at if self._first_at is not None else end
+        ttft_ms = max(0.0, (first_at - self._start) * 1000.0)
+        decode_ms = max(0.0, (end - first_at) * 1000.0)
+        total_ms = max(0.0, (end - self._start) * 1000.0)
+        prompt_tps = (self._prompt_tokens / (ttft_ms / 1000.0)) if ttft_ms > 0 else 0.0
+        gen_tps = (self._generated / (decode_ms / 1000.0)) if decode_ms > 0 and self._generated > 0 else 0.0
+        return {
+            "prompt_tokens": self._prompt_tokens,
+            "completion_tokens": self._generated,
+            "context_tokens": self._prompt_tokens + self._generated,
+            "ttft_ms": round(ttft_ms, 2),
+            "decode_ms": round(decode_ms, 2),
+            "total_ms": round(total_ms, 2),
+            "prompt_tps": round(prompt_tps, 2),
+            "gen_tps": round(gen_tps, 2),
+            "finish_reason": finish_reason,
+        }
+
+
 class InferenceEngine:
     """
     Public high-level Python inference core.
@@ -48,6 +107,7 @@ class InferenceEngine:
         allow_cpu_fallback: bool = False,
         preload_cuda_dll_dependencies: bool = True,
         model_layout: str = "auto",
+        context_length: int = 0,
     ) -> None:
         self._model_path = Path(model_path)
         self._cuda = cuda or CudaRuntimeConfig()
@@ -55,6 +115,7 @@ class InferenceEngine:
         self._allow_cpu_fallback = allow_cpu_fallback
         self._preload_cuda_dll_dependencies = preload_cuda_dll_dependencies
         self._model_layout = model_layout
+        self._context_length = max(0, int(context_length or 0))
         self._session_manager = self._new_session_manager(self._cuda)
         self._stage1_session_manager: OrtSessionManager | None = None
         self._trust_remote_code = trust_remote_code
@@ -64,6 +125,17 @@ class InferenceEngine:
         self._adapter: CausalOnnxAdapter | DualStageOnnxAdapter | None = None
         self._generation: GenerationEngine | None = None
         self._snapshot_store = ContextSnapshotStore()
+        self._last_generation: dict[str, Any] | None = None
+        self._generation_totals = {
+            "generations": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+        }
+
+    @property
+    def context_length(self) -> int:
+        """Configured context cap (0 = unlimited)."""
+        return self._context_length
 
     def _new_session_manager(self, cuda: CudaRuntimeConfig) -> OrtSessionManager:
         return OrtSessionManager(
@@ -219,6 +291,71 @@ class InferenceEngine:
     ) -> tuple[GenerationContext, Iterator[GenerationChunk]]:
         context = self.prepare(request, existing=existing)
         return context, self.generation.generate(context, request)
+
+    def generate_checked(
+        self,
+        request: GenerationRequest,
+        *,
+        existing: ContextState | None = None,
+    ) -> tuple[GenerationContext, Iterator[GenerationChunk], _GenerationTimingTracker]:
+        """Like :meth:`generate`, but enforces the context cap and tracks timings.
+
+        Raises ContextExceededError before any GPU work when
+        prompt_tokens + max_new_tokens exceeds the configured context_length.
+        """
+        context = self.prepare(request, existing=existing)
+        check_context_limit(
+            context.prompt_token_count,
+            request.stopping.max_new_tokens,
+            self._context_length,
+        )
+        self._generation_totals["generations"] += 1
+        self._generation_totals["prompt_tokens"] += context.prompt_token_count
+        tracker = _GenerationTimingTracker(context.prompt_token_count)
+        return context, self._tracked_chunks(request, context, tracker), tracker
+
+    def _tracked_chunks(
+        self,
+        request: GenerationRequest,
+        context: GenerationContext,
+        tracker: _GenerationTimingTracker,
+    ) -> Iterator[GenerationChunk]:
+        assert self._generation is not None
+        try:
+            for chunk in self._generation.generate(context, request):
+                tracker.observe(chunk)
+                yield chunk
+        finally:
+            completion = tracker._generated
+            self._generation_totals["completion_tokens"] += completion
+            stats = tracker.snapshot(
+                finish_reason="stop" if tracker._finished else "cancelled"
+            )
+            stats["timestamp_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._last_generation = stats
+
+    def get_generation_stats(self) -> dict[str, Any]:
+        """Last-generation timings + totals + effective config (serves GET /stats)."""
+        try:
+            providers = list(self.active_providers())
+        except Exception:
+            providers = []
+        return {
+            "last": self._last_generation,
+            "totals": dict(self._generation_totals),
+            "config": {
+                "model_path": str(self._model_path),
+                "model_layout": self._model_layout,
+                "context_length": self._context_length,
+                "kv_cache": {
+                    "k_type": "f16",
+                    "v_type": "f16",
+                    "quantized": False,
+                    "reason": "graph past inputs are fp16-only; cache-side requantization cannot lower peak VRAM",
+                },
+                "providers": providers,
+            },
+        }
 
     async def generate_async(
         self,
