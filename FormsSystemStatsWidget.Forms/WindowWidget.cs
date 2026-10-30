@@ -63,6 +63,7 @@ namespace FormsSystemStatsWidget.Forms
         private IReadOnlyList<(string processName, double cpuPercent)> _cachedTopTasks = Array.Empty<(string processName, double cpuPercent)>();
         private DateTime _lastTopTasksSampleUtc = DateTime.MinValue;
         private DateTime _lastTickDiagnosticsUtc = DateTime.MinValue;
+        private bool _cpuWattStartupLogged;
         private DebugConsoleForm? _debugConsoleForm;
         private WidgetPersistentSettings _persistentSettings = new();
         private bool _explicitWidgetCloseRequested;
@@ -150,6 +151,7 @@ namespace FormsSystemStatsWidget.Forms
             this.ApplyPersistentSettings();
 
             this.InitializeAudioHotkeys();
+            this.LogCpuWattStartupOnce();
         }
 
         private void InitializeProgressBars()
@@ -558,6 +560,17 @@ namespace FormsSystemStatsWidget.Forms
                 var gpuRef = this.Gpu;
 
                 var threadsTask = Task.Run(() => CpuStats.GetThreadUsages());
+                var cpuTelemetryTask = Task.Run(() =>
+                {
+                    try
+                    {
+                        return CpuStats.GetCpuTelemetrySnapshot();
+                    }
+                    catch
+                    {
+                        return new CpuStats.CpuTelemetrySnapshot(null, null);
+                    }
+                });
                 var topTasksTask = this.GetTopTasksSnapshotAsync();
                 var ramTask = Task.Run(() =>
                 {
@@ -584,14 +597,15 @@ namespace FormsSystemStatsWidget.Forms
                 });
                 var trafficTask = Task.Run(() => TrafficStats.Sample(this._updateIntervalMs));
 
-                await Task.WhenAll(threadsTask, topTasksTask, ramTask, gpuTask, trafficTask);
+                await Task.WhenAll(threadsTask, cpuTelemetryTask, topTasksTask, ramTask, gpuTask, trafficTask);
 
                 var threads = threadsTask.Result;
+                var cpuTelemetry = cpuTelemetryTask.Result;
                 var topTasks = topTasksTask.Result;
                 var (ramTotalGb, ramUsedGb, pageFileUsedGb, pageFileMaxGb) = ramTask.Result;
                 var (gpuUsage, gpuWattage, vramTotalGb, vramUsedGb) = gpuTask.Result;
 
-                this.UpdateAverageCpuLoadAndTemperatureLabel(threads);
+                this.UpdateAverageCpuLoadAndTemperatureLabel(threads, cpuTelemetry);
                 this.UpdateTopTasksLabel(topTasks);
                 await this.UpdateLlamaServerGenerationSpeedAsync();
 
@@ -852,39 +866,85 @@ namespace FormsSystemStatsWidget.Forms
             return Task.CompletedTask;
         }
 
-        private void UpdateAverageCpuLoadAndTemperatureLabel(float[] usages)
+        private void UpdateAverageCpuLoadAndTemperatureLabel(float[] usages, CpuStats.CpuTelemetrySnapshot? telemetry = null)
         {
             if (this._closing)
             {
                 return;
             }
 
-            double averageLoadPercent = usages.Length > 0 ? usages.Average() * 100d : 0d;
+            try
+            {
+                double averageLoadPercent = usages.Length > 0 ? usages.Average() * 100d : 0d;
 
-            // No thermal or wattage getting here, since it always fails and causes frequent Exceptions, just set avg. load to label
-            this.label_avgCpuLoadAndTemperature.Text = averageLoadPercent.ToString("0.000") + "%";
-            return;
+                if (telemetry?.PackagePowerWatts is double watts)
+                {
+                    this.label_avgCpuLoadAndTemperature.Text = $"{averageLoadPercent:0.000}%  |  {watts:F1} W";
+                }
+                else
+                {
+                    this.label_avgCpuLoadAndTemperature.Text = $"{averageLoadPercent:0.000}%  |  ? W";
+                }
+            }
+            catch
+            {
+                try
+                {
+                    double averageLoadPercent = usages.Length > 0 ? usages.Average() * 100d : 0d;
+                    this.label_avgCpuLoadAndTemperature.Text = averageLoadPercent.ToString("0.000") + "%";
+                }
+                catch
+                {
+                }
+            }
+        }
 
+        private void LogCpuWattStartupOnce()
+        {
+            if (this._cpuWattStartupLogged)
+            {
+                return;
+            }
+            this._cpuWattStartupLogged = true;
 
-            // NON-EFFECTIVE CODE (CUT-OFF, NEVER REACHED (for a reason (!)))
-            //CpuStats.CpuTelemetrySnapshot telemetry = CpuStats.GetCpuTelemetrySnapshot();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                    if (this._closing)
+                    {
+                        return;
+                    }
 
-            //List<string> parts = new()
-            //{
-            //    $"{averageLoadPercent:0.00}%"
-            //};
+                    CpuStats.CpuTelemetrySnapshot snap = CpuStats.GetCpuTelemetrySnapshot();
+                    if (!snap.PackagePowerWatts.HasValue)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+                        if (this._closing)
+                        {
+                            return;
+                        }
+                        snap = CpuStats.GetCpuTelemetrySnapshot();
+                    }
 
-            //if (telemetry.AverageTemperatureCelsius.HasValue)
-            //{
-            //    parts.Add($"{telemetry.AverageTemperatureCelsius.Value:0.0} °C");
-            //}
-
-            //if (telemetry.PackagePowerWatts.HasValue)
-            //{
-            //    parts.Add($"{telemetry.PackagePowerWatts.Value:0.0} W");
-            //}
-
-            //this.label_avgCpuLoadAndTemperature.Text = string.Join(" | ", parts);
+                    if (snap.PackagePowerWatts.HasValue)
+                    {
+                        StaticLogger.Log($"CPU-Watt OK: {snap.PackagePowerWatts.Value:F1} W", LogLevel.Info);
+                    }
+                    else
+                    {
+                        StaticLogger.Log("CPU-Watt nicht verfügbar: " + CpuStats.GetCpuPowerStatus(), LogLevel.Warning);
+                        foreach (string line in CpuStats.ListCpuPowerSensors(20))
+                        {
+                            StaticLogger.Log("CPU-PowerSensor: " + line, LogLevel.Warning);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            });
         }
 
 
