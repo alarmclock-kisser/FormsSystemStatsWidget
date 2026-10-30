@@ -1268,24 +1268,26 @@ namespace FormsSystemStatsWidget.Core
         private static double? _cachedPageFileMaxGb;
 
         /// <summary>
-        /// Verwendete Pagefile in GB (aus WMI Win32_PageFileUsage.CurrentUsage).
+        /// Geschätzter Pagefile-Anteil des zugesicherten Speichers in GB.
         /// </summary>
         public static double GetUsedPageFileGb()
         {
-            try
-            {
-                using var searcher = new ManagementObjectSearcher("SELECT CurrentUsage FROM Win32_PageFileUsage WHERE NOT TempPageFile");
-                foreach (ManagementObject obj in searcher.Get())
-                {
-                    return Convert.ToDouble(obj["CurrentUsage"]) / 1024.0;
-                }
-            }
-            catch { }
-            return 0;
+            MEMORYSTATUSEX status = GetMemoryStatus();
+            ulong committedBytes = status.ullTotalPageFile >= status.ullAvailPageFile
+                ? status.ullTotalPageFile - status.ullAvailPageFile
+                : 0;
+            ulong usedPhysicalBytes = status.ullTotalPhys >= status.ullAvailPhys
+                ? status.ullTotalPhys - status.ullAvailPhys
+                : 0;
+            ulong usedPageFileBytes = committedBytes > usedPhysicalBytes
+                ? committedBytes - usedPhysicalBytes
+                : 0;
+
+            return usedPageFileBytes / 1_073_741_824.0;
         }
 
         /// <summary>
-        /// Maximale Pagefile in GB (aus WMI Win32_PageFileSetting.MaximumSize, gecacht da nur bei Reboot änderbar).
+        /// Konfigurierte maximale Pagefile-Größe in GB, ohne den physischen RAM.
         /// </summary>
         public static double GetMaxPageFileGb()
         {
@@ -1296,23 +1298,24 @@ namespace FormsSystemStatsWidget.Core
 
             try
             {
-                using var searcher = new ManagementObjectSearcher("SELECT MaximumSize FROM Win32_PageFileSetting");
+                using var searcher = new ManagementObjectSearcher(
+                    "SELECT MaximumSize FROM Win32_PageFileSetting");
+
+                double maxMegabytes = 0;
                 foreach (ManagementObject obj in searcher.Get())
                 {
-                    double maxMb = Convert.ToDouble(obj["MaximumSize"]);
-                    if (maxMb > 0)
-                    {
-                        _cachedPageFileMaxGb = maxMb / 1024.0;
-                        return _cachedPageFileMaxGb.Value;
-                    }
+                    maxMegabytes += Convert.ToDouble(obj["MaximumSize"]);
                 }
-            }
-            catch { }
 
-            _cachedPageFileMaxGb = 0;
-            return 0;
+                _cachedPageFileMaxGb = maxMegabytes / 1024.0;
+            }
+            catch
+            {
+                _cachedPageFileMaxGb = 0;
+            }
+
+            return _cachedPageFileMaxGb.Value;
         }
     }
 
 }
-

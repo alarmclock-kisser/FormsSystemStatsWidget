@@ -24,6 +24,7 @@ namespace FormsSystemStatsWidget.Forms
         private int _updateIntervalMs = 420;
         private Color _diagramColor = Color.White;
         private Color? _percentageColor = Color.BlueViolet;
+        private LoopDetectionService _loopDetectionService;
 
         public bool AppendGenerationStats => this.printGenerationStatsToolStripMenuItem.Checked;
 
@@ -40,21 +41,47 @@ namespace FormsSystemStatsWidget.Forms
         internal const int GWL_EXSTYLE = -20;
         internal const int WS_EX_LAYERED = 0x80000;
 
-        // Audio recording
-        internal static readonly AudioHandling Audios = new();
+        // Helper methods for monitor and dock state detection
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromPoint(Point pt, uint dwFlags);
 
-        private bool _isAwaitingHotkeyInput = false;
-        private Dictionary<Keys, bool> _currentModifierKeys = [];
-        private Keys? _firstModifierKey = null;
-        private Keys? _otherKey = null;
+        internal const uint MONITOR_DEFAULTTOPRIMARY = 0x00000001;
+        internal const uint MONITOR_DEFAULTTONEAREST = 0x00000002;
 
+        private static MONITORINFO _monitorInfo = new MONITORINFO();
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct MONITORINFO
+        {
+            public int cbSize;
+            public RECT rcMonitor;
+            public RECT rcWork;
+            public uint dwFlags;
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct RECT
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
 
         private readonly Timer UpdateTimer;
+        private float FontSizeScale;
         private GpuStats? Gpu;
         private GpuStats? Gpu2 = null;
         private DynamicGradientProgressBar? _progRam;
         private DynamicGradientProgressBar? _progVram;
         private DynamicGradientProgressBar? _progVram2;
+        private ToolTip? _barToolTip;
+        private DynamicGradientProgressBar? _hoveredGpuBar;
+        private readonly Queue<BarHistory.RamSample> _ramHistory = new();
+        private readonly Queue<BarHistory.GpuSample> _gpu1History = new();
+        private readonly Queue<BarHistory.GpuSample> _gpu2History = new();
+        private double _lastRamTotalGb;
+        private double _lastRamUsedGb;
         private volatile bool _closing = false;
         private int _tickInProgress = 0;
         private CancellationTokenSource? _recordingCancellationTokenSource;
@@ -63,11 +90,15 @@ namespace FormsSystemStatsWidget.Forms
         private IReadOnlyList<(string processName, double cpuPercent)> _cachedTopTasks = Array.Empty<(string processName, double cpuPercent)>();
         private DateTime _lastTopTasksSampleUtc = DateTime.MinValue;
         private DateTime _lastTickDiagnosticsUtc = DateTime.MinValue;
-        private bool _cpuWattStartupLogged;
         private DebugConsoleForm? _debugConsoleForm;
         private WidgetPersistentSettings _persistentSettings = new();
         private bool _explicitWidgetCloseRequested;
+        private bool _onnxSettingsInitialized;
+        private bool _refreshingOnnxModels;
+        private bool _onnxPythonEnvironmentCheckCompleted;
+        private bool _onnxPythonEnvironmentReady;
         private Process? _llamaServerProcess;
+        private string? _activeCmdWindowTitle;
         private readonly HashSet<Keys> _processingKeys = [];
         private static readonly Regex TokensPerSecondRegex = MyRegex();
         private double _lastStdOutTokensPerSecond;
@@ -80,10 +111,30 @@ namespace FormsSystemStatsWidget.Forms
 
         public WindowWidget()
         {
+            this.KeyPreview = true;
             this.InitializeComponent();
             this.DoubleBuffered = true;
             this._persistentSettings = WidgetPersistentSettingsStore.Load();
+            // Initialize FontSizeScale from persistent settings (default 1.0f if not set)
+            this.FontSizeScale = this._persistentSettings.FontSizeScale != 0f ? this._persistentSettings.FontSizeScale : 1.0f;
+            // Initialize LoopDetectionService
+            this._loopDetectionService = new LoopDetectionService(new LoopDetectionConfig
+            {
+                Enabled = this._persistentSettings.LoopDetectionEnabled,
+                TriggerAfter = this._persistentSettings.LoopDetectionTriggerAfter,
+                DetectionWindow = this._persistentSettings.LoopDetectionWindow,
+                SimilarityThreshold = this._persistentSettings.LoopDetectionSimilarityThreshold,
+                InterjectionEnabled = this._persistentSettings.LoopInterjectionEnabled,
+                InterjectionMessage = this._persistentSettings.LoopInterjectionMessage,
+                MaxInterjections = this._persistentSettings.LoopMaxInterjections,
+                AbortEnabled = this._persistentSettings.LoopAbortEnabled,
+                AbortAfterInterjections = this._persistentSettings.LoopAbortAfterInterjections
+            });
+            LlamaOllamaBridge.LoopDetectionConfig = this._loopDetectionService.GetConfig();
+            // Hook loop detection menu events
+            this.HookLoopDetectionMenuEvents();
             Logger.MessageLogged += this.HandleLoggerMessageLogged;
+            this.ApplyApplicationIcon();
             this.ConfigureContextMenuAutoCloseBehavior();
 
             this.InitializeProgressBars();
@@ -117,12 +168,23 @@ namespace FormsSystemStatsWidget.Forms
                 this.Location = adjustedPosition;
             }
 
+            // Restore monitor ID from persistent settings
+            this._persistentSettings.WidgetMonitorId = this._persistentSettings.WidgetMonitorId != 0 
+                ? this._persistentSettings.WidgetMonitorId 
+                : 0; // Will be adjusted after position restore
+
             // Hook event for when Form is moved, to update the position in persistent settings
             this.Move += (sender, e) =>
             {
                 if (!this._explicitWidgetCloseRequested)
                 {
                     this._persistentSettings.WidgetPosition = this.Location;
+                    
+                    // Determine which monitor the window is on
+                    this._persistentSettings.WidgetMonitorId = this.GetMonitorIdFromLocation(this.Location);
+                    
+                    // Determine dock state (document, floating, fullscreen, etc.)
+                    this._persistentSettings.WidgetDockState = this.GetDockStateFromBounds(this.Bounds);
                 }
             };
 
@@ -130,6 +192,50 @@ namespace FormsSystemStatsWidget.Forms
             this.FormClosing += (sender, e) =>
             {
                 this.SavePersistentSettings();
+            };
+
+            // Hook KeyDown event for font size toggling with Ctrl key
+            this.KeyDown += (sender, e) =>
+            {
+                // Ctrl + Plus: zoom in
+                if (e.Control && e.KeyCode == Keys.Add)
+                {
+                    this.FontSizeScale = Math.Min(2.0f, this.FontSizeScale + 0.1f);
+                    this._persistentSettings.FontSizeScale = this.FontSizeScale;
+                    this.ApplyFontSizeScale();
+                }
+                // Ctrl + Minus: zoom out
+                else if (e.Control && e.KeyCode == Keys.Subtract)
+                {
+                    this.FontSizeScale = Math.Max(0.5f, this.FontSizeScale - 0.1f);
+                    this._persistentSettings.FontSizeScale = this.FontSizeScale;
+                    this.ApplyFontSizeScale();
+                }
+                // Ctrl + 0: reset to default size
+                else if (e.Control && (e.KeyCode == Keys.D0 || e.KeyCode == Keys.NumPad0))
+                {
+                    this.FontSizeScale = 1.0f;
+                    this._persistentSettings.FontSizeScale = this.FontSizeScale;
+                    this.ApplyFontSizeScale();
+                }
+            };
+
+            // Hook MouseWheel event for Ctrl+MouseWheel zoom
+            this.MouseWheel += (sender, e) =>
+            {
+                if (Control.ModifierKeys == Keys.Control && e.Delta != 0)
+                {
+                    if (e.Delta > 0)
+                    {
+                        this.FontSizeScale = Math.Min(2.0f, this.FontSizeScale + 0.1f);
+                    }
+                    else
+                    {
+                        this.FontSizeScale = Math.Max(0.5f, this.FontSizeScale - 0.1f);
+                    }
+                    this._persistentSettings.FontSizeScale = this.FontSizeScale;
+                    this.ApplyFontSizeScale();
+                }
             };
 
             try { TrafficStats.Init(); }
@@ -148,10 +254,50 @@ namespace FormsSystemStatsWidget.Forms
 
             this.EnsureModelLoadBatsDirectory();
 
+            this.BuildOnnxParameterSubmenus();
             this.ApplyPersistentSettings();
 
-            this.InitializeAudioHotkeys();
-            this.LogCpuWattStartupOnce();
+            // Python-Env für ONNX-Genai-Server initial checken (einmalig am Startup)
+            _ = this.CheckOnnxPythonEnvironmentAtStartupAsync();
+        }
+
+        /// <summary>
+        /// Einmaliger Python-Env-Check am Widget-Startup. Ein bereits laufender
+        /// Server bleibt unabhängig vom Ergebnis sofort beendbar.
+        /// </summary>
+        private async Task CheckOnnxPythonEnvironmentAtStartupAsync()
+        {
+            try
+            {
+                bool success = await this.EnsureOnnxPythonEnvironmentAsync(showProgress: true);
+
+                // UI-Update auf dem UI-Thread
+                this.Invoke((System.Windows.Forms.MethodInvoker)delegate
+                {
+                    this._onnxPythonEnvironmentCheckCompleted = true;
+                    this._onnxPythonEnvironmentReady = success;
+                    this.UpdateOnnxGenaiServerMenuState();
+
+                    if (success)
+                    {
+                        Logger.Log("[ONNX] Python env check succeeded. ONNX loader entry enabled.");
+                    }
+                    else
+                    {
+                        Logger.Log("[ONNX] Python env check failed. Loading is disabled unless an ONNX server is already running; Kill remains available.");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                this.Invoke((System.Windows.Forms.MethodInvoker)delegate
+                {
+                    this._onnxPythonEnvironmentCheckCompleted = true;
+                    this._onnxPythonEnvironmentReady = false;
+                    this.UpdateOnnxGenaiServerMenuState();
+                    Logger.Log($"[ONNX] Python-Env-Check Exception: {ex.Message}. ONNX-Loader-Eintrag deaktiviert.");
+                });
+            }
         }
 
         private void InitializeProgressBars()
@@ -175,12 +321,189 @@ namespace FormsSystemStatsWidget.Forms
             this.progressBar_ram.Visible = false;
             this.progressBar_vram.Visible = false;
             this.progressBar_vram2.Visible = false;
+
+            this._barToolTip = new ToolTip
+            {
+                AutoPopDelay = 15000,
+                InitialDelay = 400,
+                ReshowDelay = 200,
+                ShowAlways = true,
+                UseFading = false,
+            };
+            this._barToolTip.SetToolTip(this._progRam, "RAM (last 5 min)\nno data yet");
+            this._barToolTip.SetToolTip(this._progVram, "GPU (last 5 min)\nno data yet");
+            this._barToolTip.SetToolTip(this._progVram2, "GPU2 (last 5 min)\nno data yet");
+
+            // Tooltip just-in-time auffrischen, damit Hover immer den aktuellen 5-Min-Stand zeigt.
+            // MouseMove: laufend beim Bewegen; MouseHover: kurz vor dem Aufpoppen (erfasst auch
+            // einen erst nach dem Anhalten gedrückten Strg); Tastendruck: Strg-Wechsel über Balken.
+            this._progRam.MouseMove += (s, e) => this.RefreshRamToolTip();
+            this._progVram.MouseMove += (s, e) => this.RefreshGpuToolTips();
+            this._progVram2.MouseMove += (s, e) => this.RefreshGpuToolTips();
+            this._progRam.MouseHover += (s, e) => this.RefreshRamToolTip();
+            this._progVram.MouseHover += (s, e) => this.RefreshGpuToolTips();
+            this._progVram2.MouseHover += (s, e) => this.RefreshGpuToolTips();
+            this._progVram.MouseEnter += (s, e) => this._hoveredGpuBar = this._progVram;
+            this._progVram2.MouseEnter += (s, e) => this._hoveredGpuBar = this._progVram2;
+            this._progVram.MouseLeave += (s, e) => this.ClearHoveredGpuBar(this._progVram);
+            this._progVram2.MouseLeave += (s, e) => this.ClearHoveredGpuBar(this._progVram2);
+            this.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.ControlKey && this._hoveredGpuBar is not null)
+                {
+                    this.RefreshGpuToolTips();
+                }
+            };
+            this.KeyUp += (s, e) =>
+            {
+                if (e.KeyCode == Keys.ControlKey && this._hoveredGpuBar is not null)
+                {
+                    this.RefreshGpuToolTips();
+                }
+            };
+        }
+
+        private void ClearHoveredGpuBar(DynamicGradientProgressBar? bar)
+        {
+            if (ReferenceEquals(this._hoveredGpuBar, bar))
+            {
+                this._hoveredGpuBar = null;
+            }
+        }
+
+        private static bool IsCtrlHeldForBarToolTip() => (Control.ModifierKeys & Keys.Control) == Keys.Control;
+
+        private string BuildCombinedGpuToolTipText()
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+            var combined = BarHistory.ComputeCombinedGpuStats(this._gpu1History, this._gpu2History, nowUtc, BarHistory.DefaultWindow);
+            (double used1, double total1) = this.GetCurrentGpuVramGb(this.Gpu);
+            (double used2, double total2) = this.GetCurrentGpuVramGb(this.Gpu2);
+            int gpuCount = this.Gpu2 != null ? 2 : 1;
+            return BarHistory.BuildCombinedGpuToolTip(combined, gpuCount, used1 + used2, total1 + total2, BarHistory.DefaultWindow);
+        }
+
+        private void RefreshRamToolTip()
+        {
+            if (this._barToolTip is null || this._progRam is null)
+            {
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            var stats = BarHistory.ComputeRamStats(this._ramHistory, nowUtc, BarHistory.DefaultWindow);
+            string text = BarHistory.BuildRamToolTip(stats, this._lastRamTotalGb, this._lastRamUsedGb, BarHistory.DefaultWindow);
+            this._barToolTip.SetToolTip(this._progRam, text);
+        }
+
+        private void RefreshGpuToolTips()
+        {
+            if (this._barToolTip is null)
+            {
+                return;
+            }
+
+            // Strg + Hover auf einem beliebigen GPU-Balken => Gesamt-Tooltip für alle GPUs.
+            if (IsCtrlHeldForBarToolTip() && this._progVram is not null)
+            {
+                string combinedText = this.BuildCombinedGpuToolTipText();
+                this._barToolTip.SetToolTip(this._progVram, combinedText);
+                if (this._progVram2 is not null)
+                {
+                    this._barToolTip.SetToolTip(this._progVram2, combinedText);
+                }
+
+                return;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (this._progVram is not null)
+            {
+                var stats1 = BarHistory.ComputeGpuStats(this._gpu1History, nowUtc, BarHistory.DefaultWindow);
+                (double used1, double total1) = this.GetCurrentGpuVramGb(this.Gpu);
+                this._barToolTip.SetToolTip(this._progVram, BarHistory.BuildGpuToolTip(stats1, "GPU", used1, total1, BarHistory.DefaultWindow));
+            }
+
+            if (this._progVram2 is not null)
+            {
+                var stats2 = BarHistory.ComputeGpuStats(this._gpu2History, nowUtc, BarHistory.DefaultWindow);
+                (double used2, double total2) = this.GetCurrentGpuVramGb(this.Gpu2);
+                this._barToolTip.SetToolTip(this._progVram2, BarHistory.BuildGpuToolTip(stats2, "GPU2", used2, total2, BarHistory.DefaultWindow));
+            }
+        }
+
+        private (double usedGb, double totalGb) GetCurrentGpuVramGb(GpuStats? gpu)
+        {
+            if (gpu is null)
+            {
+                return (0, 0);
+            }
+
+            try
+            {
+                double total = Math.Round(gpu.GetTotalVramBytes() / 1_073_741_824.0, 3);
+                double used = Math.Round(gpu.GetUsedVramBytes() / 1_073_741_824.0, 3);
+                if (total < 0)
+                {
+                    total = 0;
+                }
+
+                if (used < 0)
+                {
+                    used = 0;
+                }
+
+                return (used, total);
+            }
+            catch
+            {
+                return (0, 0);
+            }
+        }
+
+        private void RecordBarHistories(double ramUsedGb, double gpuUsagePct, double gpuWatts, double vramUsedGb, double vramTotalGb)
+        {
+            DateTime nowUtc = DateTime.UtcNow;
+
+            this._ramHistory.Enqueue(new BarHistory.RamSample(nowUtc, ramUsedGb));
+            BarHistory.PruneOlderThan(this._ramHistory, s => s.Utc, nowUtc, BarHistory.DefaultWindow);
+
+            this._gpu1History.Enqueue(new BarHistory.GpuSample(nowUtc, gpuUsagePct, gpuWatts, vramUsedGb, vramTotalGb));
+            BarHistory.PruneOlderThan(this._gpu1History, s => s.Utc, nowUtc, BarHistory.DefaultWindow);
+
+            if (this.Gpu2 != null)
+            {
+                double gpu2LoadPct;
+                double gpu2Watts;
+                try
+                {
+                    gpu2LoadPct = this.Gpu2.CurrentLoad01 * 100.0;
+                    gpu2Watts = this.Gpu2.CurrentPowerWatts ?? 0.0;
+                }
+                catch
+                {
+                    gpu2LoadPct = 0;
+                    gpu2Watts = 0;
+                }
+
+                (double gpu2UsedGb, double gpu2TotalGb) = this.GetCurrentGpuVramGb(this.Gpu2);
+                this._gpu2History.Enqueue(new BarHistory.GpuSample(nowUtc, gpu2LoadPct, gpu2Watts, gpu2UsedGb, gpu2TotalGb));
+                BarHistory.PruneOlderThan(this._gpu2History, s => s.Utc, nowUtc, BarHistory.DefaultWindow);
+            }
+            else if (this._gpu2History.Count > 0)
+            {
+                this._gpu2History.Clear();
+            }
+
+            this.RefreshRamToolTip();
+            this.RefreshGpuToolTips();
         }
 
         private Timer InitializeUpdateTimer()
         {
             var timer = new Timer();
             timer.Interval = this._updateIntervalMs;
+            timer.Tick += (sender, e) => this.SaveCmdWindowSettings();
             timer.Tick += this.Timer_Tick;
             timer.Start();
             return timer;
@@ -219,6 +542,96 @@ namespace FormsSystemStatsWidget.Forms
                     this.contextMenuStrip_widget.Show(this, e.Location);
                 }
             };
+        }
+
+        private int GetMonitorIdFromLocation(Point location)
+        {
+            try
+            {
+                IntPtr monitor = MonitorFromPoint(location, MONITOR_DEFAULTTONEAREST);
+                if (monitor != IntPtr.Zero)
+                {
+                    // Get the monitor name to use as a unique identifier
+                    // We'll use a hash of the monitor handle as the ID
+                    int monitorId = Math.Abs(monitor.GetHashCode() % 10000);
+                    return monitorId;
+                }
+            }
+            catch { }
+            return 0; // Default to primary monitor
+        }
+
+        private int GetDockStateFromBounds(Rectangle bounds)
+        {
+            return GetDockStateFromBounds(bounds, Screen.FromRectangle(bounds).WorkingArea);
+        }
+
+        internal static int GetDockStateFromBounds(Rectangle bounds, Rectangle screen)
+        {
+            int tolerance = Math.Max(10, SystemInformation.BorderSize.Width * 2);
+            
+            // Check if window is maximized/fullscreen
+            if (bounds.Width >= screen.Width * 0.9 && bounds.Height >= screen.Height * 0.9)
+            {
+                return 1; // fullscreen
+            }
+            
+            // Check if window is docked to left half
+            if (Math.Abs(bounds.X - screen.Left) <= tolerance && Math.Abs(bounds.Y - screen.Top) <= tolerance &&
+                bounds.Width <= screen.Width * 0.55 && bounds.Height >= screen.Height * 0.9)
+            {
+                return 2; // half-left
+            }
+            
+            // Check if window is docked to right half
+            if (Math.Abs(bounds.Right - screen.Right) <= tolerance && Math.Abs(bounds.Y - screen.Top) <= tolerance &&
+                bounds.Width <= screen.Width * 0.55 && bounds.Height >= screen.Height * 0.9)
+            {
+                return 3; // half-right
+            }
+            
+            // Check if window is docked to top half
+            if (Math.Abs(bounds.Y - screen.Top) <= tolerance && Math.Abs(bounds.X - screen.Left) <= tolerance &&
+                bounds.Height <= screen.Height * 0.55 && bounds.Width >= screen.Width * 0.9)
+            {
+                return 4; // half-top
+            }
+            
+            // Check if window is docked to bottom half
+            if (Math.Abs(bounds.Bottom - screen.Bottom) <= tolerance && Math.Abs(bounds.X - screen.Left) <= tolerance &&
+                bounds.Height <= screen.Height * 0.55 && bounds.Width >= screen.Width * 0.9)
+            {
+                return 5; // half-bottom
+            }
+            
+            return 0; // floating/default
+        }
+
+        private void ApplyFontSizeScale()
+        {
+            try
+            {
+                // Apply the font size scale to the form and its controls
+                float scaleFactor = this.FontSizeScale;
+                
+                // Update default font size if needed
+                foreach (Control ctrl in this.Controls)
+                {
+                    if (ctrl.Font != null)
+                    {
+                        float newSize = ctrl.Font.Size * scaleFactor;
+                        ctrl.Font = new System.Drawing.Font(ctrl.Font.FontFamily, newSize, ctrl.Font.Style, ctrl.Font.Unit);
+                    }
+                }
+                
+                // Update context menu strip font
+                if (this.contextMenuStrip_widget != null)
+                {
+                    float newMenuSize = this.contextMenuStrip_widget.Font.Size * scaleFactor;
+                    this.contextMenuStrip_widget.Font = new System.Drawing.Font(this.contextMenuStrip_widget.Font.FontFamily, newMenuSize, this.contextMenuStrip_widget.Font.Style);
+                }
+            }
+            catch { }
         }
 
         private void InitializeLlamaUiSelections()
@@ -266,12 +679,37 @@ namespace FormsSystemStatsWidget.Forms
 
         private void EnsureModelLoadBatsDirectory()
         {
-            string batsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs");
-            if (!Directory.Exists(batsDirectory))
+            string batsDirectory = GetModelLoadBatsDirectory();
+            Directory.CreateDirectory(batsDirectory);
+
+            string[] legacyDirectories =
+            [
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "LlamaCppLoad_BATs")
+            ];
+
+            foreach (string legacyDirectory in legacyDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                Directory.CreateDirectory(batsDirectory);
+                if (!Directory.Exists(legacyDirectory) || string.Equals(Path.GetFullPath(legacyDirectory), Path.GetFullPath(batsDirectory), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                foreach (string sourcePath in Directory.EnumerateFiles(legacyDirectory, "*.bat"))
+                {
+                    string destinationPath = Path.Combine(batsDirectory, Path.GetFileName(sourcePath));
+                    if (!File.Exists(destinationPath))
+                    {
+                        File.Copy(sourcePath, destinationPath);
+                    }
+                }
             }
         }
+
+        private static string GetModelLoadBatsDirectory() => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "FSSWidget",
+            "llama.cpp_load_BATs");
 
         private void ApplyPersistentSettings()
         {
@@ -296,6 +734,24 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripMenuItem_includeRawChunksLog.Checked = this._persistentSettings.DebugConsoleIncludeRawChunks;
             this.toolStripMenuItem_logGenerationSpeed.Checked = this._persistentSettings.DebugConsoleLogGenerationSpeed;
             this.toolStripMenuItem_hideCmd.Checked = this._persistentSettings.HideCmd;
+            this.toolStripTextBox_onnxModelRootDir.Text = this._persistentSettings.OnnxModelRootDirectory;
+            this.toolStripTextBox_onnxContextLength.Text = this._persistentSettings.OnnxContextLength.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxMaxTokens.Text = this._persistentSettings.OnnxMaxTokens.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxTemperature.Text = this._persistentSettings.OnnxTemperature.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxTopP.Text = this._persistentSettings.OnnxTopP.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxTopK.Text = this._persistentSettings.OnnxTopK.ToString(CultureInfo.InvariantCulture);
+            this.toolStripTextBox_onnxRepeatPenalty.Text = this._persistentSettings.OnnxRepeatPenalty.ToString(CultureInfo.InvariantCulture);
+            string persistedEp = this._persistentSettings.OnnxExecutionProvider;
+            int epIndex = this.toolStripComboBox_onnxExecutionProvider.Items.IndexOf(persistedEp);
+            this.toolStripComboBox_onnxExecutionProvider.SelectedIndex = epIndex >= 0 ? epIndex : -1;
+            if (epIndex < 0)
+            {
+                this.toolStripComboBox_onnxExecutionProvider.Text = string.Empty;
+            }
+
+            this.toolStripMenuItem_onnxHideCmd.Checked = this._persistentSettings.OnnxHideConsole;
+
+            this.ApplyOnnxSubmenuSettings();
 
             this.toolStripTextBox_opacity.Text = this._persistentSettings.WindowOpacity.ToString() + "%";
             this.toolStripTextBox_opacity_KeyDown(this.toolStripTextBox_opacity, new KeyEventArgs(Keys.Enter));
@@ -322,6 +778,20 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_additionalCopilotSystemPrompt.Text = this._persistentSettings.AdditionalCopilotSystemPrompt.Trim();
             this.extendCopilotSystemPromptToolStripMenuItem.Checked = this._persistentSettings.ExtendCopilotSystemPrompt;
             this.toolStripMenuItem_appendParams.Checked = this._persistentSettings.AppendParams;
+            this.toolStripMenuItem_trimThinkingBlocks.Checked = this._persistentSettings.TrimThinkingBlocks;
+            LlamaOllamaBridge.Enabled = this._persistentSettings.TrimThinkingBlocks;
+            int keepLastMessages = Math.Max(0, this._persistentSettings.TrimThinkingKeepLastMessages);
+            this._persistentSettings.TrimThinkingKeepLastMessages = keepLastMessages;
+            this.toolStripTextBox_configKeepLastMessages.Text = keepLastMessages.ToString(CultureInfo.InvariantCulture);
+            LlamaOllamaBridge.KeepLastMessages = keepLastMessages;
+            this.toolStripMenuItem_configTrimToolResults.Checked = this._persistentSettings.TrimThinkingToolResults;
+            LlamaOllamaBridge.TrimToolResults = this._persistentSettings.TrimThinkingToolResults;
+            string toolCallMode = string.Equals(this._persistentSettings.TrimThinkingToolCallMode, "Skeleton", StringComparison.OrdinalIgnoreCase)
+                ? "Skeleton"
+                : "Keep";
+            this._persistentSettings.TrimThinkingToolCallMode = toolCallMode;
+            this.toolStripMenuItem_onlyKeepToolCallSkeletons.Checked = toolCallMode == "Skeleton";
+            LlamaOllamaBridge.ToolCallMode = toolCallMode;
             LlamaOllamaBridge.AdditionalCopilotSystemPrompt = this._persistentSettings.ExtendCopilotSystemPrompt
                 ? this._persistentSettings.AdditionalCopilotSystemPrompt
                 : string.Empty;
@@ -363,6 +833,11 @@ namespace FormsSystemStatsWidget.Forms
             this.toolStripTextBox_focusKeywordLimit.Text = this._persistentSettings.SmartPromptFocusKeywordLimit.ToString(CultureInfo.InvariantCulture);
             this.toolStripTextBox_tailKeepBonusChars.Text = this._persistentSettings.SmartPromptTailKeepBonusChars.ToString(CultureInfo.InvariantCulture);
 
+            // Restore font size scale
+            this._persistentSettings.FontSizeScale = Math.Max(0.5f, Math.Min(2.0f, this._persistentSettings.FontSizeScale));
+            this.FontSizeScale = this._persistentSettings.FontSizeScale;
+            this.ApplyFontSizeScale();
+
             SmartPromptOptimizationSettings.IsEnabled = this.smartPromptOptimizationsToolStripMenuItem.Checked;
             SmartPromptOptimizationSettings.PromptSafetyRatio = this._persistentSettings.SmartPromptSafetyRatio;
             SmartPromptOptimizationSettings.SmartBudgetRatio = this._persistentSettings.SmartPromptBudgetRatio;
@@ -374,6 +849,7 @@ namespace FormsSystemStatsWidget.Forms
             SmartPromptOptimizationSettings.StrictToolCallingRulesInjectionPrompt = this._persistentSettings.StrictToolCallingRulesInjectionPrompt;
 
             this.toolStripMenuItem_blackOutMode.Checked = this._persistentSettings.BlackOutMode;
+            this._onnxSettingsInitialized = true;
         }
 
 
@@ -409,6 +885,8 @@ namespace FormsSystemStatsWidget.Forms
 
             try { this.Gpu?.Dispose(); } catch { }
             try { this.Gpu2?.Dispose(); } catch { }
+            try { this._barToolTip?.Dispose(); } catch { }
+            this._barToolTip = null;
         }
 
         protected override void WndProc(ref Message m)
@@ -502,11 +980,108 @@ namespace FormsSystemStatsWidget.Forms
             this._debugConsoleForm.AppendLogLine(text);
         }
 
+        /// <summary>
+        /// Setzt das eigene FSS-Widget-Icon (ICO, Fallback PNG) als Fenster-Icon.
+        /// Damit erscheint das eigene Icon in Taskbar und Titelleiste statt des
+        /// Windows-Forms-Default-Icons.
+        /// </summary>
+        private void ApplyApplicationIcon()
+        {
+            try
+            {
+                string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "FSS_Widget.favicon.ico");
+                if (File.Exists(icoPath))
+                {
+                    this.Icon = new Icon(icoPath);
+                    return;
+                }
+
+                string pngPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Ressources", "FSS_Widget.favicon.png");
+                if (File.Exists(pngPath))
+                {
+                    using var image = Image.FromFile(pngPath);
+                    using var bitmap = new Bitmap(image);
+                    IntPtr hIcon = bitmap.GetHicon();
+                    this.Icon = Icon.FromHandle(hIcon);
+                    DestroyIcon(hIcon);
+                }
+            }
+            catch
+            {
+                // Icon-Setup ist optional - Fehler hier dürfen die App nicht blockieren.
+            }
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool DestroyIcon(IntPtr handle);
+
         private void ConfigureContextMenuAutoCloseBehavior()
         {
             this.toolStripMenuItem_loadLlamaCppServer.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.toolStripMenuItem_execModelLoadBat.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
             this.openDebugConsoleToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_loadOnnxGenaiServer.DropDown.Closing += this.KeepOnnxSubMenuOpenForInputInteractions;
+            this.rerouteAPILlamacppOllamaToolStripMenuItem.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_loopDetectionEnabled.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_triggerAfter.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_detectionWindow.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_similarityThreshold.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_interjectionEnabled.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_interjectionMessage.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_maxInterjections.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_abortEnabled.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_abortAfterInterjections.DropDown.Closing += this.KeepSelectedSubMenuOpenForItemClicks;
+            this.toolStripMenuItem_onnxHideCmd.CheckedChanged += this.FlagOnnxHideConsoleToggled;
+        }
+
+        /// <summary>
+        /// Bei CheckOnClick läuft CheckedChanged vor dem internen Close –
+        /// hier die Flag setzen, damit das Submenü beim Klick auf "Hide Console" offen bleibt.
+        /// </summary>
+        private void FlagOnnxHideConsoleToggled(object? sender, EventArgs e)
+        {
+            this._keepOnnxSubMenuOpenAfterHideConsoleClick = true;
+        }
+
+        /// <summary>
+        /// ONNX-Submenüs bleiben geöffnet, solange der User in einem Eingabefeld
+        /// (TextBox/ComboBox) interagiert oder auf "Hide Console" klickt.
+        /// </summary>
+        private void KeepOnnxSubMenuOpenForInputInteractions(object? sender, ToolStripDropDownClosingEventArgs e)
+        {
+            if (e.CloseReason != ToolStripDropDownCloseReason.ItemClicked)
+            {
+                return;
+            }
+
+            if (this._keepOnnxSubMenuOpenAfterHideConsoleClick)
+            {
+                this._keepOnnxSubMenuOpenAfterHideConsoleClick = false;
+                e.Cancel = true;
+                return;
+            }
+
+            Control? active = this.ActiveControl;
+            if (active is null)
+            {
+                return;
+            }
+
+            bool isOnnxInput =
+                ReferenceEquals(active, this.toolStripTextBox_onnxModelRootDir) ||
+                ReferenceEquals(active, this.toolStripComboBox_onnxModels) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxContextLength) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxMaxTokens) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxTemperature) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxTopP) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxTopK) ||
+                ReferenceEquals(active, this.toolStripTextBox_onnxRepeatPenalty) ||
+                ReferenceEquals(active, this.toolStripComboBox_onnxExecutionProvider);
+
+            if (isOnnxInput)
+            {
+                e.Cancel = true;
+            }
         }
 
         private void KeepSelectedSubMenuOpenForItemClicks(object? sender, ToolStripDropDownClosingEventArgs e)
@@ -560,17 +1135,6 @@ namespace FormsSystemStatsWidget.Forms
                 var gpuRef = this.Gpu;
 
                 var threadsTask = Task.Run(() => CpuStats.GetThreadUsages());
-                var cpuTelemetryTask = Task.Run(() =>
-                {
-                    try
-                    {
-                        return CpuStats.GetCpuTelemetrySnapshot();
-                    }
-                    catch
-                    {
-                        return new CpuStats.CpuTelemetrySnapshot(null, null);
-                    }
-                });
                 var topTasksTask = this.GetTopTasksSnapshotAsync();
                 var ramTask = Task.Run(() =>
                 {
@@ -597,15 +1161,14 @@ namespace FormsSystemStatsWidget.Forms
                 });
                 var trafficTask = Task.Run(() => TrafficStats.Sample(this._updateIntervalMs));
 
-                await Task.WhenAll(threadsTask, cpuTelemetryTask, topTasksTask, ramTask, gpuTask, trafficTask);
+                await Task.WhenAll(threadsTask, topTasksTask, ramTask, gpuTask, trafficTask);
 
                 var threads = threadsTask.Result;
-                var cpuTelemetry = cpuTelemetryTask.Result;
                 var topTasks = topTasksTask.Result;
                 var (ramTotalGb, ramUsedGb, pageFileUsedGb, pageFileMaxGb) = ramTask.Result;
                 var (gpuUsage, gpuWattage, vramTotalGb, vramUsedGb) = gpuTask.Result;
 
-                this.UpdateAverageCpuLoadAndTemperatureLabel(threads, cpuTelemetry);
+                this.UpdateAverageCpuLoadAndTemperatureLabel(threads);
                 this.UpdateTopTasksLabel(topTasks);
                 await this.UpdateLlamaServerGenerationSpeedAsync();
 
@@ -620,6 +1183,10 @@ namespace FormsSystemStatsWidget.Forms
                 {
                     return;
                 }
+
+                this._lastRamTotalGb = ramTotalGb;
+                this._lastRamUsedGb = ramUsedGb;
+                this.RecordBarHistories(ramUsedGb, gpuUsage, gpuWattage, vramUsedGb, vramTotalGb);
 
                 this.UpdateTitleWithTraffic();
 
@@ -866,85 +1433,39 @@ namespace FormsSystemStatsWidget.Forms
             return Task.CompletedTask;
         }
 
-        private void UpdateAverageCpuLoadAndTemperatureLabel(float[] usages, CpuStats.CpuTelemetrySnapshot? telemetry = null)
+        private void UpdateAverageCpuLoadAndTemperatureLabel(float[] usages)
         {
             if (this._closing)
             {
                 return;
             }
 
-            try
-            {
-                double averageLoadPercent = usages.Length > 0 ? usages.Average() * 100d : 0d;
+            double averageLoadPercent = usages.Length > 0 ? usages.Average() * 100d : 0d;
 
-                if (telemetry?.PackagePowerWatts is double watts)
-                {
-                    this.label_avgCpuLoadAndTemperature.Text = $"{averageLoadPercent:0.000}%  |  {watts:F1} W";
-                }
-                else
-                {
-                    this.label_avgCpuLoadAndTemperature.Text = $"{averageLoadPercent:0.000}%  |  ? W";
-                }
-            }
-            catch
-            {
-                try
-                {
-                    double averageLoadPercent = usages.Length > 0 ? usages.Average() * 100d : 0d;
-                    this.label_avgCpuLoadAndTemperature.Text = averageLoadPercent.ToString("0.000") + "%";
-                }
-                catch
-                {
-                }
-            }
-        }
+            // No thermal or wattage getting here, since it always fails and causes frequent Exceptions, just set avg. load to label
+            this.label_avgCpuLoadAndTemperature.Text = averageLoadPercent.ToString("0.000") + "%";
+            return;
 
-        private void LogCpuWattStartupOnce()
-        {
-            if (this._cpuWattStartupLogged)
-            {
-                return;
-            }
-            this._cpuWattStartupLogged = true;
 
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-                    if (this._closing)
-                    {
-                        return;
-                    }
+            // NON-EFFECTIVE CODE (CUT-OFF, NEVER REACHED (for a reason (!)))
+            //CpuStats.CpuTelemetrySnapshot telemetry = CpuStats.GetCpuTelemetrySnapshot();
 
-                    CpuStats.CpuTelemetrySnapshot snap = CpuStats.GetCpuTelemetrySnapshot();
-                    if (!snap.PackagePowerWatts.HasValue)
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
-                        if (this._closing)
-                        {
-                            return;
-                        }
-                        snap = CpuStats.GetCpuTelemetrySnapshot();
-                    }
+            //List<string> parts = new()
+            //{
+            //    $"{averageLoadPercent:0.00}%"
+            //};
 
-                    if (snap.PackagePowerWatts.HasValue)
-                    {
-                        StaticLogger.Log($"CPU-Watt OK: {snap.PackagePowerWatts.Value:F1} W", LogLevel.Info);
-                    }
-                    else
-                    {
-                        StaticLogger.Log("CPU-Watt nicht verfügbar: " + CpuStats.GetCpuPowerStatus(), LogLevel.Warning);
-                        foreach (string line in CpuStats.ListCpuPowerSensors(20))
-                        {
-                            StaticLogger.Log("CPU-PowerSensor: " + line, LogLevel.Warning);
-                        }
-                    }
-                }
-                catch
-                {
-                }
-            });
+            //if (telemetry.AverageTemperatureCelsius.HasValue)
+            //{
+            //    parts.Add($"{telemetry.AverageTemperatureCelsius.Value:0.0} °C");
+            //}
+
+            //if (telemetry.PackagePowerWatts.HasValue)
+            //{
+            //    parts.Add($"{telemetry.PackagePowerWatts.Value:0.0} W");
+            //}
+
+            //this.label_avgCpuLoadAndTemperature.Text = string.Join(" | ", parts);
         }
 
 
@@ -1069,6 +1590,8 @@ namespace FormsSystemStatsWidget.Forms
 
         private void SavePersistentSettings()
         {
+            // Save CMD window settings before saving widget settings
+            this.SaveCmdWindowSettings();
             WidgetPersistentSettingsStore.Save(this._persistentSettings);
         }
 
@@ -1088,13 +1611,33 @@ namespace FormsSystemStatsWidget.Forms
         }
 
 
-        //Hotkey (recording)
-        private void ResetHotkeyInputState()
+        private void UpdateOnnxGenaiServerMenuState()
         {
-            this._isAwaitingHotkeyInput = false;
-            this._currentModifierKeys.Clear();
-            this._firstModifierKey = null;
-            this._otherKey = null;
+            List<Process> processes = WidgetStatics.GetOnnxGenaiServerProcesses();
+            int processCount = processes.Count;
+            foreach (Process process in processes)
+            {
+                process.Dispose();
+            }
+
+            bool serverRunning = processCount > 0;
+            this.toolStripMenuItem_loadOnnxGenaiServer.Enabled = serverRunning
+                || (this._onnxPythonEnvironmentCheckCompleted && this._onnxPythonEnvironmentReady);
+            this.toolStripMenuItem_loadOnnxGenaiServer.Text = serverRunning
+                ? $"Kill ONNX Server ({processCount})"
+                : !this._onnxPythonEnvironmentCheckCompleted
+                    ? "🔮 Load ONNX-Genai Server (checking...)"
+                    : this._onnxPythonEnvironmentReady
+                        ? "🔮 Load ONNX-Genai Server"
+                        : "🔮 Load ONNX-Genai Server (Python Env Failed)";
+            this.toolStripMenuItem_loadOnnxGenaiServer.ForeColor = serverRunning
+                ? Color.Red
+                : SystemColors.ControlText;
+
+            foreach (ToolStripItem item in this.toolStripMenuItem_loadOnnxGenaiServer.DropDownItems)
+            {
+                item.Visible = !serverRunning;
+            }
         }
 
         // Init / Update / Fill ctxmenu items etc.
@@ -1149,9 +1692,11 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripMenuItem_loadLlamaCppServer.Click += this.toolStripMenuItem_loadLlamaCppServer_Click;
             }
 
+            this.UpdateOnnxGenaiServerMenuState();
+
 
             // Get & fill all .BAT files from EXE directory \ llama.cpp_load_BATs \ 
-            string batsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs");
+            string batsDirectory = GetModelLoadBatsDirectory();
             if (!Directory.Exists(batsDirectory))
             {
                 Directory.CreateDirectory(batsDirectory);
@@ -1166,6 +1711,9 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripComboBox_modelLoadBats.SelectedIndex = 0;
             }
+
+            // Refresh ONNX models list
+            this.PopulateOnnxModelsList();
         }
 
         private void toolStripTextBox_opacity_KeyDown(object sender, KeyEventArgs e)
@@ -1219,81 +1767,6 @@ namespace FormsSystemStatsWidget.Forms
             this._persistentSettings.WindowOpacity = (int) (opacity * 100);
             this.SavePersistentSettings();
         }
-
-        private void toolStripMenuItem_configureVoiceInputHotkey_Click(object sender, EventArgs e)
-        {
-            // 1. Hotkey-Text ersetzen
-            string originalText = this.toolStripMenuItem_configureVoiceInputHotkey.Text ?? "Set Voice Input Hotkey ... (<none>)";
-            string modifiedText = SetVoiceInputHotkeyRegex().Replace(originalText, " ( ... )");
-            this.toolStripMenuItem_configureVoiceInputHotkey.Text = modifiedText;
-
-            // 2. Zustand setzen und Event-Listener aktivieren
-            this._isAwaitingHotkeyInput = true;
-            // Hier müssten die KeyDown/KeyUp Event-Handler für das Formular registriert werden.
-            // Beispiel: this.KeyDown += WindowWidget_KeyDown;
-            // Beispiel: this.KeyUp += WindowWidget_KeyUp;
-
-            // 3. CtxMenuStrip offen halten (ist durch den Click-Handler implizit gegeben)
-            // ... (Kein Code nötig, da der Event-Handler den Kontext hält)
-        }
-
-        private void WindowWidget_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (!this._isAwaitingHotkeyInput)
-            {
-                return;
-            }
-
-            if (e.KeyCode == Keys.Escape)
-            {
-                // Abbrechen, wenn ESC gedrückt wird
-                this.ResetHotkeyInputState();
-                this.ContextMenuStrip?.Close();
-                return;
-            }
-
-            // 1. Modifikator-Key erfassen
-            if (e.KeyCode == Keys.LControlKey || e.KeyCode == Keys.Alt || e.KeyCode == Keys.LWin || e.KeyCode == Keys.RControlKey || e.KeyCode == Keys.Alt || e.KeyCode == Keys.RWin)
-            {
-                if (!this._currentModifierKeys.ContainsKey(e.KeyCode))
-                {
-                    this._currentModifierKeys[e.KeyCode] = false;
-                }
-                this._currentModifierKeys[e.KeyCode] = true;
-                if (this._firstModifierKey == null)
-                {
-                    this._firstModifierKey = e.KeyCode;
-                }
-            }
-            // 2. Nicht-Modifikator-Key erfassen
-            else if (e.KeyCode != Keys.Tab && e.KeyCode != Keys.Enter)
-            {
-                if (this._otherKey == null)
-                {
-                    this._otherKey = e.KeyCode;
-                }
-            }
-        }
-
-        private void WindowWidget_KeyUp(object sender, KeyEventArgs e)
-        {
-            if (!this._isAwaitingHotkeyInput)
-            {
-                return;
-            }
-
-            // KeyUp-Verarbeitung
-            if (e.KeyCode == Keys.LControlKey || e.KeyCode == Keys.Alt || e.KeyCode == Keys.LWin || e.KeyCode == Keys.RControlKey || e.KeyCode == Keys.Alt || e.KeyCode == Keys.RWin)
-            {
-                if (this._currentModifierKeys.ContainsKey(e.KeyCode))
-                {
-                    this._currentModifierKeys[e.KeyCode] = false;
-                }
-            }
-            // Hier müsste die Logik zur Überprüfung, ob *alle* relevanten Keys Up sind, implementiert werden.
-            // Für diesen Scope reicht es, wenn wir das State-Update durch das Event-Handling abdecken.
-        }
-
 
         private void toolStripMenuItem_blackOutMode_CheckedChanged(Object sender, EventArgs e)
         {
@@ -1401,12 +1874,9 @@ namespace FormsSystemStatsWidget.Forms
 
 
 
-        [GeneratedRegex(@"\((.*?)\)")]
-        private static partial Regex SetVoiceInputHotkeyRegex();
         [GeneratedRegex(@"(?<tps>\d+(?:\.\d+)?)\s*(?:tokens?/s|t/s)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled, "de-DE")]
         private static partial Regex MyRegex();
 
     
     }
 }
-

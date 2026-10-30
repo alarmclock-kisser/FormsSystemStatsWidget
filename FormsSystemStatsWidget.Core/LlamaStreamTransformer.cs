@@ -4,7 +4,9 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -15,7 +17,7 @@ namespace FormsSystemStatsWidget.Core
     {
         // Robuste Regex für alle möglichen Tool-Call-Formate
         private static readonly Regex ToolCallStartRegex = new(
-            @"(?:```(?:json|javascript|js)\s*\n)?\s*(?:<function|{\s*""(?:tool|name|function|action|command)"")",
+            @"(?:```(?:json|javascript|js)\s*\n)?\s*(?:<tool_call(?:\s*>)|<function|{\s*""(?:tool|name|function|action|command)"")",
             RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline);
 
         // Spezifische Regex für XML-ähnliche Tool-Calls (Nemotron-Standard)
@@ -25,7 +27,7 @@ namespace FormsSystemStatsWidget.Core
 
         // Spezifische Regex für Parameter in XML-ähnlichen Tool-Calls
         private static readonly Regex ParameterRegex = new(
-            @"<parameter\s+(?:name\s*=\s*[""']?(?<pname>[^""'>\s]+)[""']?|(?<pname>[^""'>\s]+))\s*>(?<pval>[\s\S]*?)</parameter>",
+            @"<parameter(?:\s+name\s*=\s*[""']?(?<pname>[^""'>\s]+)[""']?|\s*=\s*[""']?(?<pname>[^""'>\s]+)[""']?|\s+(?<pname>[^""'>\s]+))\s*>(?<pval>[\s\S]*?)</parameter>",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         // Für Qwen-ähnliche Tool-Calls (falls benötigt)
@@ -55,6 +57,9 @@ namespace FormsSystemStatsWidget.Core
 
         private static readonly Regex FunctionToolCallRegex = new(@"<function=(?<name>[^\s>]+)>\s*(?<body>.*?)\s*</function>(?:\s*</tool_call>)?", RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.Singleline);
         private static readonly Regex KeywordSearchRegex = new(@"\b[\p{L}\p{Nd}_]{3,}\b", RegexOptions.Compiled);
+        private static readonly Regex ThinkingTagRegex = new(
+            @"</think\s*>|<think\b[^>]*>",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
         // Anti-Truncation: Dreifache Backticks im Code sicher verpacken, damit UI-Parser nicht abbrechen
         private static readonly Regex CodeFenceBlockRegex = new(@"(" + "``" + @"`)(?<lang>[^\r\n`]*)\r?\n(?<code>[\s\S]*?)\1", RegexOptions.Compiled);
@@ -66,25 +71,35 @@ namespace FormsSystemStatsWidget.Core
             "this", "that", "with", "from", "were", "have", "just"
         };
 
-        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double presencePenalty = 1.0, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40, string? reasoningEffort = null, int reasoningBudget = 0)
+        public static string SanitizeIncomingRequest(string jsonInput, string modelFamily = "llama", int numCtx = 4096, double temperature = 0.3, double repetitionPenalty = 1.25, double presencePenalty = 1.0, double userDefinedTopP = 0.95, double userDefinedMinP = 0.1, int userDefinedTopK = 40, string? reasoningEffort = null, int reasoningBudget = 0, bool trimThinkingBlocks = false, int keepLastMessages = 10, bool trimToolResults = false, string toolCallMode = "Keep")
         {
             try
             {
                 JsonNode? node = JsonNode.Parse(jsonInput);
-                bool flattenToolHistory = string.Equals(modelFamily, "qwen", StringComparison.OrdinalIgnoreCase);
+                // Keep native call IDs and ordering intact when history trimming is enabled.
+                bool flattenToolHistory = !trimThinkingBlocks &&
+                    string.Equals(modelFamily, "qwen", StringComparison.OrdinalIgnoreCase);
 
                 if (node is not JsonObject root)
                 {
-                    Logger.Log($"[Sanitized Request] {node?.ToJsonString() ?? jsonInput}");
+                    Logger.Log($"[Sanitized Request] Ignored non-object JSON body (length={jsonInput.Length}).");
                     return node?.ToJsonString() ?? jsonInput;
                 }
 
-                root["temperature"] = temperature;
-                root["repetition_penalty"] = repetitionPenalty;
-                root["presence_penalty"] = presencePenalty;
-                root["top_p"] = userDefinedTopP;
-                root["min_p"] = userDefinedMinP;
-                root["top_k"] = userDefinedTopK;
+                SetNumericParameter(root, "temperature", temperature, static value => value >= 0);
+                _ = root.Remove("repetition_penalty");
+                SetNumericParameter(root, "repeat_penalty", repetitionPenalty, static value => value > 0);
+                SetNumericParameter(root, "presence_penalty", presencePenalty, static value => value is >= -2 and <= 2);
+                SetNumericParameter(root, "top_p", userDefinedTopP, static value => value is > 0 and <= 1);
+                SetNumericParameter(root, "min_p", userDefinedMinP, static value => value is > 0 and <= 1);
+                if (userDefinedTopK > 0)
+                {
+                    root["top_k"] = userDefinedTopK;
+                }
+                else
+                {
+                    _ = root.Remove("top_k");
+                }
                 if (!string.IsNullOrEmpty(reasoningEffort))
                 {
                     root["reasoning_effort"] = reasoningEffort;
@@ -113,16 +128,47 @@ namespace FormsSystemStatsWidget.Core
                     return root.ToJsonString();
                 }
 
-                foreach (JsonObject message in messages.OfType<JsonObject>())
+                int firstMessageToTrim = Math.Max(0, messages.Count - Math.Max(0, keepLastMessages));
+                for (int messageIndex = 0; messageIndex < messages.Count; messageIndex++)
                 {
+                    if (messages[messageIndex] is not JsonObject message)
+                    {
+                        continue;
+                    }
+
                     _ = message.Remove("audio");
                     _ = message.Remove("refusal");
-                    _ = message.Remove("reasoning_content");
+
+                    if (trimThinkingBlocks && messageIndex < firstMessageToTrim)
+                    {
+                        string role = message["role"]?.ToString() ?? string.Empty;
+                        if (string.Equals(role, "assistant", StringComparison.OrdinalIgnoreCase))
+                        {
+                            RemoveThinkingBlocksFromMessageContent(message, removeReasoningContent: true);
+                            if (string.Equals(toolCallMode, "Skeleton", StringComparison.OrdinalIgnoreCase))
+                            {
+                                ReduceToolCallsToSkeleton(message);
+                            }
+                        }
+                        else if (trimToolResults && string.Equals(role, "tool", StringComparison.OrdinalIgnoreCase))
+                        {
+                            RemoveThinkingBlocksFromMessageContent(message, removeReasoningContent: false);
+                        }
+                    }
+
                     NormalizeToolHistoryMessage(message, flattenToolHistory);
                 }
 
                 EnsureSystemMessageFirst(messages);
-                InjectStrictToolCallingRules(messages);
+                bool hasNativeToolDefinitions = root["tools"] is JsonArray nativeTools && nativeTools.Count > 0;
+                if (hasNativeToolDefinitions)
+                {
+                    Logger.Log("[Sanitizer] Skipped legacy JSON-tool instructions because native tool definitions are present.");
+                }
+                else
+                {
+                    InjectStrictToolCallingRules(messages);
+                }
                 EnsureAdditionalSystemPrompt(messages, temperature, repetitionPenalty, presencePenalty, userDefinedTopP, userDefinedMinP, userDefinedTopK, reasoningEffort, reasoningBudget);
 
                 double promptSafetyRatio = Math.Clamp(SmartPromptOptimizationSettings.PromptSafetyRatio, 0.10, 1.00);
@@ -141,13 +187,20 @@ namespace FormsSystemStatsWidget.Core
 
                 while (GetTotalContentLength(messages) > hardCharLimit && messages.Count > (hasSystem ? 2 : 1))
                 {
-                    messages.RemoveAt(deleteIndex);
+                    if (!TryRemoveOldestCompleteConversationUnit(messages, deleteIndex))
+                    {
+                        Logger.Log("[Sanitizer] Context remains over the configured limit; preserving the newest conversation unit rather than splitting tool history.");
+                        break;
+                    }
                 }
 
                 if (GetTotalContentLength(messages) > hardCharLimit && messages.Count > 0)
                 {
                     JsonObject? lastMessage = messages.Last() as JsonObject;
-                    if (lastMessage != null && TryGetStringContent(lastMessage, out string content) && content.Length > hardCharLimit)
+                    bool isToolHistoryMessage = string.Equals(lastMessage?["role"]?.ToString(), "tool", StringComparison.OrdinalIgnoreCase) ||
+                                                lastMessage?["tool_calls"] is JsonArray;
+                    if (!isToolHistoryMessage && lastMessage != null &&
+                        TryGetStringContent(lastMessage, out string content) && content.Length > hardCharLimit)
                     {
                         int safeStart = Math.Max(0, content.Length - hardCharLimit + Math.Max(0, SmartPromptOptimizationSettings.TailKeepBonusChars));
                         string truncatedContent = string.Concat($"[Context automatically rolled by proxy to fit dynamic limit of {numCtx} ctx]\r\n", content.AsSpan(safeStart));
@@ -162,6 +215,48 @@ namespace FormsSystemStatsWidget.Core
                 Logger.Log($"[Sanitizer-Error] {ex.Message}");
                 return jsonInput;
             }
+        }
+
+        private static void SetNumericParameter(JsonObject request, string name, double value, Func<double, bool> isValid)
+        {
+            if (double.IsFinite(value) && isValid(value))
+            {
+                request[name] = value;
+            }
+            else
+            {
+                _ = request.Remove(name);
+            }
+        }
+
+        private static bool TryRemoveOldestCompleteConversationUnit(JsonArray messages, int firstRemovableIndex)
+        {
+            if (firstRemovableIndex >= messages.Count)
+            {
+                return false;
+            }
+
+            int nextUserIndex = -1;
+            for (int index = firstRemovableIndex + 1; index < messages.Count; index++)
+            {
+                if (string.Equals(messages[index]?["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+                {
+                    nextUserIndex = index;
+                    break;
+                }
+            }
+
+            if (nextUserIndex < 0)
+            {
+                return false;
+            }
+
+            for (int index = nextUserIndex - 1; index >= firstRemovableIndex; index--)
+            {
+                messages.RemoveAt(index);
+            }
+
+            return true;
         }
 
         // --- NEUE METHODE: Gehirnwäsche für lokale Modelle (Prompt Injection) ---
@@ -234,7 +329,7 @@ namespace FormsSystemStatsWidget.Core
                 string inferenceParams = string.Join(
                     " ",
                     $"temperature={temperature.ToString("0.######", CultureInfo.InvariantCulture)}",
-                    $"repetition_penalty={repetitionPenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
+                    $"repeat_penalty={repetitionPenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
                     $"presence_penalty={presencePenalty.ToString("0.######", CultureInfo.InvariantCulture)}",
                     $"top_p={userDefinedTopP.ToString("0.######", CultureInfo.InvariantCulture)}",
                     $"min_p={userDefinedMinP.ToString("0.######", CultureInfo.InvariantCulture)}",
@@ -371,7 +466,9 @@ namespace FormsSystemStatsWidget.Core
         {
             foreach (JsonObject message in messages.OfType<JsonObject>())
             {
-                if (string.Equals(message["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(message["role"]?.ToString(), "system", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(message["role"]?.ToString(), "tool", StringComparison.OrdinalIgnoreCase) ||
+                    message["tool_calls"] is JsonArray)
                 {
                     continue;
                 }
@@ -549,9 +646,57 @@ namespace FormsSystemStatsWidget.Core
                     break;
                 }
 
-                messages.RemoveAt(candidate.Index);
+                if (!TryRemoveConversationUnitContaining(messages, candidate.Index, hasSystem, latestUserIndex))
+                {
+                    break;
+                }
                 totalLength = GetTotalContentLength(messages);
+                latestUserIndex = FindLatestRoleIndex(messages, "user");
             }
+        }
+
+        private static bool TryRemoveConversationUnitContaining(
+            JsonArray messages,
+            int candidateIndex,
+            bool hasSystem,
+            int latestUserIndex)
+        {
+            if (candidateIndex >= latestUserIndex && latestUserIndex >= 0)
+            {
+                return false;
+            }
+
+            int firstRemovableIndex = hasSystem ? 1 : 0;
+            int startIndex = candidateIndex;
+            while (startIndex > firstRemovableIndex &&
+                   !string.Equals(messages[startIndex]?["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+            {
+                startIndex--;
+            }
+
+            if (!string.Equals(messages[startIndex]?["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+            {
+                startIndex = firstRemovableIndex;
+            }
+
+            int endIndex = startIndex + 1;
+            while (endIndex < messages.Count &&
+                   !string.Equals(messages[endIndex]?["role"]?.ToString(), "user", StringComparison.OrdinalIgnoreCase))
+            {
+                endIndex++;
+            }
+
+            if (endIndex == messages.Count || endIndex == latestUserIndex || startIndex == latestUserIndex)
+            {
+                return false;
+            }
+
+            for (int index = endIndex - 1; index >= startIndex; index--)
+            {
+                messages.RemoveAt(index);
+            }
+
+            return true;
         }
 
         private static bool CanRemoveMessage(JsonArray messages, int index, bool hasSystem, int latestUserIndex)
@@ -561,7 +706,7 @@ namespace FormsSystemStatsWidget.Core
                 return false;
             }
 
-            if (index == messages.Count - 1 || index == latestUserIndex)
+            if (index == messages.Count - 1 || (latestUserIndex >= 0 && index >= latestUserIndex))
             {
                 return false;
             }
@@ -655,6 +800,125 @@ namespace FormsSystemStatsWidget.Core
 
             content = candidate;
             return true;
+        }
+
+        private static void RemoveThinkingBlocksFromMessageContent(JsonObject message, bool removeReasoningContent)
+        {
+            if (removeReasoningContent)
+            {
+                _ = message.Remove("reasoning_content");
+            }
+
+            if (message["content"] is JsonValue contentValue &&
+                contentValue.TryGetValue<string>(out string? content) &&
+                content != null)
+            {
+                message["content"] = RemoveThinkingBlocks(content);
+                return;
+            }
+
+            if (message["content"] is not JsonArray contentParts)
+            {
+                return;
+            }
+
+            foreach (JsonObject part in contentParts.OfType<JsonObject>())
+            {
+                if (!string.Equals(part["type"]?.ToString(), "text", StringComparison.OrdinalIgnoreCase) ||
+                    part["text"] is not JsonValue textValue ||
+                    !textValue.TryGetValue<string>(out string? text) ||
+                    text == null)
+                {
+                    continue;
+                }
+
+                part["text"] = RemoveThinkingBlocks(text);
+            }
+        }
+
+        private static string RemoveThinkingBlocks(string content)
+        {
+            MatchCollection tags = ThinkingTagRegex.Matches(content);
+            if (tags.Count == 0)
+            {
+                return content;
+            }
+
+            var result = new StringBuilder(content.Length);
+            int copyStart = 0;
+            int depth = 0;
+
+            foreach (Match tag in tags)
+            {
+                if (depth == 0)
+                {
+                    result.Append(content, copyStart, tag.Index - copyStart);
+                }
+
+                if (tag.Value.StartsWith("</", StringComparison.Ordinal))
+                {
+                    if (depth > 0)
+                    {
+                        depth--;
+                    }
+                }
+                else
+                {
+                    depth++;
+                }
+
+                copyStart = tag.Index + tag.Length;
+            }
+
+            if (depth == 0)
+            {
+                result.Append(content, copyStart, content.Length - copyStart);
+            }
+
+            return result.ToString();
+        }
+
+        private static void ReduceToolCallsToSkeleton(JsonObject message)
+        {
+            if (message["tool_calls"] is JsonArray toolCalls)
+            {
+                foreach (JsonObject toolCall in toolCalls.OfType<JsonObject>())
+                {
+                    foreach (string propertyName in toolCall
+                        .Select(property => property.Key)
+                        .Where(propertyName => propertyName is not ("id" or "type" or "index" or "function"))
+                        .ToArray())
+                    {
+                        _ = toolCall.Remove(propertyName);
+                    }
+
+                    if (toolCall["function"] is JsonObject function)
+                    {
+                        foreach (string propertyName in function
+                            .Select(property => property.Key)
+                            .Where(propertyName => propertyName is not ("name" or "arguments"))
+                            .ToArray())
+                        {
+                            _ = function.Remove(propertyName);
+                        }
+
+                        function["arguments"] = "{}";
+                    }
+                }
+            }
+
+            if (message["function_call"] is JsonObject legacyFunctionCall)
+            {
+                foreach (string propertyName in legacyFunctionCall
+                    .Select(property => property.Key)
+                    .Where(propertyName => propertyName is not ("name" or "arguments"))
+                    .ToArray())
+                {
+                    _ = legacyFunctionCall.Remove(propertyName);
+                }
+
+                legacyFunctionCall["arguments"] = "{}";
+            }
         }
 
         private static int CountKeywordHits(string content, HashSet<string> focusKeywords)
@@ -945,270 +1209,728 @@ namespace FormsSystemStatsWidget.Core
 
 
 
-        public static async Task TransformOpenAiStreamAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false)
+        public enum OpenAiStreamCompletionStatus
         {
-            using var streamReader = new StreamReader(upstreamStream);
-            using var writer = new StreamWriter(downstreamStream, new UTF8Encoding(false)) { AutoFlush = true };
+            CompletedByLlm,
+            CompletedByToolCall,
+            CompletedByDone,
+            ClientDisconnected,
+            UpstreamError,
+            TransformationError,
+            LoopAborted
+        }
 
+        public sealed record OpenAiStreamTransformResult(
+            bool DoneReceived,
+            string? FinalFinishReason,
+            int ToolCallCount,
+            int GeneratedContentLength,
+            bool ClientDisconnected,
+            OpenAiStreamCompletionStatus Status);
+
+        public static Task TransformOpenAiStreamAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false)
+        {
+            return TransformOpenAiStreamWithDiagnosticsAsync(upstreamStream, downstreamStream, detectedModelName, getGenerationStatsText);
+        }
+
+        public static async Task<OpenAiStreamTransformResult> TransformOpenAiStreamWithDiagnosticsAsync(Stream upstreamStream, Stream downstreamStream, string detectedModelName, bool getGenerationStatsText = false, string? streamRequestId = null)
+        {
+            const int traceLimit = 12;
+            streamRequestId ??= "untracked";
+            LlamaAgentLoopDiagnostics.BeginResponse(streamRequestId);
+            using var streamReader = new StreamReader(upstreamStream);
+            using var responseHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
+            var llamaServerTrace = new Queue<string>();
+            var copilotTrace = new Queue<string>();
+            var llamaToolDeltas = new ToolDeltaMetrics();
+            var copilotToolDeltas = new ToolDeltaMetrics();
+            var forwardedNativeToolDeltas = new ToolDeltaMetrics();
+            var intentionallyTransformedToolDeltas = new ToolDeltaMetrics();
+            var outputToolCallKeys = new HashSet<string>(StringComparer.Ordinal);
+            bool isEmittingLegacyToolCall = false;
             bool isReceivingReasoning = false;
             bool inToolCall = false;
             bool toolCallTriggered = false;
-            string toolBuffer = "";
-            string responseTextBuffer = "";
-            string detectBuffer = "";
-            string? line;
+            bool doneReceived = false;
+            bool clientDisconnected = false;
+            bool upstreamError = false;
+            bool transformationError = false;
+            bool statsInjected = false;
+            bool firstTokenLogged = false;
+            bool toolCallStartedLogged = false;
+            bool toolCallCompletedLogged = false;
+            bool finishReasonLogged = false;
+            bool upstreamIdentifiersLogged = false;
+            int generatedContentLength = 0;
+            string? finalFinishReason = null;
+            string toolBuffer = string.Empty;
+            var streamingLoopDetector = new StreamingLoopDetector(LlamaOllamaBridge.LoopDetectionConfig);
+            bool loopAborted = false;
 
-            while ((line = await streamReader.ReadLineAsync()) != null)
+            void AddTrace(Queue<string> trace, string entry)
             {
-                // Für Debugzwecke
-                // Logger.Log($"[RAW CHUNK] {line}");
-
-                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
+                if (trace.Count == traceLimit)
                 {
-                    if (!toolCallTriggered)
-                    {
-                        try
-                        {
-                            await writer.WriteLineAsync(line);
-                            await writer.FlushAsync();
-                        }
-                        catch (IOException) { break; }
-                        catch (System.Net.HttpListenerException) { break; }
-                        catch { break; }
-                    }
-                    continue;
+                    _ = trace.Dequeue();
                 }
+                trace.Enqueue(entry);
+            }
 
-                var dataStr = line["data: ".Length..].Trim();
-                if (dataStr == "[DONE]")
-                {
-                    if (getGenerationStatsText)
-                    {
-                        int deltaTokens = LlamaOllamaBridge.s_startContextTokens - await LlamaServerStats.GetCurrentContextTokensAsync();
-                        TimeSpan deltaTime = DateTime.Now - LlamaOllamaBridge.s_generationStartUtc;
-                        float rate = (float)(deltaTokens / deltaTime.TotalSeconds);
-                        string modelName = File.Exists(detectedModelName) ? Path.GetFileNameWithoutExtension(detectedModelName) : detectedModelName;
-
-                        string statsText = $"\n\n[Generation Stats] Model: '{modelName}', Tokens: {deltaTokens:N0}, Time: {deltaTime.TotalSeconds:F3}s, Rate: {rate:F3} tokens/s";
-                        await writer.WriteLineAsync("data: " + statsText);
-                        await writer.FlushAsync();
-                    }
-                    else
-                    {
-                        try
-                        {
-                            await writer.WriteLineAsync(line);
-                            await writer.FlushAsync();
-                        }
-                        catch { }
-                        break;
-                    }
-                }
-
+            async Task EmitLineAsync(string outputLine)
+            {
                 try
                 {
-                    var chunk = JsonNode.Parse(dataStr);
-                    if (chunk?["choices"] is not JsonArray choicesArray || choicesArray.Count == 0)
-                    {
-                        if (!toolCallTriggered && chunk?["content"] != null)
-                        {
-                            await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                            await writer.FlushAsync();
-                        }
-                        continue;
-                    }
-
-                    var choice = choicesArray[0]?.AsObject();
-                    var delta = choice?["delta"]?.AsObject();
-
-                    if (toolCallTriggered)
-                    {
-                        continue;
-                    }
-
-                    if (delta != null)
-                    {
-                        bool hasReasoning = delta.ContainsKey("reasoning_content") &&
-                                          delta["reasoning_content"] != null &&
-                                          !string.IsNullOrEmpty(delta["reasoning_content"]?.ToString());
-                        bool hasContent = delta.ContainsKey("content") &&
-                                         delta["content"] != null &&
-                                         !string.IsNullOrEmpty(delta["content"]?.ToString());
-
-                        if (hasReasoning)
-                        {
-                            string rContent = delta["reasoning_content"]!.ToString();
-                            _ = delta.Remove("reasoning_content");
-
-                            rContent = rContent.Replace("\n", "\n> ");
-
-                            if (!isReceivingReasoning)
-                            {
-                                rContent = "\n\n> 🧠 \n> " + rContent;
-                                isReceivingReasoning = true;
-                            }
-
-                            delta["content"] = rContent;
-                            hasContent = true;
-                        }
-                        else if (isReceivingReasoning && hasContent)
-                        {
-                            string nContent = delta["content"]!.ToString();
-                            delta["content"] = "\n\n" + nContent;
-                            isReceivingReasoning = false;
-                        }
-                        else if (isReceivingReasoning && choice != null &&
-                                 choice.ContainsKey("finish_reason") &&
-                                 choice["finish_reason"]?.ToString() != null)
-                        {
-                            delta["content"] = (delta["content"]?.ToString() ?? "") + "\n\n";
-                            isReceivingReasoning = false;
-                        }
-
-                        if (hasContent)
-                        {
-                            var content = delta["content"]?.ToString();
-
-                            if (!string.IsNullOrEmpty(content))
-                            {
-                                responseTextBuffer += content;
-
-                                // Kritische Prüfung: Ist dies der Beginn eines Tool-Calls?
-                                detectBuffer += content;
-                                int toolStartIndex = FindToolCallStartIndex(detectBuffer);
-
-                                if (toolStartIndex >= 0)
-                                {
-                                    inToolCall = true;
-                                    toolBuffer = detectBuffer.Substring(toolStartIndex);
-
-                                    // Sende Text vor dem Tool-Call
-                                    string textBefore = detectBuffer.Substring(0, toolStartIndex);
-                                    if (!string.IsNullOrEmpty(textBefore))
-                                    {
-                                        delta["content"] = textBefore;
-                                        await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                                        await writer.FlushAsync();
-                                    }
-                                    detectBuffer = "";
-                                    continue;
-                                }
-
-                                // Verarbeite Tool-Call, wenn wir bereits darin sind
-                                if (inToolCall)
-                                {
-                                    toolBuffer += content;
-
-                                    // Versuche, den Tool-Call zu parsen
-                                    if (TryParseToolCall(toolBuffer, out JsonObject? toolCall))
-                                    {
-                                        inToolCall = false;
-                                        toolCallTriggered = true;
-
-                                        // Erstelle tool_calls Array im OpenAI-Format
-                                        var toolCallsArray = new JsonArray
-                                        {
-                                            new JsonObject
-                                            {
-                                                ["index"] = 0,
-                                                ["id"] = $"call_{Guid.NewGuid():N}",
-                                                ["type"] = "function",
-                                                ["function"] = new JsonObject
-                                                {
-                                                    ["name"] = toolCall?["name"]?.ToString() ?? "unknown_tool",
-                                                    ["arguments"] = toolCall?["arguments"]?.ToString() ?? "{}"
-                                                }
-                                            }
-                                        };
-
-                                        // Bereinige Delta
-                                        _ = delta.Remove("content");
-                                        _ = delta.Remove("reasoning_content");
-                                        delta["tool_calls"] = toolCallsArray;
-
-                                        // Sende Chunk mit tool_calls
-                                        await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                                        await writer.FlushAsync();
-
-                                        // Sende finish_reason = "tool_calls"
-                                        var finishChunk = new JsonObject
-                                        {
-                                            ["choices"] = new JsonArray
-                                            {
-                                                new JsonObject
-                                                {
-                                                    ["delta"] = new JsonObject(),
-                                                    ["finish_reason"] = "tool_calls",
-                                                    ["index"] = 0
-                                                }
-                                            }
-                                        };
-                                        await writer.WriteLineAsync("data: " + finishChunk.ToJsonString());
-                                        await writer.FlushAsync();
-
-                                        toolBuffer = "";
-                                        detectBuffer = "";
-                                        continue;
-                                    }
-
-                                    // Wenn es nach JSON aussieht, aber nicht vollständig ist, warte auf mehr Daten
-                                    if (toolBuffer.Contains('{') && !toolBuffer.Contains('}'))
-                                    {
-                                        continue;
-                                    }
-
-                                    // Kein Tool-Call erkannt - sende als normalen Text
-                                    inToolCall = false;
-                                    delta["content"] = toolBuffer;
-                                    await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                                    await writer.FlushAsync();
-                                    toolBuffer = "";
-                                    continue;
-                                }
-
-                                // Normale Textverarbeitung
-                                delta["content"] = detectBuffer;
-                                await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                                await writer.FlushAsync();
-                                detectBuffer = "";
-                                continue;
-                            }
-                        }
-
-                        if (!delta.ContainsKey("content") || string.IsNullOrEmpty(delta["content"]?.ToString()))
-                        {
-                            await writer.WriteLineAsync("data: " + chunk?.ToJsonString());
-                            await writer.FlushAsync();
-                        }
-                    }
+                    byte[] outputBytes = Encoding.UTF8.GetBytes(outputLine + "\r\n");
+                    await downstreamStream.WriteAsync(outputBytes);
+                    await downstreamStream.FlushAsync();
+                    responseHash.AppendData(outputBytes);
                 }
                 catch (IOException)
                 {
-                    Logger.Log("[Disconnect] Copilot canceled the request (timeout/stop). Ending llama-server generation...");
-                    break;
+                    LogToolDeltaDispositionFromLine("DROPPED_TOOL_DELTA", streamRequestId, outputLine, "downstream_write_failed");
+                    clientDisconnected = true;
+                    throw new DownstreamDisconnectedException();
                 }
                 catch (System.Net.HttpListenerException)
                 {
-                    Logger.Log("[Disconnect] HTTP connection closed. Ending llama-server generation...");
-                    break;
+                    LogToolDeltaDispositionFromLine("DROPPED_TOOL_DELTA", streamRequestId, outputLine, "downstream_write_failed");
+                    clientDisconnected = true;
+                    throw new DownstreamDisconnectedException();
                 }
-                catch (Exception ex)
+                catch (ObjectDisposedException)
                 {
-                    Logger.Log($"[Transformer-Error] {ex.Message}");
-                    try
+                    LogToolDeltaDispositionFromLine("DROPPED_TOOL_DELTA", streamRequestId, outputLine, "downstream_write_failed");
+                    clientDisconnected = true;
+                    throw new DownstreamDisconnectedException();
+                }
+
+                if (outputLine.StartsWith("data: ", StringComparison.Ordinal))
+                {
+                    string data = outputLine["data: ".Length..].Trim();
+                    AddTrace(copilotTrace, SummarizeOpenAiSseData(data));
+                    if (data != "[DONE]")
                     {
-                        await writer.WriteLineAsync(line);
-                        await writer.FlushAsync();
-                    }
-                    catch
-                    {
-                        break;
+                        TrackOpenAiOutput(data, outputToolCallKeys, ref generatedContentLength, ref finalFinishReason);
+                        JsonNode? forwardedChunk = JsonNode.Parse(data);
+                        LlamaAgentLoopDiagnostics.ObserveResponseChunk(streamRequestId, forwardedChunk);
+                        RecordToolDeltas(forwardedChunk, copilotToolDeltas);
+                        if (isEmittingLegacyToolCall)
+                        {
+                            RecordToolDeltas(forwardedChunk, intentionallyTransformedToolDeltas);
+                            LogToolDeltaDispositionForChunk("INTENTIONALLY_TRANSFORMED_TOOL_DELTA", streamRequestId, forwardedChunk, "legacy_content_to_native_tool_call");
+                        }
+                        else
+                        {
+                            RecordToolDeltas(forwardedChunk, forwardedNativeToolDeltas);
+                            LogToolDeltaDispositionForChunk("COPILOT_FORWARDED_TOOL_DELTA", streamRequestId, forwardedChunk);
+                        }
                     }
                 }
             }
 
-            await FlushRemainingDetectBufferAsync(writer, detectBuffer, toolCallTriggered, inToolCall);
-            LogResponseSummary(responseTextBuffer);
+            async Task EmitChunkAsync(JsonObject chunk)
+            {
+                JsonObject? firstChoice = chunk["choices"] is JsonArray choices && choices.Count > 0
+                    ? choices[0] as JsonObject
+                    : null;
+                string? finishReason = firstChoice?["finish_reason"]?.ToString();
+                bool containsToolCalls = firstChoice?["delta"]?["tool_calls"] is JsonArray toolCalls && toolCalls.Count > 0;
+
+                if (getGenerationStatsText && !statsInjected &&
+                    !string.IsNullOrEmpty(finishReason) &&
+                    !string.Equals(finishReason, "tool_calls", StringComparison.Ordinal) &&
+                    !containsToolCalls)
+                {
+                    LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "StatsProbeStarted", "method=GET,path=/slots,purpose=completion_context_tokens");
+                    int currentContextTokens = await LlamaServerStats.GetCurrentContextTokensAsync();
+                    LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "StatsProbeCompleted", $"purpose=completion_context_tokens,tokens={currentContextTokens}");
+                    int deltaTokens = LlamaOllamaBridge.s_startContextTokens - currentContextTokens;
+                    TimeSpan deltaTime = DateTime.Now - LlamaOllamaBridge.s_generationStartUtc;
+                    double rate = deltaTime.TotalSeconds > 0 ? deltaTokens / deltaTime.TotalSeconds : 0;
+                    string modelName = File.Exists(detectedModelName) ? Path.GetFileNameWithoutExtension(detectedModelName) : detectedModelName;
+                    string statsText = $"\n\n[Generation Stats] Model: '{modelName}', Tokens: {deltaTokens:N0}, Time: {deltaTime.TotalSeconds:F3}s, Rate: {rate:F3} tokens/s";
+
+                    JsonObject statsChunk = chunk.DeepClone().AsObject();
+                    JsonObject statsChoice = statsChunk["choices"]![0]!.AsObject();
+                    statsChoice["delta"] = new JsonObject { ["content"] = statsText };
+                    statsChoice["finish_reason"] = null;
+                    await EmitLineAsync("data: " + statsChunk.ToJsonString());
+                    statsInjected = true;
+                }
+
+                await EmitLineAsync("data: " + chunk.ToJsonString());
+            }
+
+            async Task EmitLegacyToolCallAsync(JsonObject chunk, JsonObject delta, JsonObject toolCall)
+            {
+                toolCallTriggered = true;
+                inToolCall = false;
+                if (!toolCallStartedLogged)
+                {
+                    toolCallStartedLogged = true;
+                    LlamaAgentLoopDiagnostics.LogLifecycle(
+                        streamRequestId, "ToolCallStarted",
+                        $"source=legacy_content_transform,name={SafeTraceValue(toolCall["name"]?.ToString())}");
+                }
+                _ = delta.Remove("content");
+                _ = delta.Remove("reasoning_content");
+                delta["tool_calls"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["index"] = 0,
+                        ["id"] = $"call_{Guid.NewGuid():N}",
+                        ["type"] = "function",
+                        ["function"] = new JsonObject
+                        {
+                            ["name"] = toolCall["name"]?.ToString() ?? "unknown_tool",
+                            ["arguments"] = toolCall["arguments"]?.ToString() ?? "{}"
+                        }
+                    }
+                };
+
+                isEmittingLegacyToolCall = true;
+                try
+                {
+                    await EmitChunkAsync(chunk);
+                }
+                finally
+                {
+                    isEmittingLegacyToolCall = false;
+                }
+                var finishChunk = new JsonObject
+                {
+                    ["choices"] = new JsonArray
+                    {
+                        new JsonObject
+                        {
+                            ["delta"] = new JsonObject(),
+                            ["finish_reason"] = "tool_calls",
+                            ["index"] = 0
+                        }
+                    }
+                };
+                await EmitChunkAsync(finishChunk);
+                toolBuffer = string.Empty;
+            }
+
+            try
+            {
+                while (true)
+                {
+                    string? line;
+                    try
+                    {
+                        line = await streamReader.ReadLineAsync();
+                    }
+                    catch (IOException ex)
+                    {
+                        upstreamError = true;
+                        Logger.Log($"[OpenAI SSE] Upstream read failed ({ex.GetType().Name}).");
+                        break;
+                    }
+                    catch (ObjectDisposedException ex)
+                    {
+                        upstreamError = true;
+                        Logger.Log($"[OpenAI SSE] Upstream stream closed unexpectedly ({ex.GetType().Name}).");
+                        break;
+                    }
+                    catch (System.Net.Http.HttpRequestException ex)
+                    {
+                        upstreamError = true;
+                        Logger.Log($"[OpenAI SSE] Upstream request failed ({ex.GetType().Name}).");
+                        break;
+                    }
+                    catch (OperationCanceledException ex)
+                    {
+                        upstreamError = true;
+                        Logger.Log($"[OpenAI SSE] Upstream read was canceled ({ex.GetType().Name}).");
+                        break;
+                    }
+
+                    if (line == null)
+                    {
+                        break;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: ", StringComparison.Ordinal))
+                    {
+                        if (!toolCallTriggered || string.IsNullOrWhiteSpace(line))
+                        {
+                            await EmitLineAsync(line);
+                        }
+                        continue;
+                    }
+
+                    string data = line["data: ".Length..].Trim();
+                    AddTrace(llamaServerTrace, SummarizeOpenAiSseData(data));
+                    if (data == "[DONE]")
+                    {
+                        doneReceived = true;
+                        LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "DoneReceived");
+                        await EmitLineAsync(line);
+                        await EmitLineAsync(string.Empty);
+                        LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "DownstreamDoneWritten");
+                        if (toolCallStartedLogged && !toolCallCompletedLogged)
+                        {
+                            toolCallCompletedLogged = true;
+                            LlamaAgentLoopDiagnostics.LogLifecycle(
+                                streamRequestId, "ToolCallCompleted",
+                                $"finish_reason={finalFinishReason ?? "<none>"},tool_call_count={outputToolCallKeys.Count}");
+                        }
+                        break;
+                    }
+
+                    JsonObject chunk;
+                    try
+                    {
+                        chunk = JsonNode.Parse(data)?.AsObject()
+                            ?? throw new JsonException("The upstream SSE data was not a JSON object.");
+                    }
+                    catch (JsonException ex)
+                    {
+                        transformationError = true;
+                        Logger.Log($"[OpenAI SSE][{streamRequestId}] Invalid upstream JSON ({ex.GetType().Name}, {data.Length} chars).");
+                        break;
+                    }
+
+                    StreamingLoopDecision? loopDecision = streamingLoopDetector.ObserveChunk(chunk);
+                    if (loopDecision is not null)
+                    {
+                        if (loopDecision.ShouldAbort)
+                        {
+                            loopAborted = true;
+                            LlamaAgentLoopDiagnostics.LogLifecycle(
+                                streamRequestId, "StreamLoopAborted",
+                                $"repeats={loopDecision.RepeatCount},kind={loopDecision.LoopKind}");
+                            Logger.Log($"[OpenAI SSE][{streamRequestId}] Loop guard aborted streaming generation (repeats={loopDecision.RepeatCount}, kind={loopDecision.LoopKind}).");
+                            break;
+                        }
+                        else if (loopDecision.InterjectionMessage is not null)
+                        {
+                            LlamaAgentLoopDiagnostics.LogLifecycle(
+                                streamRequestId, "StreamLoopInterjectionDetected",
+                                $"repeats={loopDecision.RepeatCount},kind={loopDecision.LoopKind}");
+                        }
+                        continue;
+                    }
+
+                    RecordToolDeltas(chunk, llamaToolDeltas);
+                    LogToolDeltaDispositionForChunk("LLAMA_RECEIVED_TOOL_DELTA", streamRequestId, chunk);
+                    string? upstreamResponseId = chunk["id"]?.ToString();
+                    string? upstreamTaskId = chunk["task_id"]?.ToString();
+                    string? upstreamRequestId = chunk["request_id"]?.ToString();
+                    if (!upstreamIdentifiersLogged &&
+                        (upstreamResponseId != null || upstreamTaskId != null || upstreamRequestId != null))
+                    {
+                        upstreamIdentifiersLogged = true;
+                        LlamaAgentLoopDiagnostics.LogLifecycle(
+                            streamRequestId, "UpstreamSseIdentifiers",
+                            $"id={SafeTraceValue(upstreamResponseId)},task_id={SafeTraceValue(upstreamTaskId)},request_id={SafeTraceValue(upstreamRequestId)}");
+                    }
+
+                    if (chunk["choices"] is JsonArray lifecycleChoices)
+                    {
+                        foreach (JsonNode? lifecycleChoice in lifecycleChoices)
+                        {
+                            JsonObject? lifecycleDelta = lifecycleChoice?["delta"] as JsonObject;
+                            JsonArray? lifecycleToolCalls = lifecycleDelta?["tool_calls"] as JsonArray;
+                            bool hasToken = lifecycleDelta != null &&
+                                (lifecycleDelta["content"]?.ToString().Length > 0 ||
+                                 lifecycleDelta["reasoning_content"]?.ToString().Length > 0 ||
+                                 lifecycleToolCalls is { Count: > 0 });
+                            if (hasToken && !firstTokenLogged)
+                            {
+                                firstTokenLogged = true;
+                                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "FirstToken");
+                            }
+
+                            if (lifecycleToolCalls is { Count: > 0 } && !toolCallStartedLogged)
+                            {
+                                toolCallStartedLogged = true;
+                                string calls = string.Join(";", lifecycleToolCalls.Select(call =>
+                                    $"index={call?["index"]?.ToString() ?? "<none>"},id={call?["id"]?.ToString() ?? "<none>"},type={call?["type"]?.ToString() ?? "<none>"},name={call?["function"]?["name"]?.ToString() ?? "<fragment>"},arguments_length={call?["function"]?["arguments"]?.ToString().Length ?? 0}"));
+                                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "ToolCallStarted", calls);
+                            }
+
+                            string? lifecycleFinishReason = lifecycleChoice?["finish_reason"]?.ToString();
+                            if (lifecycleFinishReason != null && !finishReasonLogged)
+                            {
+                                finishReasonLogged = true;
+                                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "FinishReason", $"value={lifecycleFinishReason}");
+                                if (toolCallStartedLogged && string.Equals(lifecycleFinishReason, "tool_calls", StringComparison.Ordinal))
+                                {
+                                    toolCallCompletedLogged = true;
+                                    LlamaAgentLoopDiagnostics.LogLifecycle(
+                                        streamRequestId, "ToolCallCompleted",
+                                        $"finish_reason={lifecycleFinishReason},tool_call_count={outputToolCallKeys.Count}");
+                                }
+                            }
+                        }
+                    }
+
+                    if (chunk["choices"] is not JsonArray choicesArray || choicesArray.Count == 0)
+                    {
+                        if (!toolCallTriggered)
+                        {
+                            await EmitChunkAsync(chunk);
+                        }
+                        continue;
+                    }
+
+                    bool hasNativeToolCallInAdditionalChoice = choicesArray.Skip(1).Any(choiceNode =>
+                        choiceNode?["delta"]?["tool_calls"] is JsonArray calls && calls.Count > 0);
+                    if (hasNativeToolCallInAdditionalChoice)
+                    {
+                        await EmitChunkAsync(chunk);
+                        continue;
+                    }
+
+                    if (choicesArray[0] is not JsonObject choice || choice["delta"] is not JsonObject delta)
+                    {
+                        if (!toolCallTriggered)
+                        {
+                            await EmitChunkAsync(chunk);
+                        }
+                        continue;
+                    }
+
+                    bool hasNativeToolCalls = delta["tool_calls"] is JsonArray nativeToolCalls && nativeToolCalls.Count > 0;
+                    if (toolCallTriggered && !hasNativeToolCalls)
+                    {
+                        // The converted tool call already emitted its own tool_calls finish chunk.
+                        continue;
+                    }
+
+                    bool hasReasoning = delta["reasoning_content"] != null &&
+                                        !string.IsNullOrEmpty(delta["reasoning_content"]?.ToString());
+                    bool hasContent = delta["content"] != null &&
+                                      !string.IsNullOrEmpty(delta["content"]?.ToString());
+
+                    if (hasReasoning)
+                    {
+                        string reasoning = delta["reasoning_content"]!.ToString().Replace("\n", "\n> ");
+                        _ = delta.Remove("reasoning_content");
+                        if (!isReceivingReasoning)
+                        {
+                            reasoning = "\n\n> 🧠 \n> " + reasoning;
+                            isReceivingReasoning = true;
+                        }
+                        delta["content"] = reasoning;
+                        hasContent = true;
+                    }
+                    else if (isReceivingReasoning && hasContent)
+                    {
+                        delta["content"] = "\n\n" + delta["content"]!.ToString();
+                        isReceivingReasoning = false;
+                    }
+                    else if (isReceivingReasoning && choice["finish_reason"] != null)
+                    {
+                        delta["content"] = (delta["content"]?.ToString() ?? string.Empty) + "\n\n";
+                        isReceivingReasoning = false;
+                    }
+
+                    if (hasNativeToolCalls)
+                    {
+                        await EmitChunkAsync(chunk);
+                        continue;
+                    }
+
+                    if (hasContent && !string.IsNullOrEmpty(delta["content"]?.ToString()))
+                    {
+                        string content = delta["content"]!.ToString();
+                        if (inToolCall)
+                        {
+                            toolBuffer += content;
+                            if (TryParseToolCall(toolBuffer, out JsonObject? parsedToolCall) && parsedToolCall != null)
+                            {
+                                await EmitLegacyToolCallAsync(chunk, delta, parsedToolCall);
+                                continue;
+                            }
+
+                            if (toolBuffer.Contains('{') && !toolBuffer.Contains('}'))
+                            {
+                                continue;
+                            }
+
+                            inToolCall = false;
+                            delta["content"] = toolBuffer;
+                            await EmitChunkAsync(chunk);
+                            toolBuffer = string.Empty;
+                            continue;
+                        }
+
+                        int toolStartIndex = FindToolCallStartIndex(content);
+                        if (toolStartIndex >= 0)
+                        {
+                            string textBefore = content[..toolStartIndex];
+                            toolBuffer = content[toolStartIndex..];
+                            inToolCall = true;
+                            if (!string.IsNullOrEmpty(textBefore))
+                            {
+                                delta["content"] = textBefore;
+                                await EmitChunkAsync(chunk);
+                            }
+                            if (TryParseToolCall(toolBuffer, out JsonObject? parsedToolCall) && parsedToolCall != null)
+                            {
+                                await EmitLegacyToolCallAsync(chunk, delta, parsedToolCall);
+                            }
+                            continue;
+                        }
+
+                        await EmitChunkAsync(chunk);
+                        continue;
+                    }
+
+                    await EmitChunkAsync(chunk);
+                }
+            }
+            catch (DownstreamDisconnectedException)
+            {
+                clientDisconnected = true;
+            }
+            catch (InvalidOperationException ex)
+            {
+                transformationError = true;
+                Logger.Log($"[OpenAI SSE] Transformation failed ({ex.GetType().Name}).");
+            }
+
+            OpenAiStreamCompletionStatus status = loopAborted
+                ? OpenAiStreamCompletionStatus.LoopAborted
+                : clientDisconnected
+                    ? OpenAiStreamCompletionStatus.ClientDisconnected
+                    : transformationError
+                        ? OpenAiStreamCompletionStatus.TransformationError
+                        : upstreamError || !doneReceived
+                            ? OpenAiStreamCompletionStatus.UpstreamError
+                            : string.Equals(finalFinishReason, "tool_calls", StringComparison.Ordinal)
+                                ? OpenAiStreamCompletionStatus.CompletedByToolCall
+                                : finalFinishReason != null
+                                    ? OpenAiStreamCompletionStatus.CompletedByLlm
+                                    : OpenAiStreamCompletionStatus.CompletedByDone;
+
+            if (!firstTokenLogged)
+            {
+                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "FirstToken", "received=false");
+            }
+            if (!toolCallStartedLogged)
+            {
+                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "ToolCallStarted", "received=false");
+            }
+            if (!toolCallCompletedLogged)
+            {
+                LlamaAgentLoopDiagnostics.LogLifecycle(
+                    streamRequestId, "ToolCallCompleted",
+                    toolCallStartedLogged ? "completed=false" : "applicable=false");
+            }
+            if (!finishReasonLogged)
+            {
+                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "FinishReason", "received=false");
+            }
+            if (!doneReceived)
+            {
+                LlamaAgentLoopDiagnostics.LogLifecycle(streamRequestId, "DoneReceived", "received=false");
+            }
+
+            LlamaAgentLoopDiagnostics.CompleteResponse(streamRequestId, doneReceived, finalFinishReason);
+            string parity = llamaToolDeltas.SemanticallyMatches(forwardedNativeToolDeltas) ? "PASS" : "FAIL";
+            Logger.Log($"[OpenAI SSE][LLAMA #{streamRequestId}] {string.Join(" || ", llamaServerTrace)}");
+            Logger.Log($"[OpenAI SSE][COPILOT #{streamRequestId}] {string.Join(" || ", copilotTrace)}");
+            Logger.Log($"[OpenAI SSE][ToolDeltaParity #{streamRequestId}] ToolDeltaParity={parity}; LLAMA: {llamaToolDeltas}; COPILOT: {copilotToolDeltas}; native_forwarded={forwardedNativeToolDeltas}; intentionally_transformed={intentionallyTransformedToolDeltas}.");
+            string responseHashValue = Convert.ToHexString(responseHash.GetHashAndReset());
+            Logger.Log($"[OpenAI SSE][Summary #{streamRequestId}] DoneReceived={doneReceived}, FinalFinishReason={finalFinishReason ?? "<none>"}, ToolCallCount={outputToolCallKeys.Count}, GeneratedContentLength={generatedContentLength}, ResponseHash={responseHashValue}, ClientDisconnected={clientDisconnected}, Completion={status}.");
+
+            return new OpenAiStreamTransformResult(
+                doneReceived,
+                finalFinishReason,
+                outputToolCallKeys.Count,
+                generatedContentLength,
+                clientDisconnected,
+                status);
+        }
+
+        private sealed class DownstreamDisconnectedException : Exception
+        {
+        }
+
+        private sealed class ToolDeltaMetrics
+        {
+            public int DeltaCount { get; private set; }
+            public int IdsPresent { get; private set; }
+            public int TypesPresent { get; private set; }
+            public int NamesPresent { get; private set; }
+            public int ArgumentCharacters { get; private set; }
+            public HashSet<string> Indices { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> Ids { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> Types { get; } = new(StringComparer.Ordinal);
+            public HashSet<string> Names { get; } = new(StringComparer.Ordinal);
+            public List<string> CallPayloads { get; } = new();
+
+            public void Add(JsonArray calls)
+            {
+                if (calls.Count == 0)
+                {
+                    return;
+                }
+
+                DeltaCount++;
+                foreach (JsonNode? call in calls)
+                {
+                    CallPayloads.Add(call?.ToJsonString() ?? "<null>");
+                    string? index = call?["index"]?.ToString();
+                    string? id = call?["id"]?.ToString();
+                    string? type = call?["type"]?.ToString();
+                    JsonNode? nameNode = call?["function"]?["name"];
+                    string? name = nameNode?.ToString();
+                    JsonNode? arguments = call?["function"]?["arguments"];
+                    if (index != null) _ = Indices.Add(index);
+                    if (!string.IsNullOrEmpty(id)) { IdsPresent++; _ = Ids.Add(id); }
+                    if (!string.IsNullOrEmpty(type)) { TypesPresent++; _ = Types.Add(type); }
+                    if (!string.IsNullOrEmpty(name)) { NamesPresent++; _ = Names.Add(name); }
+                    ArgumentCharacters += arguments?.ToString().Length ?? 0;
+                }
+            }
+
+            public bool SemanticallyMatches(ToolDeltaMetrics other) =>
+                DeltaCount == other.DeltaCount && IdsPresent == other.IdsPresent && TypesPresent == other.TypesPresent &&
+                NamesPresent == other.NamesPresent && ArgumentCharacters == other.ArgumentCharacters &&
+                Indices.SetEquals(other.Indices) && Ids.SetEquals(other.Ids) && Types.SetEquals(other.Types) &&
+                Names.SetEquals(other.Names) && CallPayloads.SequenceEqual(other.CallPayloads, StringComparer.Ordinal);
+
+            public override string ToString() =>
+                $"tool_deltas={DeltaCount},indices=[{string.Join(",", Indices.OrderBy(value => value, StringComparer.Ordinal))}],ids_present={IdsPresent},types_present={TypesPresent},names_present={NamesPresent},argument_chars={ArgumentCharacters}";
+        }
+
+        private static void RecordToolDeltas(JsonNode? chunk, ToolDeltaMetrics metrics)
+        {
+            if (chunk?["choices"] is not JsonArray choices)
+            {
+                return;
+            }
+
+            foreach (JsonNode? choice in choices)
+            {
+                if (choice?["delta"]?["tool_calls"] is JsonArray calls)
+                {
+                    metrics.Add(calls);
+                }
+            }
+        }
+
+        private static void LogToolDeltaDispositionFromLine(string eventName, string requestId, string line, string reason)
+        {
+            if (!line.StartsWith("data: ", StringComparison.Ordinal)) return;
+            JsonNode? chunk = JsonNode.Parse(line["data: ".Length..].Trim());
+            LogToolDeltaDispositionForChunk(eventName, requestId, chunk, reason);
+        }
+
+        private static void LogToolDeltaDispositionForChunk(string eventName, string requestId, JsonNode? chunk, string? reason = null)
+        {
+            if (chunk?["choices"] is not JsonArray choices) return;
+            foreach (JsonNode? choice in choices)
+            {
+                if (choice?["delta"]?["tool_calls"] is not JsonArray calls) continue;
+                foreach (JsonNode? call in calls)
+                {
+                    JsonNode? function = call?["function"];
+                    int argumentLength = function?["arguments"]?.ToString().Length ?? 0;
+                    Logger.Log($"[{eventName} #{requestId}] index={call?["index"]?.ToString() ?? "<none>"},has_id={!string.IsNullOrEmpty(call?["id"]?.ToString())},has_type={!string.IsNullOrEmpty(call?["type"]?.ToString())},has_function_name={!string.IsNullOrEmpty(function?["name"]?.ToString())},arguments_length={argumentLength}{(reason == null ? string.Empty : $",reason={reason}")}");
+                }
+            }
+        }
+
+        private static string SummarizeOpenAiSseData(string data)
+        {
+            if (data == "[DONE]")
+            {
+                return "[DONE]";
+            }
+
+            JsonNode? root;
+            try
+            {
+                root = JsonNode.Parse(data);
+            }
+            catch (JsonException)
+            {
+                return $"invalid_json(length={data.Length})";
+            }
+
+            if (root is not JsonObject rootObject || rootObject["choices"] is not JsonArray choices)
+            {
+                return $"choices=0,payloadLength={data.Length}";
+            }
+
+            var summaries = new List<string>();
+            foreach (JsonNode? choice in choices)
+            {
+                JsonObject? delta = choice?["delta"] as JsonObject;
+                string contentSummary = delta == null || !delta.ContainsKey("content")
+                    ? "absent"
+                    : delta["content"] == null
+                        ? "null"
+                        : $"length={delta["content"]!.ToString().Length}";
+                string toolSummary = "absent";
+                if (delta?["tool_calls"] is JsonArray toolCalls)
+                {
+                    toolSummary = string.Join(";", toolCalls.Select(toolCall =>
+                    {
+                        JsonObject? function = toolCall?["function"] as JsonObject;
+                        string arguments = function?["arguments"]?.ToString() ?? string.Empty;
+                        return $"index={toolCall?["index"]?.ToString() ?? "<none>"},id={SafeTraceValue(toolCall?["id"]?.ToString())},type={SafeTraceValue(toolCall?["type"]?.ToString())},name={SafeTraceValue(function?["name"]?.ToString())},argumentsLength={arguments.Length}";
+                    }));
+                }
+
+                summaries.Add($"delta.content={contentSummary},delta.tool_calls=[{toolSummary}],finish_reason={choice?["finish_reason"]?.ToString() ?? "<null>"}");
+            }
+
+            return string.Join(" | ", summaries);
+        }
+
+        private static string SafeTraceValue(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "<none>";
+            }
+
+            string safeValue = value.Replace("\r", " ").Replace("\n", " ");
+            return safeValue.Length <= 80 ? safeValue : string.Concat(safeValue.AsSpan(0, 80), "...");
+        }
+
+        private static void TrackOpenAiOutput(string data, HashSet<string> toolCallKeys, ref int generatedContentLength, ref string? finalFinishReason)
+        {
+            JsonNode? root = JsonNode.Parse(data);
+            if (root is not JsonObject rootObject || rootObject["choices"] is not JsonArray choices)
+            {
+                return;
+            }
+
+            foreach (JsonNode? choice in choices)
+            {
+                JsonObject? delta = choice?["delta"] as JsonObject;
+                if (delta?["content"] != null)
+                {
+                    generatedContentLength += delta["content"]!.ToString().Length;
+                }
+
+                if (delta?["tool_calls"] is JsonArray toolCalls)
+                {
+                    foreach (JsonNode? toolCall in toolCalls)
+                    {
+                        string? index = toolCall?["index"]?.ToString();
+                        string? id = toolCall?["id"]?.ToString();
+                        string key = index != null ? $"index:{index}" : id != null ? $"id:{id}" : $"anonymous:{toolCallKeys.Count}";
+                        _ = toolCallKeys.Add(key);
+                    }
+                }
+
+                if (choice?["finish_reason"] != null)
+                {
+                    finalFinishReason = choice["finish_reason"]!.ToString();
+                }
+            }
         }
 
         private static int FindToolCallStartIndex(string content)
@@ -1361,12 +2083,16 @@ namespace FormsSystemStatsWidget.Core
                 string paramName = p.Groups["pname"].Value.Trim();
                 string paramValue = p.Groups["pval"].Value.Trim();
 
-                // Bereinige den Wert von überschüssigem Whitespace
-                paramValue = Regex.Replace(paramValue, @"\s+", " ").Trim();
-
                 if (!string.IsNullOrWhiteSpace(paramName))
                 {
-                    args[paramName] = paramValue;
+                    try
+                    {
+                        args[paramName] = JsonNode.Parse(paramValue);
+                    }
+                    catch (JsonException)
+                    {
+                        args[paramName] = JsonValue.Create(paramValue);
+                    }
                 }
             }
 
@@ -1483,39 +2209,6 @@ namespace FormsSystemStatsWidget.Core
             }
             return string.Empty;
         }
-
-        private static async Task FlushRemainingDetectBufferAsync(StreamWriter writer, string detectBuffer, bool toolCallTriggered, bool inToolCall)
-        {
-            if (string.IsNullOrEmpty(detectBuffer) || toolCallTriggered || inToolCall)
-            {
-                return;
-            }
-
-            var finalChunk = new JsonObject
-            {
-                ["choices"] = new JsonArray {
-                    new JsonObject {
-                        ["delta"] = new JsonObject { ["content"] = detectBuffer },
-                        ["index"] = 0,
-                        ["finish_reason"] = "stop"
-                    }
-                }
-            };
-
-            await writer.WriteLineAsync("data: " + finalChunk.ToJsonString());
-            await writer.FlushAsync();
-        }
-
-        private static void LogResponseSummary(string responseTextBuffer)
-        {
-            string cleanLog = responseTextBuffer.Replace("\r", " ").Replace("\n", " ").Trim();
-            if (cleanLog.Length > 200)
-            {
-                cleanLog = string.Concat(cleanLog.AsSpan(0, 200), "...");
-            }
-            Logger.Log($"[LLM Output Summary] Generated text: {cleanLog}");
-        }
-
 
         private static string RemoveKeyAndGetArgs(JsonObject source, params string[] keysToRemove)
         {

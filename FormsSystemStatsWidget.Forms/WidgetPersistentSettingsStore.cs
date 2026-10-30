@@ -77,12 +77,77 @@ namespace FormsSystemStatsWidget.Forms
         public int OllamaPort { get; set; } = 11434;
         public string AdditionalLoadArgs { get; set; } = "--mlock -t 4 -tb 4";
         public Point WidgetPosition { get; set; } = new(0, 0);
+        public int WidgetMonitorId { get; set; } = 0;
+        public int WidgetDockState { get; set; } = 0; // 0=floating, 1=fullscreen, 2=half-left, 3=half-right, 4=half-top, 5=half-bottom
+        public float FontSizeScale { get; set; } = 1.0f;
         public bool BlackOutMode { get; set; } = false;
 
         public bool PrintGenerationStats { get; set; } = false;
+        public bool TrimThinkingBlocks { get; set; }
+        public int TrimThinkingKeepLastMessages { get; set; } = 10;
+        public bool TrimThinkingToolResults { get; set; }
+        public string TrimThinkingToolCallMode { get; set; } = "Keep";
         public string AdditionalCopilotSystemPrompt { get; set; } = string.Empty;
         public bool ExtendCopilotSystemPrompt { get; set; } = false;
         public bool AppendParams { get; set; } = false;
+
+        public string OnnxModelRootDirectory { get; set; } = @"D:\Models\ONNX";
+        public string OnnxModel { get; set; } = string.Empty;
+        public string OnnxModelLayout { get; set; } = "Auto";
+        public int OnnxContextLength { get; set; } = 4096;
+        public int OnnxMaxTokens { get; set; } = 1024;
+        public double OnnxTemperature { get; set; } = 0.8;
+        public double OnnxTopP { get; set; } = 0.9;
+        public int OnnxTopK { get; set; } = 40;
+        public double OnnxRepeatPenalty { get; set; } = 1.1;
+        public string OnnxExecutionProvider { get; set; } = "Dml";
+        public bool OnnxHideConsole { get; set; } = true;
+        public double OnnxMinP { get; set; } = 0.0;
+        public double OnnxTypicalP { get; set; } = 1.0;
+        public double OnnxPresencePenalty { get; set; } = 0.0;
+        public double OnnxFrequencyPenalty { get; set; } = 0.0;
+        public int OnnxRepeatLastN { get; set; } = 0;
+        public string OnnxSeed { get; set; } = string.Empty;
+        public string OnnxStopSequences { get; set; } = string.Empty;
+        public bool OnnxEnableThinking { get; set; } = false;
+        public string OnnxSystemPrompt { get; set; } = string.Empty;
+        public int OnnxStage0Device { get; set; } = 0;
+        public int OnnxStage1Device { get; set; } = 1;
+        public int OnnxIntraOpThreads { get; set; } = 0;
+        public int OnnxInterOpThreads { get; set; } = 0;
+        public string OnnxExecutionMode { get; set; } = "sequential";
+        public string OnnxGraphOptimization { get; set; } = "all";
+        public bool OnnxEnableMemPattern { get; set; } = true;
+        public bool OnnxEnableCpuMemArena { get; set; } = true;
+        public bool OnnxEnableProfiling { get; set; } = false;
+        public bool OnnxDisablePrepacking { get; set; } = false;
+        public long OnnxGpuMemLimitMb { get; set; } = 0;
+        public string OnnxArenaExtendStrategy { get; set; } = "kNextPowerOfTwo";
+        public string OnnxCudnnConvAlgoSearch { get; set; } = "EXHAUSTIVE";
+        public bool OnnxCopyInDefaultStream { get; set; } = true;
+        public bool OnnxUseCudaGraphs { get; set; } = false;
+        public bool OnnxUseTf32 { get; set; } = true;
+        public bool OnnxAllowCpuFallback { get; set; } = false;
+        public int OnnxMaxConcurrentGenerations { get; set; } = 1;
+
+        // CMD/Terminal window persistence (for llama-server .BAT launched windows)
+        public Point CmdWindowPosition { get; set; } = new(0, 0);
+        public Size CmdWindowSize { get; set; } = Size.Empty;
+        public int CmdWindowMonitorId { get; set; } = 0;
+        public string CmdWindowMonitorDeviceName { get; set; } = string.Empty;
+        public int CmdWindowDockState { get; set; } = 0; // 0=floating, 1=fullscreen, 2=half-left, 3=half-right, 4=half-top, 5=half-bottom
+        public int CmdWindowFontSize { get; set; } = 12; // font size in points
+        public int CmdWindowFontFamily { get; set; } = 0; // 0=default, 1=Courier New, 2=Consolas
+
+        public bool LoopDetectionEnabled { get; set; } = true;
+        public int LoopDetectionTriggerAfter { get; set; } = 3;
+        public int LoopDetectionWindow { get; set; } = 5;
+        public double LoopDetectionSimilarityThreshold { get; set; } = 0.9;
+        public bool LoopInterjectionEnabled { get; set; } = true;
+        public string LoopInterjectionMessage { get; set; } = "You appear to be repeating the same actions or tool calls. Stop looping, review the current tool results and continue with a different action or provide the final answer if the task is complete.";
+        public int LoopMaxInterjections { get; set; } = 2;
+        public bool LoopAbortEnabled { get; set; }
+        public int LoopAbortAfterInterjections { get; set; } = 3;
     }
 
     internal static class WidgetPersistentSettingsStore
@@ -113,7 +178,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             catch (Exception ex)
             {
-                Logger.Log($"[Settings] Laden fehlgeschlagen: {ex.Message}");
+                Logger.Log($"[Settings] Load failed: {ex.Message}");
                 return new WidgetPersistentSettings();
             }
         }
@@ -128,7 +193,7 @@ namespace FormsSystemStatsWidget.Forms
             }
             catch (Exception ex)
             {
-                Logger.Log($"[Settings] Speichern fehlgeschlagen: {ex.Message}");
+                Logger.Log($"[Settings] Save failed: {ex.Message}");
             }
         }
     }

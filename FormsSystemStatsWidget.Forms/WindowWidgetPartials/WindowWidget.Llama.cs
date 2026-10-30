@@ -1,9 +1,9 @@
 ﻿using FormsSystemStatsWidget.Core;
-using FormsSystemStatsWidget.Forms.Services;
 using Microsoft.VisualBasic;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -15,8 +15,147 @@ namespace FormsSystemStatsWidget.Forms
         [GeneratedRegex(@" (?=-)")]
         private static partial Regex ArgsSplitRegex();
 
+        /// <summary>
+        /// Binds the loop-detection ToolStrip controls to the current LoopDetectionConfig values.
+        /// Call this after InitializeComponent() so the controls exist.
+        /// </summary>
+        private void HookLoopDetectionMenuEvents()
+        {
+            // Loop detection toggle
+            toolStripMenuItem_loopDetectionEnabled.Checked = this._loopDetectionService.GetConfig().Enabled;
+            toolStripMenuItem_loopDetectionEnabled.CheckedChanged += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                cfg.Enabled = toolStripMenuItem_loopDetectionEnabled.Checked;
+                this.ApplyLoopDetectionConfig(cfg);
+            };
 
-        
+            // Trigger after
+            toolStripTextBox_triggerAfter.Text = this._loopDetectionService.GetConfig().TriggerAfter.ToString();
+
+            // Detection window
+            toolStripTextBox_detectionWindow.Text = this._loopDetectionService.GetConfig().DetectionWindow.ToString();
+
+            // Similarity threshold
+            toolStripTextBox_similarityThreshold.Text = this._loopDetectionService.GetConfig().SimilarityThreshold.ToString("F2");
+
+            // Interjection enabled
+            toolStripMenuItem_interjectionEnabled.Checked = this._loopDetectionService.GetConfig().InterjectionEnabled;
+            toolStripMenuItem_interjectionEnabled.CheckedChanged += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                cfg.InterjectionEnabled = toolStripMenuItem_interjectionEnabled.Checked;
+                this.ApplyLoopDetectionConfig(cfg);
+            };
+
+            // Interjection message
+            toolStripTextBox_interjectionMessage.Text = this._loopDetectionService.GetConfig().InterjectionMessage;
+
+            // Max interjections
+            toolStripTextBox_maxInterjections.Text = this._loopDetectionService.GetConfig().MaxInterjections.ToString();
+
+            // Abort enabled
+            toolStripMenuItem_abortEnabled.Checked = this._loopDetectionService.GetConfig().AbortEnabled;
+            toolStripMenuItem_abortEnabled.CheckedChanged += (s, e) =>
+            {
+                var cfg = this._loopDetectionService.GetConfig();
+                cfg.AbortEnabled = toolStripMenuItem_abortEnabled.Checked;
+                this.ApplyLoopDetectionConfig(cfg);
+            };
+
+            // Abort after interjections
+            toolStripTextBox_abortAfterInterjections.Text = this._loopDetectionService.GetConfig().AbortAfterInterjections.ToString();
+        }
+
+        private void toolStripTextBox_triggerAfter_KeyDown(object? sender, KeyEventArgs e) =>
+            this.ApplyLoopIntegerInput(toolStripTextBox_triggerAfter, e, value => this._loopDetectionService.GetConfig().TriggerAfter = value, 2, 100);
+
+        private void toolStripTextBox_detectionWindow_KeyDown(object? sender, KeyEventArgs e) =>
+            this.ApplyLoopIntegerInput(toolStripTextBox_detectionWindow, e, value => this._loopDetectionService.GetConfig().DetectionWindow = value, 2, 100);
+
+        private void toolStripTextBox_similarityThreshold_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            string text = toolStripTextBox_similarityThreshold.Text.Trim();
+            if (!double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out double value) &&
+                !double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value) || value is < 0 or > 1)
+            {
+                toolStripTextBox_similarityThreshold.Text = this._loopDetectionService.GetConfig().SimilarityThreshold.ToString("0.##", CultureInfo.CurrentCulture);
+                return;
+            }
+            this._loopDetectionService.GetConfig().SimilarityThreshold = value;
+            this.toolStripTextBox_similarityThreshold.Text = value.ToString("0.##", CultureInfo.CurrentCulture);
+            this.ApplyLoopDetectionConfig(this._loopDetectionService.GetConfig());
+        }
+
+        private void toolStripTextBox_interjectionMessage_KeyDown(object? sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            if (!string.IsNullOrWhiteSpace(toolStripTextBox_interjectionMessage.Text))
+            {
+                this._loopDetectionService.GetConfig().InterjectionMessage = toolStripTextBox_interjectionMessage.Text.Trim();
+                this.ApplyLoopDetectionConfig(this._loopDetectionService.GetConfig());
+            }
+            else
+            {
+                toolStripTextBox_interjectionMessage.Text = this._loopDetectionService.GetConfig().InterjectionMessage;
+            }
+        }
+
+        private void toolStripTextBox_maxInterjections_KeyDown(object? sender, KeyEventArgs e) =>
+            this.ApplyLoopIntegerInput(toolStripTextBox_maxInterjections, e, value => this._loopDetectionService.GetConfig().MaxInterjections = value, 1, 20);
+
+        private void toolStripTextBox_abortAfterInterjections_KeyDown(object? sender, KeyEventArgs e) =>
+            this.ApplyLoopIntegerInput(toolStripTextBox_abortAfterInterjections, e, value => this._loopDetectionService.GetConfig().AbortAfterInterjections = value, 1, 20);
+
+        private void ApplyLoopIntegerInput(ToolStripTextBox textBox, KeyEventArgs e, Action<int> assign, int minimum, int maximum)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+            if (!int.TryParse(textBox.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out int value) || value < minimum || value > maximum)
+            {
+                textBox.Text = textBox == toolStripTextBox_triggerAfter
+                    ? this._loopDetectionService.GetConfig().TriggerAfter.ToString(CultureInfo.CurrentCulture)
+                    : textBox == toolStripTextBox_detectionWindow
+                        ? this._loopDetectionService.GetConfig().DetectionWindow.ToString(CultureInfo.CurrentCulture)
+                        : textBox == toolStripTextBox_maxInterjections
+                            ? this._loopDetectionService.GetConfig().MaxInterjections.ToString(CultureInfo.CurrentCulture)
+                            : this._loopDetectionService.GetConfig().AbortAfterInterjections.ToString(CultureInfo.CurrentCulture);
+                return;
+            }
+            assign(value);
+            this.ApplyLoopDetectionConfig(this._loopDetectionService.GetConfig());
+        }
+
+        private void ApplyLoopDetectionConfig(LoopDetectionConfig config)
+        {
+            this._loopDetectionService.SetConfig(config);
+            LlamaOllamaBridge.LoopDetectionConfig = config;
+            this._persistentSettings.LoopDetectionEnabled = config.Enabled;
+            this._persistentSettings.LoopDetectionTriggerAfter = config.TriggerAfter;
+            this._persistentSettings.LoopDetectionWindow = config.DetectionWindow;
+            this._persistentSettings.LoopDetectionSimilarityThreshold = config.SimilarityThreshold;
+            this._persistentSettings.LoopInterjectionEnabled = config.InterjectionEnabled;
+            this._persistentSettings.LoopInterjectionMessage = config.InterjectionMessage;
+            this._persistentSettings.LoopMaxInterjections = config.MaxInterjections;
+            this._persistentSettings.LoopAbortEnabled = config.AbortEnabled;
+            this._persistentSettings.LoopAbortAfterInterjections = config.AbortAfterInterjections;
+            this.SavePersistentSettings();
+        }
 
 
         private async void rerouteAPILlamacppOllamaToolStripMenuItem_CheckedChanged(object? sender, EventArgs e)
@@ -47,10 +186,10 @@ namespace FormsSystemStatsWidget.Forms
             menuItem.Enabled = true;
         }
 
-        private async Task EnableBridgeRouteAsync(ToolStripMenuItem menuItem)
+        private async Task EnableBridgeRouteAsync(ToolStripMenuItem menuItem) 
         {
             var cur = this.Cursor;
-            this.Cursor = Cursors.WaitCursor;
+            this.Cursor = Cursors.WaitCursor; 
 
             string apiUrl = this.toolStripTextBox_openAiApiUrl.Text.Trim();
             int llamaPort = int.TryParse(this.toolStripTextBox_llamacppPort.Text.Trim(), out int parsedLlamaPort) ? parsedLlamaPort : 8080;
@@ -311,7 +450,7 @@ namespace FormsSystemStatsWidget.Forms
                     Title = "Save Model Load Configuration as Batch File",
                     Filter = "Batch Files (*.bat)|*.bat",
                     FileName = batName,
-                    InitialDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs")
+                    InitialDirectory = GetModelLoadBatsDirectory()
                 };
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
@@ -373,14 +512,17 @@ namespace FormsSystemStatsWidget.Forms
 
                 Logger.Log($"Loaded inference parameters from batch file: Temperature={LlamaOllamaBridge.UserDefinedTemperature}, RepetitionPenalty={LlamaOllamaBridge.UserDefinedRepetitionPenalty}, PresencePenalty={LlamaOllamaBridge.UserDefinedPresencePenalty}, ReasoningEffort={LlamaOllamaBridge.UserDefinedReasoningEffort}, TopP={LlamaOllamaBridge.UserDefinedTopP}, MinP={LlamaOllamaBridge.UserDefinedMinP}, TopK={LlamaOllamaBridge.UserDefinedTopK}, ReasoningBudget={LlamaOllamaBridge.UserDefinedReasoningBudget}");
 
-                _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                // Launch CMD with persisted window settings (position, size, font)
+                this.StartCmdWithPersistedSettings(batFilePath);
+
+                try
                 {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c \"{batFilePath}\"",
-                    UseShellExecute = true,
-                    CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
-                    WindowStyle = this.toolStripMenuItem_hideCmd.Checked ? System.Diagnostics.ProcessWindowStyle.Hidden : System.Diagnostics.ProcessWindowStyle.Normal
-                });
+                    File.SetLastWriteTimeUtc(batFilePath, DateTime.UtcNow);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[Model Load BAT] Could not update last-used timestamp for '{batFilePath}': {ex.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -398,7 +540,7 @@ namespace FormsSystemStatsWidget.Forms
                 return false;
             }
 
-            batFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "llama.cpp_load_BATs", selectedBatName + ".BAT");
+            batFilePath = Path.Combine(GetModelLoadBatsDirectory(), selectedBatName + ".BAT");
             if (!File.Exists(batFilePath))
             {
                 _ = MessageBox.Show(this, $"The selected batch file does not exist:\n{batFilePath}", "Batch File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -407,6 +549,441 @@ namespace FormsSystemStatsWidget.Forms
 
             return true;
         }
+
+        /// <summary>
+        /// Starts the batch file through cmd.exe so Windows can use the configured
+        /// default terminal, then restores its window bounds when its title appears.
+        /// </summary>
+        private void StartCmdWithPersistedSettings(string batFilePath)
+        {
+            if (this.toolStripMenuItem_hideCmd.Checked)
+            {
+                this._activeCmdWindowTitle = null;
+                this.StartCmdNormal(batFilePath);
+                return;
+            }
+
+            string safeBatName = Regex.Replace(Path.GetFileNameWithoutExtension(batFilePath), "[^A-Za-z0-9_-]", "_");
+            this._activeCmdWindowTitle = $"FSSWidget_{safeBatName}";
+            System.Diagnostics.ProcessStartInfo startInfo = CreateTerminalStartInfo(batFilePath, this._activeCmdWindowTitle, this._persistentSettings);
+
+            try
+            {
+                System.Diagnostics.Process? process = System.Diagnostics.Process.Start(startInfo);
+                if (process is null)
+                {
+                    throw new InvalidOperationException("cmd.exe did not start.");
+                }
+                Logger.Log($"[CMD] Started batch file through cmd.exe (PID {process.Id}), window title '{this._activeCmdWindowTitle}'.");
+                _ = System.Threading.Tasks.Task.Run(this.RestoreCmdWindowWhenReady);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[CMD] Could not start batch file through cmd.exe: {ex.Message}");
+                this.StartCmdNormal(batFilePath);
+            }
+        }
+
+        private async System.Threading.Tasks.Task RestoreCmdWindowWhenReady()
+        {
+            for (int attempt = 0; attempt < 30; attempt++)
+            {
+                IntPtr handle = FindWindowByTitle(this._activeCmdWindowTitle);
+                if (handle != IntPtr.Zero)
+                {
+                    this.RestoreCmdWindow(handle);
+                    return;
+                }
+                await System.Threading.Tasks.Task.Delay(100).ConfigureAwait(false);
+            }
+            Logger.Log($"[CMD] Timed out waiting for console window '{this._activeCmdWindowTitle}'.");
+        }
+
+        private void RestoreCmdWindow(IntPtr handle)
+        {
+            Size size = this._persistentSettings.CmdWindowSize;
+            Point position = this._persistentSettings.CmdWindowPosition;
+            bool recoveredLegacyBounds = false;
+            Screen[] screens = Screen.AllScreens;
+            Screen screen = screens.FirstOrDefault(candidate => string.Equals(
+                    candidate.DeviceName,
+                    this._persistentSettings.CmdWindowMonitorDeviceName,
+                    StringComparison.OrdinalIgnoreCase))
+                ?? Screen.FromPoint(position);
+            int dockState = this._persistentSettings.CmdWindowDockState;
+            if (size.Width < 250 || size.Height < 200)
+            {
+                if (!TryRecoverLegacyCmdWindowBounds(position, size, out Rectangle recoveredBounds))
+                {
+                    Logger.Log($"[CMD] Ignoring invalid saved window size {size}; using the terminal's default geometry.");
+                    return;
+                }
+
+                int recoveredDockState = GetDockStateFromBounds(recoveredBounds, screen.WorkingArea);
+                if (recoveredDockState == 0)
+                {
+                    Logger.Log($"[CMD] Ignoring legacy window bounds that do not match a supported snap layout: {recoveredBounds}.");
+                    return;
+                }
+
+                Logger.Log($"[CMD] Recovered legacy native RECT {recoveredBounds}; inferred dock state {recoveredDockState}.");
+                position = recoveredBounds.Location;
+                size = recoveredBounds.Size;
+                dockState = recoveredDockState;
+                recoveredLegacyBounds = true;
+            }
+
+            Rectangle bounds;
+            Rectangle outerBounds;
+            if (dockState != 0 &&
+                GetWindowRect(handle, out NativeWindowRect outerNativeRect) &&
+                DwmGetWindowAttribute(handle, DwmwaExtendedFrameBounds, out NativeWindowRect visibleNativeRect, (uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeWindowRect>()) == 0)
+            {
+                bounds = GetCmdWindowRestoreBounds(position, size, dockState, screen.WorkingArea);
+                if (!recoveredLegacyBounds)
+                {
+                    Rectangle savedOuterBounds = new(position, size);
+                    Rectangle savedVisibleBounds = ConvertSavedOuterBoundsToVisibleBounds(
+                        savedOuterBounds, outerNativeRect.ToRectangle(), visibleNativeRect.ToRectangle());
+                    bounds = GetCmdWindowRestoreBoundsPreservingSavedSize(
+                        savedVisibleBounds.Location, savedVisibleBounds.Size, dockState, screen.WorkingArea);
+                }
+
+                outerBounds = GetCmdWindowOuterRestoreBounds(
+                    dockState, bounds, outerNativeRect.ToRectangle(), visibleNativeRect.ToRectangle());
+            }
+            else if (recoveredLegacyBounds || dockState != 0)
+            {
+                bounds = GetCmdWindowRestoreBounds(position, size, dockState, screen.WorkingArea);
+                outerBounds = bounds;
+            }
+            else
+            {
+                bounds = GetCmdWindowRestoreBoundsPreservingSavedSize(position, size, dockState, screen.WorkingArea);
+                outerBounds = bounds;
+            }
+
+            _ = SetWindowPos(handle, IntPtr.Zero, outerBounds.X, outerBounds.Y, outerBounds.Width, outerBounds.Height, SwpNoZOrder | SwpNoActivate);
+            Logger.Log($"[CMD] Restored visible frame on {screen.DeviceName}: target={bounds}, hwnd={outerBounds}, dock={dockState}.");
+        }
+
+        internal static bool TryRecoverLegacyCmdWindowBounds(Point position, Size size, out Rectangle bounds)
+        {
+            bounds = Rectangle.Empty;
+            if (size.Width <= position.X || size.Height <= position.Y)
+            {
+                return false;
+            }
+
+            bounds = Rectangle.FromLTRB(position.X, position.Y, size.Width, size.Height);
+            return bounds.Width >= 250 && bounds.Height >= 200;
+        }
+
+        internal static Rectangle GetCmdWindowRestoreBounds(Point position, Size size, int dockState, Rectangle workingArea)
+        {
+            if (dockState == 1)
+            {
+                return workingArea;
+            }
+
+            if (dockState == 2)
+            {
+                return new Rectangle(workingArea.Left, workingArea.Top, workingArea.Width / 2, workingArea.Height);
+            }
+            if (dockState == 3)
+            {
+                int snapWidth = workingArea.Width / 2;
+                return new Rectangle(workingArea.Left + workingArea.Width - snapWidth, workingArea.Top, snapWidth, workingArea.Height);
+            }
+            if (dockState == 4)
+            {
+                return new Rectangle(workingArea.Left, workingArea.Top, workingArea.Width, workingArea.Height / 2);
+            }
+            if (dockState == 5)
+            {
+                int snapHeight = workingArea.Height / 2;
+                return new Rectangle(workingArea.Left, workingArea.Top + workingArea.Height - snapHeight, workingArea.Width, snapHeight);
+            }
+
+            int width = Math.Min(size.Width, workingArea.Width);
+            int height = Math.Min(size.Height, workingArea.Height);
+            int x = Math.Clamp(position.X, workingArea.Left, workingArea.Right - width);
+            int y = Math.Clamp(position.Y, workingArea.Top, workingArea.Bottom - height);
+            return new Rectangle(x, y, width, height);
+        }
+
+        internal static Rectangle GetCmdWindowRestoreBoundsPreservingSavedSize(Point position, Size size, int dockState, Rectangle workingArea)
+        {
+            if (dockState == 0)
+            {
+                return GetCmdWindowRestoreBounds(position, size, dockState, workingArea);
+            }
+
+            if (dockState == 1)
+            {
+                return workingArea;
+            }
+
+            int width = Math.Clamp(size.Width, 1, workingArea.Width);
+            int height = Math.Clamp(size.Height, 1, workingArea.Height);
+            int x = Math.Clamp(position.X, workingArea.Left, workingArea.Right - width);
+            int y = Math.Clamp(position.Y, workingArea.Top, workingArea.Bottom - height);
+
+            return dockState switch
+            {
+                2 => new Rectangle(workingArea.Left, y, width, height),
+                3 => new Rectangle(workingArea.Right - width, y, width, height),
+                4 => new Rectangle(x, workingArea.Top, width, height),
+                5 => new Rectangle(x, workingArea.Bottom - height, width, height),
+                _ => GetCmdWindowRestoreBounds(position, size, dockState, workingArea)
+            };
+        }
+
+        internal static Rectangle ConvertSavedOuterBoundsToVisibleBounds(Rectangle savedOuterBounds, Rectangle currentOuterBounds, Rectangle currentVisibleBounds)
+        {
+            int leftInset = currentVisibleBounds.Left - currentOuterBounds.Left;
+            int topInset = currentVisibleBounds.Top - currentOuterBounds.Top;
+            int rightInset = currentOuterBounds.Right - currentVisibleBounds.Right;
+            int bottomInset = currentOuterBounds.Bottom - currentVisibleBounds.Bottom;
+            return Rectangle.FromLTRB(
+                savedOuterBounds.Left + leftInset,
+                savedOuterBounds.Top + topInset,
+                savedOuterBounds.Right - rightInset,
+                savedOuterBounds.Bottom - bottomInset);
+        }
+
+        internal static int GetCmdWindowDockStateFromBounds(Rectangle bounds, Rectangle workingArea)
+        {
+            if (workingArea.Width <= 0 || workingArea.Height <= 0)
+            {
+                return 0;
+            }
+
+            int tolerance = Math.Max(10, SystemInformation.BorderSize.Width * 2);
+            bool atLeft = Math.Abs(bounds.Left - workingArea.Left) <= tolerance;
+            bool atRight = Math.Abs(bounds.Right - workingArea.Right) <= tolerance;
+            bool atTop = Math.Abs(bounds.Top - workingArea.Top) <= tolerance;
+            bool atBottom = Math.Abs(bounds.Bottom - workingArea.Bottom) <= tolerance;
+            if (atLeft && atRight && atTop && atBottom)
+            {
+                return 1;
+            }
+
+            double horizontalCoverage = (double)bounds.Width / workingArea.Width;
+            double verticalCoverage = (double)bounds.Height / workingArea.Height;
+            if (verticalCoverage >= 0.5 && verticalCoverage >= horizontalCoverage)
+            {
+                if (atLeft)
+                {
+                    return 2;
+                }
+                if (atRight)
+                {
+                    return 3;
+                }
+            }
+
+            if (horizontalCoverage >= 0.5 && horizontalCoverage > verticalCoverage)
+            {
+                if (atTop)
+                {
+                    return 4;
+                }
+                if (atBottom)
+                {
+                    return 5;
+                }
+            }
+
+            return 0;
+        }
+
+        internal static Rectangle ConvertNativeWindowRect(int left, int top, int right, int bottom) =>
+            Rectangle.FromLTRB(left, top, right, bottom);
+
+        internal static Rectangle ExpandOuterBoundsForVisibleTarget(Rectangle visibleTarget, Rectangle currentOuter, Rectangle currentVisible)
+        {
+            int leftInset = currentVisible.Left - currentOuter.Left;
+            int topInset = currentVisible.Top - currentOuter.Top;
+            int rightInset = currentOuter.Right - currentVisible.Right;
+            int bottomInset = currentOuter.Bottom - currentVisible.Bottom;
+            return Rectangle.FromLTRB(
+                visibleTarget.Left - leftInset,
+                visibleTarget.Top - topInset,
+                visibleTarget.Right + rightInset,
+                visibleTarget.Bottom + bottomInset);
+        }
+
+        internal static Rectangle GetCmdWindowOuterRestoreBounds(int dockState, Rectangle targetBounds, Rectangle currentOuter, Rectangle currentVisible) =>
+            dockState == 0 ? targetBounds : ExpandOuterBoundsForVisibleTarget(targetBounds, currentOuter, currentVisible);
+
+        private void StartCmdNormal(string batFilePath)
+        {
+            string fullPath = Path.GetFullPath(batFilePath);
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                Arguments = $"/c call \"{fullPath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = this.toolStripMenuItem_hideCmd.Checked,
+                WindowStyle = this.toolStripMenuItem_hideCmd.Checked
+                    ? System.Diagnostics.ProcessWindowStyle.Hidden
+                    : System.Diagnostics.ProcessWindowStyle.Normal
+            };
+            _ = System.Diagnostics.Process.Start(startInfo);
+        }
+
+        internal static System.Diagnostics.ProcessStartInfo CreateTerminalStartInfo(string batFilePath, string windowTitle, WidgetPersistentSettings settings)
+        {
+            string fullPath = Path.GetFullPath(batFilePath);
+            string windowsTerminal = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Microsoft", "WindowsApps", "wt.exe");
+            if (File.Exists(windowsTerminal))
+            {
+                var terminalStartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = windowsTerminal,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                terminalStartInfo.ArgumentList.Add("-w");
+                terminalStartInfo.ArgumentList.Add("new");
+                if (settings.CmdWindowPosition != Point.Empty)
+                {
+                    terminalStartInfo.ArgumentList.Add("--pos");
+                    terminalStartInfo.ArgumentList.Add($"{settings.CmdWindowPosition.X},{settings.CmdWindowPosition.Y}");
+                }
+                terminalStartInfo.ArgumentList.Add("new-tab");
+                terminalStartInfo.ArgumentList.Add("--title");
+                terminalStartInfo.ArgumentList.Add(windowTitle);
+                terminalStartInfo.ArgumentList.Add("--suppressApplicationTitle");
+                terminalStartInfo.ArgumentList.Add("cmd.exe");
+                terminalStartInfo.ArgumentList.Add("/c");
+                terminalStartInfo.ArgumentList.Add($"call \"{fullPath}\"");
+                return terminalStartInfo;
+            }
+
+            return new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+                Arguments = $"/c title {windowTitle} & call \"{fullPath}\"",
+                UseShellExecute = false,
+                CreateNoWindow = false,
+                WindowStyle = System.Diagnostics.ProcessWindowStyle.Normal
+            };
+        }
+
+        /// <summary>
+        /// Saves the visible console geometry while the console is still available.
+        /// </summary>
+        private void SaveCmdWindowSettings()
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(this._activeCmdWindowTitle))
+                {
+                    return;
+                }
+
+                IntPtr handle = FindWindowByTitle(this._activeCmdWindowTitle);
+                if (handle == IntPtr.Zero || !GetWindowRect(handle, out NativeWindowRect nativeRect))
+                {
+                    return;
+                }
+
+                Rectangle rect = nativeRect.ToRectangle();
+                if (rect.Width < 250 || rect.Height < 200)
+                {
+                    Logger.Log($"[CMD] Ignoring implausible window bounds: {rect}.");
+                    return;
+                }
+
+                Rectangle dockDetectionBounds = rect;
+                if (DwmGetWindowAttribute(handle, DwmwaExtendedFrameBounds, out NativeWindowRect visibleNativeRect, (uint)System.Runtime.InteropServices.Marshal.SizeOf<NativeWindowRect>()) == 0)
+                {
+                    dockDetectionBounds = visibleNativeRect.ToRectangle();
+                }
+
+                var position = new Point(rect.X, rect.Y);
+                var size = new Size(rect.Width, rect.Height);
+                int monitorId = this.GetMonitorIdFromLocation(dockDetectionBounds.Location);
+                int dockState = GetCmdWindowDockStateFromBounds(dockDetectionBounds, Screen.FromRectangle(dockDetectionBounds).WorkingArea);
+                string monitorDeviceName = Screen.FromRectangle(dockDetectionBounds).DeviceName;
+                if (this._persistentSettings.CmdWindowPosition != position ||
+                    this._persistentSettings.CmdWindowSize != size ||
+                    this._persistentSettings.CmdWindowMonitorId != monitorId ||
+                    this._persistentSettings.CmdWindowDockState != dockState ||
+                    !string.Equals(this._persistentSettings.CmdWindowMonitorDeviceName, monitorDeviceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    this._persistentSettings.CmdWindowPosition = position;
+                    this._persistentSettings.CmdWindowSize = size;
+                    this._persistentSettings.CmdWindowMonitorId = monitorId;
+                    this._persistentSettings.CmdWindowDockState = dockState;
+                    this._persistentSettings.CmdWindowMonitorDeviceName = monitorDeviceName;
+                    WidgetPersistentSettingsStore.Save(this._persistentSettings);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"[CMD] Failed to save window settings: {ex.Message}");
+            }
+        }
+
+        private const uint SwpNoZOrder = 0x0004;
+        private const uint SwpNoActivate = 0x0010;
+        private const uint DwmwaExtendedFrameBounds = 9;
+
+        private delegate bool EnumWindowsCallback(IntPtr handle, IntPtr parameter);
+
+        private static IntPtr FindWindowByTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return IntPtr.Zero;
+            }
+
+            IntPtr found = IntPtr.Zero;
+            EnumWindows((handle, _) =>
+            {
+                var text = new StringBuilder(512);
+                _ = GetWindowText(handle, text, text.Capacity);
+                if (text.ToString().Contains(title, StringComparison.OrdinalIgnoreCase))
+                {
+                    found = handle;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct NativeWindowRect
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+
+            public readonly Rectangle ToRectangle() => ConvertNativeWindowRect(this.Left, this.Top, this.Right, this.Bottom);
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+        [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+        private static extern bool GetWindowRect(IntPtr hWnd, out NativeWindowRect lpRect);
+
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr hwnd, uint attribute, out NativeWindowRect value, uint size);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
 
         private void ToolStripMenuItem_killLlamaServer_Click(object? sender, EventArgs e)
         {
@@ -421,6 +998,22 @@ namespace FormsSystemStatsWidget.Forms
             catch (Exception ex)
             {
                 _ = MessageBox.Show(this, $"Failed to kill llama-server processes. Error: {ex.Message}", "Error Killing Processes", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void toolStripMenuItem_killOnnxGenaiServer_Click(object? sender, EventArgs e)
+        {
+            try
+            {
+                List<Process> processes = WidgetStatics.GetOnnxGenaiServerProcesses();
+                int? killed = WidgetStatics.KillOnnxGenaiServerProcesses(processes);
+                this.StopTrackedOnnxGenaiServerProcess();
+                Logger.Log($"[WindowWidget] Killed {killed} ONNX-GenAI Server process(es).");
+                this.ContextMenuStrip?.Close();
+            }
+            catch (Exception ex)
+            {
+                _ = MessageBox.Show(this, $"Failed to kill ONNX-GenAI Server processes. Error: {ex.Message}", "Error Killing Processes", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -1003,6 +1596,53 @@ namespace FormsSystemStatsWidget.Forms
         private void showTokenssToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
             this._persistentSettings.ShowTokensPerSecond = this.showTokenssToolStripMenuItem.Checked;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_trimThinkingBlocks_CheckedChanged(object sender, EventArgs e)
+        {
+            LlamaOllamaBridge.Enabled = this.toolStripMenuItem_trimThinkingBlocks.Checked;
+            this._persistentSettings.TrimThinkingBlocks = LlamaOllamaBridge.Enabled;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripMenuItem_configTrimToolResults_CheckedChanged(object sender, EventArgs e)
+        {
+            LlamaOllamaBridge.TrimToolResults = this.toolStripMenuItem_configTrimToolResults.Checked;
+            this._persistentSettings.TrimThinkingToolResults = LlamaOllamaBridge.TrimToolResults;
+            this.SavePersistentSettings();
+        }
+
+        private void toolStripTextBox_configKeepLastMessages_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode != Keys.Enter)
+            {
+                return;
+            }
+
+            string entered = this.toolStripTextBox_configKeepLastMessages.Text.Trim();
+            if (int.TryParse(entered, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int keepLastMessages))
+            {
+                this.toolStripTextBox_configKeepLastMessages.Text = keepLastMessages.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                LlamaOllamaBridge.KeepLastMessages = keepLastMessages;
+                this._persistentSettings.TrimThinkingKeepLastMessages = keepLastMessages;
+                this.SavePersistentSettings();
+            }
+            else
+            {
+                _ = MessageBox.Show(this, "Enter a non-negative whole number for the number of recent messages to keep unchanged.", "Invalid Input", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                this.toolStripTextBox_configKeepLastMessages.Text = LlamaOllamaBridge.KeepLastMessages.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            e.SuppressKeyPress = true;
+            e.Handled = true;
+        }
+
+        private void toolStripMenuItem_onlyKeepToolCallSkeletons_CheckedChanged(object sender, EventArgs e)
+        {
+            string mode = this.toolStripMenuItem_onlyKeepToolCallSkeletons.Checked ? "Skeleton" : "Keep";
+            LlamaOllamaBridge.ToolCallMode = mode;
+            this._persistentSettings.TrimThinkingToolCallMode = mode;
             this.SavePersistentSettings();
         }
 

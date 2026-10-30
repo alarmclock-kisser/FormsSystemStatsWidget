@@ -30,6 +30,7 @@ namespace FormsSystemStatsWidget.Core
 
         private static long _lastTotalSent;
         private static long _lastTotalReceived;
+        private static DateTime _lastSampleUtc = DateTime.MinValue;
         private static Dictionary<int, (string Name, ulong Read, ulong Write)> _prevSnapshot = [];
         private static bool _initialized;
         private static readonly TimeSpan NetworkInterfacesRefreshInterval = TimeSpan.FromSeconds(5);
@@ -64,6 +65,7 @@ namespace FormsSystemStatsWidget.Core
             _cachedNetworkInterfaces = GetNetworkInterfacesSnapshot(forceRefresh: true);
             _lastTotalSent = GetTotalBytesSent(_cachedNetworkInterfaces);
             _lastTotalReceived = GetTotalBytesReceived(_cachedNetworkInterfaces);
+            _lastSampleUtc = DateTime.UtcNow;
             _prevSnapshot = SnapshotProcessIo();
             _lastProcessIoSampleUtc = DateTime.UtcNow;
             _initialized = true;
@@ -89,12 +91,19 @@ namespace FormsSystemStatsWidget.Core
                 long totalSent = GetTotalBytesSent(_cachedNetworkInterfaces);
                 long totalReceived = GetTotalBytesReceived(_cachedNetworkInterfaces);
 
-                double factor = 1000.0 / Math.Max(1, intervalMs);
-                UpBytesPerSecond = Math.Max(0, totalSent - _lastTotalSent) * factor;
-                DownBytesPerSecond = Math.Max(0, totalReceived - _lastTotalReceived) * factor;
+                // Echte verstrichene Zeit statt starr intervalMs: Der UI-Timer kann durch
+                // langsame HW-Abfragen deutlich später feuern; mit fixer 420ms-Annahme
+                // würde die Rate um Faktor (realElapsed / interval) überschätzt.
+                // (Erklärt die gemeldeten ~50 MB/s an einer 100-MBit-Leitung:
+                //  100 MBit/s = 12,5 MB/s max, Faktor ~8 = Bit/Byte-Verwechslung
+                //  plus Überhöhung durch falschen Zeitnenner.)
+                double elapsedSeconds = (nowUtc - _lastSampleUtc).TotalSeconds;
+                UpBytesPerSecond = BarHistory.ComputeBytesPerSecond(totalSent - _lastTotalSent, elapsedSeconds, intervalMs);
+                DownBytesPerSecond = BarHistory.ComputeBytesPerSecond(totalReceived - _lastTotalReceived, elapsedSeconds, intervalMs);
 
                 _lastTotalSent = totalSent;
                 _lastTotalReceived = totalReceived;
+                _lastSampleUtc = nowUtc;
 
                 if ((nowUtc - _lastProcessIoSampleUtc) >= ProcessIoSamplingInterval)
                 {
@@ -155,6 +164,11 @@ namespace FormsSystemStatsWidget.Core
             long total = 0;
             foreach (NetworkInterface ni in networkInterfaces)
             {
+                if (!ShouldCountInterface(ni))
+                {
+                    continue;
+                }
+
                 try { total += ni.GetIPv4Statistics().BytesSent; }
                 catch { }
             }
@@ -166,10 +180,54 @@ namespace FormsSystemStatsWidget.Core
             long total = 0;
             foreach (NetworkInterface ni in networkInterfaces)
             {
+                if (!ShouldCountInterface(ni))
+                {
+                    continue;
+                }
+
                 try { total += ni.GetIPv4Statistics().BytesReceived; }
                 catch { }
             }
             return total;
+        }
+
+        /// <summary>
+        /// Nur reale, aktive NICs zählen. Loopback/Tunnel/virtuale Down-Adapter würden
+        /// sonst lokalen Traffic (z.B. llama-server ↔ Widget) als Up/Down-Rate
+        /// im Fenstertitel erscheinen lassen und die Werte aufblähen.
+        /// </summary>
+        internal static bool ShouldCountInterface(NetworkInterface ni)
+        {
+            try
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up)
+                {
+                    return false;
+                }
+
+                if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback
+                    || ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+                {
+                    return false;
+                }
+
+                // Virtuelle/vEthernet/VPN-Adapter grob herausfiltern, physische NICs behalten.
+                string desc = (ni.Description ?? string.Empty).ToLowerInvariant();
+                string name = (ni.Name ?? string.Empty).ToLowerInvariant();
+                if (desc.Contains("loopback") || name.Contains("loopback")
+                    || desc.Contains("vethernet") || name.Contains("vethernet")
+                    || desc.Contains("virtual") && desc.Contains("ethernet")
+                    || name.StartsWith("vethernet"))
+                {
+                    return false;
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         // ── process IO via P/Invoke (fast, no COM overhead) ─────────────
