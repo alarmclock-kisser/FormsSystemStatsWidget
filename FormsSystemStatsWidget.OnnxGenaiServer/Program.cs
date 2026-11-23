@@ -197,6 +197,70 @@ app.MapGet("/stats", async (HttpContext ctx) =>
     return Results.Content(statsJson, "application/json", statusCode: 200);
 });
 
+// Full server configuration (all startup options incl. defaults) plus the
+// detailed backend device list with per-device initialized/executionBusy flags.
+app.MapGet("/config", async (HttpContext ctx) =>
+{
+    var cuda = EnvironmentDiscovery.DiscoverCuda();
+    var deviceStates = await engine.GetDeviceStatesAsync(ctx.RequestAborted);
+    var statesById = deviceStates
+        .Where(s => s.DeviceId >= 0)
+        .GroupBy(s => s.DeviceId)
+        .ToDictionary(g => g.Key, g => g.First());
+
+    var devices = new List<object>();
+    foreach (var device in cuda.Devices)
+    {
+        statesById.TryGetValue(device.Id, out var state);
+        devices.Add(new
+        {
+            id = device.Id,
+            name = device.Name,
+            computeCapability = device.ComputeCapability,
+            vramTotalMb = device.VramTotalMb,
+            vramUsedMb = device.VramUsedMb,
+            vramFreeMb = device.VramFreeMb,
+            role = state?.Role,
+            initialized = state?.Initialized ?? false,
+            executionBusy = state?.ExecutionBusy ?? false,
+        });
+    }
+
+    // Python-known devices that discovery missed (e.g. no NVML) still show up,
+    // with discovery details left null.
+    foreach (var state in deviceStates.Where(s => s.DeviceId >= 0 && !cuda.Devices.Any(d => d.Id == s.DeviceId)))
+    {
+        devices.Add(new
+        {
+            id = state.DeviceId,
+            name = (string?)null,
+            computeCapability = (string?)null,
+            vramTotalMb = (long?)null,
+            vramUsedMb = (long?)null,
+            vramFreeMb = (long?)null,
+            role = (string?)state.Role,
+            initialized = state.Initialized,
+            executionBusy = state.ExecutionBusy,
+        });
+    }
+
+    return Results.Ok(new
+    {
+        options = new
+        {
+            onnxGenaiServer = app.Services.GetRequiredService<OnnxGenaiServerOptions>(),
+            engine = app.Services.GetRequiredService<EngineOptions>(),
+            runtime = app.Services.GetRequiredService<RuntimeOptions>(),
+            cuda = app.Services.GetRequiredService<CudaOptions>(),
+            generation = app.Services.GetRequiredService<GenerationDefaults>(),
+            diagnostics = app.Services.GetRequiredService<DiagnosticsOptions>(),
+        },
+        cudaAvailable = cuda.IsAvailable,
+        driverVersion = cuda.DriverVersion,
+        devices,
+    });
+});
+
 app.MapGet("/metrics", () =>
 {
     var cuda = EnvironmentDiscovery.DiscoverCuda();

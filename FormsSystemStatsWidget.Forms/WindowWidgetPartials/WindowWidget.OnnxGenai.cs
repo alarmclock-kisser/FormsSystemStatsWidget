@@ -103,39 +103,65 @@ namespace FormsSystemStatsWidget.Forms
                 this.toolStripMenuItem_onnxTemperature,
                 this.toolStripMenuItem_onnxTopP,
                 this.toolStripMenuItem_onnxTopK,
-                this.CreateOnnxInputMenu("Min P", out this._menuOnnxMinP, out this._boxOnnxMinP, "0.0"),
-                this.CreateOnnxInputMenu("Typical P", out this._menuOnnxTypicalP, out this._boxOnnxTypicalP, "1.0"),
+                this.CreateOnnxInputMenu("Min P", out this._menuOnnxMinP, out this._boxOnnxMinP, "0.0",
+                    tip: "Drop tokens below P x top-token probability. 0 = off."),
+                this.CreateOnnxInputMenu("Typical P", out this._menuOnnxTypicalP, out this._boxOnnxTypicalP, "1.0",
+                    tip: "Keep locally typical tokens (mass <= P). 1.0 = off."),
                 this.toolStripMenuItem_onnxRepeatPenalty,
-                this.CreateOnnxInputMenu("Repeat Last N (0 = full history)", out this._menuOnnxRepeatLastN, out this._boxOnnxRepeatLastN, "0"),
-                this.CreateOnnxInputMenu("Presence Penalty", out this._menuOnnxPresencePenalty, out this._boxOnnxPresencePenalty, "0.0"),
-                this.CreateOnnxInputMenu("Frequency Penalty", out this._menuOnnxFrequencyPenalty, out this._boxOnnxFrequencyPenalty, "0.0"),
-                this.CreateOnnxInputMenu("Seed (empty = random)", out this._menuOnnxSeed, out this._boxOnnxSeed, string.Empty),
-                this.CreateOnnxInputMenu("Stop Sequences (; separated)", out this._menuOnnxStopSequences, out this._boxOnnxStopSequences, string.Empty, boxWidth: 200),
-                this.CreateOnnxCheckMenu("Enable Thinking", @default: false, out this._menuOnnxEnableThinking),
-                this.CreateOnnxInputMenu("System Prompt", out this._menuOnnxSystemPrompt, out this._boxOnnxSystemPrompt, string.Empty, boxWidth: 280),
+                this.CreateOnnxInputMenu("Repeat Last N (0 = full history)", out this._menuOnnxRepeatLastN, out this._boxOnnxRepeatLastN, "0",
+                    tip: "Penalty window in tokens; older history is ignored. 0 = full history."),
+                this.CreateOnnxInputMenu("Presence Penalty", out this._menuOnnxPresencePenalty, out this._boxOnnxPresencePenalty, "0.0",
+                    tip: "Flat penalty for any token already used. 0 = off."),
+                this.CreateOnnxInputMenu("Frequency Penalty", out this._menuOnnxFrequencyPenalty, out this._boxOnnxFrequencyPenalty, "0.0",
+                    tip: "Penalty scaled by how often a token was used. 0 = off."),
+                this.CreateOnnxInputMenu("Seed (empty = random)", out this._menuOnnxSeed, out this._boxOnnxSeed, string.Empty,
+                    tip: "Fixed seed gives reproducible output. Empty = random every run."),
+                this.CreateOnnxInputMenu("Stop Sequences (; separated)", out this._menuOnnxStopSequences, out this._boxOnnxStopSequences, string.Empty, boxWidth: 200,
+                    tip: "Stop generation when any of these strings appears. Separate entries with ';'."),
+                this.CreateOnnxCheckMenu("Enable Thinking", @default: false, out this._menuOnnxEnableThinking,
+                    tip: "Wrap the prompt for the model's thinking template (Qwen3 <think>). Needs a thinking-capable model."),
+                this.CreateOnnxInputMenu("System Prompt", out this._menuOnnxSystemPrompt, out this._boxOnnxSystemPrompt, string.Empty, boxWidth: 280,
+                    tip: "Prepended as the system message when the request has none."),
             });
 
             this._menuOnnxExecution = new ToolStripMenuItem { Text = "Execution ..." };
             this._menuOnnxExecution.DropDownItems.AddRange(new ToolStripItem[]
             {
                 this.toolStripComboBox_onnxExecutionProvider,
-                this.CreateOnnxInputMenu("Stage 0 Device", out this._menuOnnxStage0Device, out this._boxOnnxStage0Device, "0"),
-                this.CreateOnnxInputMenu("Stage 1 Device", out this._menuOnnxStage1Device, out this._boxOnnxStage1Device, "1"),
-                this.CreateOnnxInputMenu("Intra-Op Threads (0 = auto)", out this._menuOnnxIntraOpThreads, out this._boxOnnxIntraOpThreads, "0"),
-                this.CreateOnnxInputMenu("Inter-Op Threads (0 = auto)", out this._menuOnnxInterOpThreads, out this._boxOnnxInterOpThreads, "0"),
-                this.CreateOnnxComboMenu("Execution Mode", OnnxKvExecutionModes, "sequential", out this._menuOnnxExecutionMode, out this._comboOnnxExecutionMode),
-                this.CreateOnnxComboMenu("Graph Optimization", OnnxKvGraphOptimizations, "all", out this._menuOnnxGraphOptimization, out this._comboOnnxGraphOptimization),
-                this.CreateOnnxCheckMenu("Memory Pattern", @default: true, out this._menuOnnxMemPattern),
-                this.CreateOnnxCheckMenu("CPU Memory Arena", @default: true, out this._menuOnnxCpuMemArena),
-                this.CreateOnnxCheckMenu("Profiling (writes ORT profiles)", @default: false, out this._menuOnnxProfiling),
-                this.CreateOnnxCheckMenu("Disable Prepacking", @default: false, out this._menuOnnxDisablePrepacking),
-                this.CreateOnnxInputMenu("GPU Mem Limit MB (0 = unlimited)", out this._menuOnnxGpuMemLimitMb, out this._boxOnnxGpuMemLimitMb, "0"),
-                this.CreateOnnxComboMenu("Arena Strategy", OnnxKvArenaStrategies, "kNextPowerOfTwo", out this._menuOnnxArenaStrategy, out this._comboOnnxArenaStrategy),
-                this.CreateOnnxComboMenu("cuDNN Conv Search", OnnxKvCudnnSearchModes, "EXHAUSTIVE", out this._menuOnnxCudnnSearch, out this._comboOnnxCudnnSearch),
-                this.CreateOnnxCheckMenu("Copy In Default Stream", @default: true, out this._menuOnnxCopyDefaultStream),
-                this.CreateOnnxCheckMenu("CUDA Graphs (experimental)", @default: false, out this._menuOnnxCudaGraphs),
-                this.CreateOnnxCheckMenu("TF32", @default: true, out this._menuOnnxTf32),
-                this.CreateOnnxCheckMenu("CPU Fallback", @default: false, out this._menuOnnxCpuFallback),
+                this.CreateOnnxInputMenu("Stage 0 Device", out this._menuOnnxStage0Device, out this._boxOnnxStage0Device, "0",
+                    tip: "CUDA device index for stage 0 (embeddings + early layers)."),
+                this.CreateOnnxInputMenu("Stage 1 Device", out this._menuOnnxStage1Device, out this._boxOnnxStage1Device, "1",
+                    tip: "CUDA device index for stage 1 (late layers + output head)."),
+                this.CreateOnnxInputMenu("Intra-Op Threads (0 = auto)", out this._menuOnnxIntraOpThreads, out this._boxOnnxIntraOpThreads, "0",
+                    tip: "CPU threads inside a single operator. 0 = automatic. Only affects CPU ops."),
+                this.CreateOnnxInputMenu("Inter-Op Threads (0 = auto)", out this._menuOnnxInterOpThreads, out this._boxOnnxInterOpThreads, "0",
+                    tip: "CPU threads for independent branches. 0 = automatic. Sequential models gain little."),
+                this.CreateOnnxComboMenu("Execution Mode", OnnxKvExecutionModes, "sequential", out this._menuOnnxExecutionMode, out this._comboOnnxExecutionMode,
+                    tip: "Sequential runs one branch at a time (recommended). Parallel runs independent branches concurrently."),
+                this.CreateOnnxComboMenu("Graph Optimization", OnnxKvGraphOptimizations, "all", out this._menuOnnxGraphOptimization, out this._comboOnnxGraphOptimization,
+                    tip: "ONNX graph rewrites. 'all' is fastest; lower only to debug wrong results."),
+                this.CreateOnnxCheckMenu("Memory Pattern", @default: true, out this._menuOnnxMemPattern,
+                    tip: "Reuse memory buffers across steps (recommended). Off only for debugging."),
+                this.CreateOnnxCheckMenu("CPU Memory Arena", @default: true, out this._menuOnnxCpuMemArena,
+                    tip: "Pool CPU allocations instead of malloc/free each step (recommended)."),
+                this.CreateOnnxCheckMenu("Profiling (writes ORT profiles)", @default: false, out this._menuOnnxProfiling,
+                    tip: "Write per-session ORT profiles (JSON) for speed analysis. Costs some throughput."),
+                this.CreateOnnxCheckMenu("Disable Prepacking", @default: false, out this._menuOnnxDisablePrepacking,
+                    tip: "Skip weight prepacking (debug option). Keep off for speed."),
+                this.CreateOnnxInputMenu("GPU Mem Limit MB (0 = unlimited)", out this._menuOnnxGpuMemLimitMb, out this._boxOnnxGpuMemLimitMb, "0",
+                    tip: "CUDA arena cap in MB. 0 = unlimited. Lower to reserve VRAM for other apps."),
+                this.CreateOnnxComboMenu("Arena Strategy", OnnxKvArenaStrategies, "kNextPowerOfTwo", out this._menuOnnxArenaStrategy, out this._comboOnnxArenaStrategy,
+                    tip: "How the CUDA arena grows: next power of two (fewer allocs) vs exactly as requested (less waste)."),
+                this.CreateOnnxComboMenu("cuDNN Conv Search", OnnxKvCudnnSearchModes, "EXHAUSTIVE", out this._menuOnnxCudnnSearch, out this._comboOnnxCudnnSearch,
+                    tip: "Convolution algorithm search. EXHAUSTIVE = slow start, fastest kernels. HEURISTIC = fast start."),
+                this.CreateOnnxCheckMenu("Copy In Default Stream", @default: true, out this._menuOnnxCopyDefaultStream,
+                    tip: "Copy in the default CUDA stream (recommended). Off only for exotic multi-stream cases."),
+                this.CreateOnnxCheckMenu("CUDA Graphs (experimental)", @default: false, out this._menuOnnxCudaGraphs,
+                    tip: "Capture steady-state decode as a CUDA graph. Experimental: fails on dynamic-shape graphs like this one."),
+                this.CreateOnnxCheckMenu("TF32", @default: true, out this._menuOnnxTf32,
+                    tip: "Allow TF32 tensor cores on Ampere+ GPUs (faster matmuls, tiny precision cost)."),
+                this.CreateOnnxCheckMenu("CPU Fallback", @default: false, out this._menuOnnxCpuFallback,
+                    tip: "Append the CPU provider after CUDA so unsupported ops fall back instead of failing."),
             });
 
             this._menuOnnxLimits = new ToolStripMenuItem { Text = "Limits ..." };
@@ -143,13 +169,38 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.toolStripMenuItem_onnxContextLength,
                 this.toolStripMenuItem_onnxMaxTokens,
-                this.CreateOnnxInputMenu("Max Concurrent Generations", out this._menuOnnxMaxConcurrent, out this._boxOnnxMaxConcurrent, "1"),
+                this.CreateOnnxInputMenu("Max Concurrent Generations", out this._menuOnnxMaxConcurrent, out this._boxOnnxMaxConcurrent, "1",
+                    tip: "Parallel generations allowed. Extra requests wait in a queue (see queue_depth in /stats)."),
             });
 
             // Top level keeps: Model Root Directory, models combo, submenus, Hide Console.
             host.DropDownItems.Add(this._menuOnnxSampling);
             host.DropDownItems.Add(this._menuOnnxExecution);
             host.DropDownItems.Add(this._menuOnnxLimits);
+
+            // Tooltips for regrouped Designer items + top-level entries.
+            SetOnnxTip(this.toolStripMenuItem_onnxModelRootDir, this.toolStripTextBox_onnxModelRootDir,
+                "Folder that contains one subfolder per ONNX model package.");
+            SetOnnxTip(this.toolStripMenuItem_onnxTemperature, this.toolStripTextBox_onnxTemperature,
+                "Sampling randomness. 0 = greedy/deterministic, higher = more creative. 0.6-0.9 is typical.");
+            SetOnnxTip(this.toolStripMenuItem_onnxTopP, this.toolStripTextBox_onnxTopP,
+                "Nucleus sampling: keep the smallest token set with combined probability >= P. 1.0 = off.");
+            SetOnnxTip(this.toolStripMenuItem_onnxTopK, this.toolStripTextBox_onnxTopK,
+                "Keep only the K most likely tokens per step. 0 = off.");
+            SetOnnxTip(this.toolStripMenuItem_onnxRepeatPenalty, this.toolStripTextBox_onnxRepeatPenalty,
+                "Penalty above 1.0 discourages repeated tokens. 1.0 = off.");
+            SetOnnxTip(this.toolStripMenuItem_onnxContextLength, this.toolStripTextBox_onnxContextLength,
+                "Hard cap: prompt + max_tokens beyond this is rejected before any GPU work. Needs reload to take effect.");
+            SetOnnxTip(this.toolStripMenuItem_onnxMaxTokens, this.toolStripTextBox_onnxMaxTokens,
+                "Default cap for new tokens per request. Per-request max_tokens overrides it.");
+            SetOnnxTip(this.toolStripMenuItem_onnxHideCmd, null,
+                "Hide the server console window while running.");
+            this.toolStripComboBox_onnxModels.ToolTipText =
+                "Model package to load (subfolder of the root directory).";
+            this.toolStripComboBox_onnxExecutionProvider.ToolTipText =
+                "Execution provider. CUDA = NVIDIA GPUs, CPU = CPU only (slow for large models). Availability is checked at load.";
+
+            EnableOnnxTooltips(host);
 
             foreach (var submenu in new[] { this._menuOnnxSampling, this._menuOnnxExecution, this._menuOnnxLimits })
             {
@@ -172,30 +223,83 @@ namespace FormsSystemStatsWidget.Forms
             }
         }
 
-        private ToolStripMenuItem CreateOnnxInputMenu(string text, out ToolStripMenuItem menu, out ToolStripTextBox box, string defaultText, int boxWidth = 100)
+        private ToolStripMenuItem CreateOnnxInputMenu(string text, out ToolStripMenuItem menu, out ToolStripTextBox box, string defaultText, int boxWidth = 100, string tip = "")
         {
             var localBox = new ToolStripTextBox { Size = new Size(boxWidth, 23), Text = defaultText };
             localBox.KeyDown += (s, e) => this.PersistOnnxSettingsOnEnter(e);
             menu = new ToolStripMenuItem { Text = text };
             menu.DropDownItems.Add(localBox);
             box = localBox;
+            SetOnnxTip(menu, localBox, tip);
             return menu;
         }
 
-        private ToolStripMenuItem CreateOnnxComboMenu(string text, string[] items, string defaultText, out ToolStripMenuItem menu, out ToolStripComboBox combo)
+        private ToolStripMenuItem CreateOnnxComboMenu(string text, string[] items, string defaultText, out ToolStripMenuItem menu, out ToolStripComboBox combo, string tip = "")
         {
             var localCombo = new ToolStripComboBox { Size = new Size(160, 23), Text = defaultText };
             localCombo.Items.AddRange(items);
             menu = new ToolStripMenuItem { Text = text };
             menu.DropDownItems.Add(localCombo);
             combo = localCombo;
+            SetOnnxTip(menu, localCombo, tip);
             return menu;
         }
 
-        private ToolStripMenuItem CreateOnnxCheckMenu(string text, bool @default, out ToolStripMenuItem menu)
+        private ToolStripMenuItem CreateOnnxCheckMenu(string text, bool @default, out ToolStripMenuItem menu, string tip = "")
         {
             menu = new ToolStripMenuItem { Text = text, CheckOnClick = true, Checked = @default };
+            SetOnnxTip(menu, null, tip);
             return menu;
+        }
+
+        private static void EnableOnnxTooltips(ToolStripMenuItem host)
+        {
+            // Tooltips only appear when every dropdown level opts in.
+            var seen = new HashSet<ToolStrip>();
+            var queue = new Queue<ToolStrip>();
+            if (host.DropDown is not null)
+            {
+                queue.Enqueue(host.DropDown);
+            }
+
+            // The top-level context menu itself as well.
+            var top = host.GetCurrentParent();
+            if (top is not null)
+            {
+                queue.Enqueue(top);
+            }
+
+            while (queue.Count > 0)
+            {
+                var strip = queue.Dequeue();
+                if (!seen.Add(strip))
+                {
+                    continue;
+                }
+
+                strip.ShowItemToolTips = true;
+                foreach (ToolStripItem item in strip.Items)
+                {
+                    if (item is ToolStripMenuItem menuItem && menuItem.HasDropDownItems && menuItem.DropDown is not null)
+                    {
+                        queue.Enqueue(menuItem.DropDown);
+                    }
+                }
+            }
+        }
+
+        private static void SetOnnxTip(ToolStripMenuItem menu, ToolStripItem? input, string tip)
+        {
+            if (string.IsNullOrWhiteSpace(tip))
+            {
+                return;
+            }
+
+            menu.ToolTipText = tip;
+            if (input is not null)
+            {
+                input.ToolTipText = tip;
+            }
         }
 
         private void OnnxSubmenuSettingChanged(object? sender, EventArgs e)

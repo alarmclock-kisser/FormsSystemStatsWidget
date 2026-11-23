@@ -164,6 +164,12 @@ class EngineLifecycle:
             while self._operations:
                 self._condition.wait()
 
+    @property
+    def is_generating(self) -> bool:
+        """Whether at least one generation is currently running."""
+        with self._condition:
+            return "Generating" in self._operations
+
     def health_snapshot(self, *, loaded: bool) -> dict[str, Any]:
         with self._condition:
             active_operations = sum(self._operations.values())
@@ -595,6 +601,30 @@ def generation_stats() -> Response:
     except Exception as ex:
         logger.exception("Error reading generation stats")
         return _error_response("STATS_FAILED", str(ex), 500)
+
+
+@app.route("/devices", methods=["GET"])
+def devices() -> Response:
+    """Per-device init/execution state: initialized session? currently inferencing?"""
+    try:
+        engine = _get_engine()
+    except OnnxEngineError as ex:
+        return _error_response("ENGINE_NOT_READY", str(ex), 503)
+    try:
+        busy = _lifecycle.is_generating
+        result = [
+            {
+                "device_id": state["device_id"],
+                "role": state.get("role", "single"),
+                "initialized": bool(state.get("initialized", False)),
+                "executionBusy": bool(busy and state.get("initialized", False)),
+            }
+            for state in engine.get_device_states()
+        ]
+        return jsonify({"devices": result}), 200
+    except Exception as ex:
+        logger.exception("Error reading device states")
+        return _error_response("DEVICES_FAILED", str(ex), 500)
 
 
 @app.route("/shutdown", methods=["POST"])

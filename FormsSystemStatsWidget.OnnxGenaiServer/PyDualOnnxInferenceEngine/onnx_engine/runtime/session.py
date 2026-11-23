@@ -52,6 +52,11 @@ class OrtSessionManager:
             raise RuntimeError("ONNX Runtime session is not loaded.")
         return self._session
 
+    @property
+    def is_loaded(self) -> bool:
+        """Whether a session is currently loaded (device is initialized)."""
+        return self._session is not None
+
     def load(self, model_path: str) -> ort.InferenceSession:
         if self._session is not None:
             return self._session

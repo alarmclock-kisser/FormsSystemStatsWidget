@@ -264,6 +264,56 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
     }
 
     /// <summary>
+    /// Fragt die Device-States der Python-Engine ab (initialized session?
+    /// gerade am Inferenzieren?). Leere Liste, wenn nicht verfügbar.
+    /// </summary>
+    public async Task<IReadOnlyList<PythonDeviceState>> GetDeviceStatesAsync(CancellationToken ct = default)
+    {
+        var empty = Array.Empty<PythonDeviceState>();
+        if (string.IsNullOrWhiteSpace(_pythonServerBaseUrl))
+        {
+            return empty;
+        }
+
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var response = await client.GetAsync($"{_pythonServerBaseUrl.TrimEnd('/')}/devices", ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                return empty;
+            }
+
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+            if (!doc.RootElement.TryGetProperty("devices", out var devices) || devices.ValueKind != JsonValueKind.Array)
+            {
+                return empty;
+            }
+
+            var result = new List<PythonDeviceState>();
+            foreach (var device in devices.EnumerateArray())
+            {
+                if (device.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                result.Add(new PythonDeviceState(
+                    device.TryGetProperty("device_id", out var id) && id.ValueKind == JsonValueKind.Number ? id.GetInt32() : -1,
+                    device.TryGetProperty("role", out var role) && role.ValueKind == JsonValueKind.String ? role.GetString() ?? "single" : "single",
+                    device.TryGetProperty("initialized", out var init) && init.ValueKind is JsonValueKind.True or JsonValueKind.False && init.GetBoolean(),
+                    device.TryGetProperty("executionBusy", out var busy) && busy.ValueKind is JsonValueKind.True or JsonValueKind.False && busy.GetBoolean()));
+            }
+
+            return result;
+        }
+        catch
+        {
+            return empty;
+        }
+    }
+
+    /// <summary>
     /// Liefert ein Embedding für den gegebenen Text, oder null, wenn das geladene
     /// Modell keine Embeddings unterstützt (z. B. Qwen3.8-27B).
     /// </summary>
@@ -284,6 +334,8 @@ public sealed class OnnxGenaiEngine : IAsyncDisposable
         await Task.CompletedTask;
     }
 }
+
+public sealed record PythonDeviceState(int DeviceId, string Role, bool Initialized, bool ExecutionBusy);
 
 public sealed class GenerationParameters
 {

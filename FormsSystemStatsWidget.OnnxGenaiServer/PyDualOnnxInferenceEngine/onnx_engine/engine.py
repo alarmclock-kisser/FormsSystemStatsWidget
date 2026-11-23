@@ -398,6 +398,28 @@ class InferenceEngine:
         """
         context.reset()
 
+    def get_device_states(self) -> list[dict[str, Any]]:
+        """Per-device init state for /devices (session loaded per stage device)."""
+        partitioned = self._stage1_session_manager is not None
+        states = [
+            {
+                "device_id": int(self._cuda.device_id),
+                "role": "stage0" if partitioned else "single",
+                "initialized": bool(
+                    self._session_manager is not None and self._session_manager.is_loaded
+                ),
+            }
+        ]
+        if partitioned:
+            states.append(
+                {
+                    "device_id": int(self._cuda.stage1_device_id),
+                    "role": "stage1",
+                    "initialized": bool(self._stage1_session_manager.is_loaded),
+                }
+            )
+        return states
+
     def available_providers(self) -> tuple[str, ...]:
         import onnxruntime as ort
         return tuple(ort.get_available_providers())
