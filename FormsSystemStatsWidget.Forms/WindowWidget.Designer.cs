@@ -240,6 +240,10 @@
             toolStripSeparator2 = new ToolStripSeparator();
             toolStripMenuItem_remapAnyKey = new ToolStripMenuItem();
             toolStripSeparator6 = new ToolStripSeparator();
+            toolStripSeparator7 = new ToolStripSeparator();
+            remoteConnectToolStripMenuItem = new ToolStripMenuItem();
+            remoteAllowAllConnectionsToolStripMenuItem = new ToolStripMenuItem();
+            remoteStartHostingToolStripMenuItem = new ToolStripMenuItem();
             openDebugConsoleToolStripMenuItem = new ToolStripMenuItem();
 
             toolStripMenuItem_visuallyFormatLog = new ToolStripMenuItem();
@@ -291,7 +295,7 @@
             // 
             // contextMenuStrip_widget
             // 
-            contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { updateIntervalToolStripMenuItem, diagramColorToolStripMenuItem, toolStripMenuItem_opacity, showUsageToolStripMenuItem, alwaysOnTopToolStripMenuItem, trafficThresholdToolStripMenuItem, toolStripSeparator5, driveSpeedTestToolStripMenuItem, toolStripSeparator1, toolStripMenuItem_loadLlamaCppServer, toolStripMenuItem_execModelLoadBat, toolStripMenuItem_loadOnnxGenaiServer, rerouteAPILlamacppOllamaToolStripMenuItem, smartPromptOptimizationsToolStripMenuItem, toolStripSeparator2, toolStripMenuItem_remapAnyKey, toolStripSeparator6, openDebugConsoleToolStripMenuItem });
+            contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { updateIntervalToolStripMenuItem, diagramColorToolStripMenuItem, toolStripMenuItem_opacity, showUsageToolStripMenuItem, alwaysOnTopToolStripMenuItem, trafficThresholdToolStripMenuItem, toolStripSeparator5, driveSpeedTestToolStripMenuItem, toolStripSeparator1, toolStripMenuItem_loadLlamaCppServer, toolStripMenuItem_execModelLoadBat, toolStripMenuItem_loadOnnxGenaiServer, rerouteAPILlamacppOllamaToolStripMenuItem, smartPromptOptimizationsToolStripMenuItem, toolStripSeparator2, toolStripMenuItem_remapAnyKey, toolStripSeparator6, openDebugConsoleToolStripMenuItem, toolStripSeparator7, remoteConnectToolStripMenuItem });
             contextMenuStrip_widget.Name = "contextMenuStrip_widget";
             contextMenuStrip_widget.Size = new Size(291, 358);
             contextMenuStrip_widget.Text = "Settings";
@@ -1261,6 +1265,35 @@
             openDebugConsoleToolStripMenuItem.Size = new Size(290, 22);
             openDebugConsoleToolStripMenuItem.Text = "💻 Open Debug Console";
             openDebugConsoleToolStripMenuItem.Click += openDebugConsoleToolStripMenuItem_Click;
+            //
+            // toolStripSeparator7
+            //
+            toolStripSeparator7.Name = "toolStripSeparator7";
+            toolStripSeparator7.Size = new Size(287, 6);
+            //
+            // remoteConnectToolStripMenuItem
+            //
+            remoteConnectToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { remoteAllowAllConnectionsToolStripMenuItem, remoteStartHostingToolStripMenuItem });
+            remoteConnectToolStripMenuItem.Name = "remoteConnectToolStripMenuItem";
+            remoteConnectToolStripMenuItem.Size = new Size(290, 22);
+            remoteConnectToolStripMenuItem.Text = "🌐 Remote Connect ...";
+            remoteConnectToolStripMenuItem.Click += remoteConnectToolStripMenuItem_Click;
+            //
+            // remoteAllowAllConnectionsToolStripMenuItem
+            //
+            remoteAllowAllConnectionsToolStripMenuItem.CheckOnClick = true;
+            remoteAllowAllConnectionsToolStripMenuItem.Name = "remoteAllowAllConnectionsToolStripMenuItem";
+            remoteAllowAllConnectionsToolStripMenuItem.Size = new Size(190, 22);
+            remoteAllowAllConnectionsToolStripMenuItem.Text = "Allow all connections";
+            remoteAllowAllConnectionsToolStripMenuItem.Click += remoteAllowAllConnectionsToolStripMenuItem_Click;
+            //
+            // remoteStartHostingToolStripMenuItem
+            //
+            remoteStartHostingToolStripMenuItem.CheckOnClick = true;
+            remoteStartHostingToolStripMenuItem.Name = "remoteStartHostingToolStripMenuItem";
+            remoteStartHostingToolStripMenuItem.Size = new Size(190, 22);
+            remoteStartHostingToolStripMenuItem.Text = "Start hosting";
+            remoteStartHostingToolStripMenuItem.Click += remoteStartHostingToolStripMenuItem_Click;
             // 
             // toolStripMenuItem_visuallyFormatLog
             // 
@@ -1574,6 +1607,10 @@
         private ToolStripMenuItem toolStripMenuItem_reasoningEffort;
         private ToolStripComboBox toolStripComboBox_reasoningEffort;
         private ToolStripSeparator toolStripSeparator6;
+        private ToolStripSeparator toolStripSeparator7;
+        private ToolStripMenuItem remoteConnectToolStripMenuItem;
+        private ToolStripMenuItem remoteAllowAllConnectionsToolStripMenuItem;
+        private ToolStripMenuItem remoteStartHostingToolStripMenuItem;
         private ToolStripMenuItem toolStripMenuItem_remapAnyKey;
         private ToolStripMenuItem toolStripMenuItem_kvCacheType;
         private ToolStripComboBox toolStripComboBox_cacheType;

@@ -82,6 +82,10 @@ namespace FormsSystemStatsWidget.Forms
         public float FontSizeScale { get; set; } = 1.0f;
         public bool BlackOutMode { get; set; } = false;
 
+        // Remote host/client feature (TCP, JSON messages)
+        public bool RemoteAllowAllConnections { get; set; } = false;
+        public int RemotePort { get; set; } = 6553;
+
         public bool PrintGenerationStats { get; set; } = false;
         public bool TrimThinkingBlocks { get; set; }
         public int TrimThinkingKeepLastMessages { get; set; } = 10;

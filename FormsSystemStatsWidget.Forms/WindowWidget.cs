@@ -113,6 +113,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             this.KeyPreview = true;
             this.InitializeComponent();
+            this.InitializeRemoteMenu();
             this.DoubleBuffered = true;
             this._persistentSettings = WidgetPersistentSettingsStore.Load();
             // Initialize FontSizeScale from persistent settings (default 1.0f if not set)
@@ -722,6 +723,7 @@ namespace FormsSystemStatsWidget.Forms
 
             this.showUsageToolStripMenuItem.Checked = this._persistentSettings.ShowPerCorePercent;
             this.toolStripTextBox_percentageColor.Enabled = this.showUsageToolStripMenuItem.Checked;
+            this.remoteAllowAllConnectionsToolStripMenuItem.Checked = this._persistentSettings.RemoteAllowAllConnections;
 
             this.alwaysOnTopToolStripMenuItem.Checked = this._persistentSettings.AlwaysOnTop;
             this.TopMost = this._persistentSettings.AlwaysOnTop;
@@ -875,6 +877,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             this._closing = true;
             this.UpdateTimer.Stop();
+            this.StopRemoteHosting();
             Logger.MessageLogged -= this.HandleLoggerMessageLogged;
 
             if (this._debugConsoleForm != null)
@@ -1714,6 +1717,11 @@ namespace FormsSystemStatsWidget.Forms
 
             // Refresh ONNX models list
             this.PopulateOnnxModelsList();
+
+            // Refresh Remote hosting state (checked + text reflect the actual listener state)
+            bool isHosting = this.IsRemoteHosting;
+            this.remoteStartHostingToolStripMenuItem.Checked = isHosting;
+            this.remoteStartHostingToolStripMenuItem.Text = isHosting ? "Stop hosting" : "Start hosting";
         }
 
         private void toolStripTextBox_opacity_KeyDown(object sender, KeyEventArgs e)
