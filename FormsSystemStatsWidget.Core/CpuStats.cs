@@ -950,6 +950,160 @@ namespace FormsSystemStatsWidget.Core
         }
 
         /// <summary>
+        /// Kurz-Status ob Admin / LHM-Daten da sind. Wirft nie.
+        /// </summary>
+        public static string GetCpuPowerStatus()
+        {
+            try
+            {
+                bool isAdmin = IsRunningAsAdmin();
+                int hwCount = 0;
+                int powerCount = 0;
+                try
+                {
+                    EnsureHardwareComputerOpened();
+                    hwCount = _hardwareComputer.Hardware.Count;
+                    foreach (IHardware hw in _hardwareComputer.Hardware)
+                    {
+                        try
+                        {
+                            hw.Update();
+                            foreach (ISensor s in hw.Sensors)
+                            {
+                                if (s.SensorType == SensorType.Power && s.Value.HasValue)
+                                {
+                                    powerCount++;
+                                }
+                            }
+                            foreach (IHardware sub in hw.SubHardware)
+                            {
+                                try
+                                {
+                                    sub.Update();
+                                    foreach (ISensor s in sub.Sensors)
+                                    {
+                                        if (s.SensorType == SensorType.Power && s.Value.HasValue)
+                                        {
+                                            powerCount++;
+                                        }
+                                    }
+                                }
+                                catch
+                                {
+                                }
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                string hvci = TryReadHvciStatus();
+                return $"Admin={isAdmin} LHM_HW={hwCount} LHM_Power={powerCount} HVCI={hvci} LastW={_lastCpuTelemetrySnapshot.PackagePowerWatts?.ToString("0.0") ?? "null"}";
+            }
+            catch
+            {
+                return "Status unbekannt";
+            }
+        }
+
+        /// <summary>
+        /// Voll-Dump aller Power-Sensoren für Debug-Log. Wirft nie.
+        /// </summary>
+        public static IReadOnlyList<string> ListCpuPowerSensors(int max = 40)
+        {
+            List<string> lines = [];
+            try
+            {
+                EnsureHardwareComputerOpened();
+                foreach (IHardware hw in _hardwareComputer.Hardware)
+                {
+                    try
+                    {
+                        hw.Update();
+                        foreach (ISensor s in hw.Sensors)
+                        {
+                            if (s.SensorType != SensorType.Power)
+                            {
+                                continue;
+                            }
+                            lines.Add($"{hw.HardwareType}/{hw.Name} :: {s.Name} = {(s.Value.HasValue ? s.Value.Value.ToString("0.00") + " W" : "null")}");
+                            if (lines.Count >= max)
+                            {
+                                return lines;
+                            }
+                        }
+                        foreach (IHardware sub in hw.SubHardware)
+                        {
+                            try
+                            {
+                                sub.Update();
+                                foreach (ISensor s in sub.Sensors)
+                                {
+                                    if (s.SensorType != SensorType.Power)
+                                    {
+                                        continue;
+                                    }
+                                    lines.Add($"{hw.Name}/{sub.Name} :: {s.Name} = {(s.Value.HasValue ? s.Value.Value.ToString("0.00") + " W" : "null")}");
+                                    if (lines.Count >= max)
+                                    {
+                                        return lines;
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+            catch
+            {
+            }
+            if (lines.Count == 0)
+            {
+                lines.Add("(kein Power-Sensor mit Wert gefunden)");
+            }
+            return lines;
+        }
+
+        private static bool IsRunningAsAdmin()
+        {
+            try
+            {
+                using System.Security.Principal.WindowsIdentity id = System.Security.Principal.WindowsIdentity.GetCurrent();
+                System.Security.Principal.WindowsPrincipal p = new(id);
+                return p.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string TryReadHvciStatus()
+        {
+            try
+            {
+                using Microsoft.Win32.RegistryKey? key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity");
+                object? v = key?.GetValue("Enabled");
+                return v?.ToString() ?? "n/a";
+            }
+            catch
+            {
+                return "n/a";
+            }
+        }
+
+        /// <summary>
         /// Malt die CPU-Auslastung pro Kern als Bitmap. Async, da das Rendern bei vielen Kernen etwas dauern kann.
         /// </summary>
         public static Task<Bitmap> RenderCoresBitmapAsync(float[] usages, int width, int height, Color? backColor = null, Color? renderPercentagesColor = null, CancellationToken ct = default)
