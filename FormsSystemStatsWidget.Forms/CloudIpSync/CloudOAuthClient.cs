@@ -223,7 +223,9 @@ namespace FormsSystemStatsWidget.Forms
             if (provider == CloudIpSyncProvider.GoogleDrive)
             {
                 query["access_type"] = "offline";
-                query["prompt"] = "consent";
+                // "select_account" shows the already-logged-in Google accounts (chooser)
+                // instead of silently reusing the last consent flow.
+                query["prompt"] = "select_account";
                 query["include_granted_scopes"] = "true";
             }
             else
