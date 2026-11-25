@@ -86,6 +86,20 @@ namespace FormsSystemStatsWidget.Forms
         public bool RemoteAllowAllConnections { get; set; } = false;
         public int RemotePort { get; set; } = 6553;
 
+        // Automatic WAN IP updates via cloud drive (Google Drive / OneDrive).
+        // Credentials are stored as DPAPI-protected base64 blobs, never as plaintext.
+        public bool CloudIpSyncEnabled { get; set; }
+        public string CloudIpSyncProvider { get; set; } = "GoogleDrive";
+        public string CloudIpSyncTenant { get; set; } = "common";
+        public string CloudIpSyncClientId { get; set; } = string.Empty;
+        public string CloudIpSyncClientSecretProtected { get; set; } = string.Empty;
+        public string CloudIpSyncRefreshTokenProtected { get; set; } = string.Empty;
+        public string CloudIpSyncAccessTokenProtected { get; set; } = string.Empty;
+        public DateTime CloudIpSyncAccessTokenExpiresUtc { get; set; } = DateTime.MinValue;
+        public string CloudIpSyncAccount { get; set; } = string.Empty;
+        public DateTime CloudIpSyncLastUploadUtc { get; set; } = DateTime.MinValue;
+        public string CloudIpSyncLastStatus { get; set; } = string.Empty;
+
         public bool PrintGenerationStats { get; set; } = false;
         public bool TrimThinkingBlocks { get; set; }
         public int TrimThinkingKeepLastMessages { get; set; } = 10;

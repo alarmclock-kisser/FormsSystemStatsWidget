@@ -241,6 +241,8 @@
             toolStripMenuItem_remapAnyKey = new ToolStripMenuItem();
             toolStripSeparator6 = new ToolStripSeparator();
             toolStripSeparator7 = new ToolStripSeparator();
+            cloudIpUpdatesToolStripMenuItem = new ToolStripMenuItem();
+            toolStripSeparator8 = new ToolStripSeparator();
             remoteConnectToolStripMenuItem = new ToolStripMenuItem();
             remoteAllowAllConnectionsToolStripMenuItem = new ToolStripMenuItem();
             remoteStartHostingToolStripMenuItem = new ToolStripMenuItem();
@@ -295,7 +297,7 @@
             // 
             // contextMenuStrip_widget
             // 
-            contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { updateIntervalToolStripMenuItem, diagramColorToolStripMenuItem, toolStripMenuItem_opacity, showUsageToolStripMenuItem, alwaysOnTopToolStripMenuItem, trafficThresholdToolStripMenuItem, toolStripSeparator5, driveSpeedTestToolStripMenuItem, toolStripSeparator1, toolStripMenuItem_loadLlamaCppServer, toolStripMenuItem_execModelLoadBat, toolStripMenuItem_loadOnnxGenaiServer, rerouteAPILlamacppOllamaToolStripMenuItem, smartPromptOptimizationsToolStripMenuItem, toolStripSeparator2, toolStripMenuItem_remapAnyKey, toolStripSeparator6, openDebugConsoleToolStripMenuItem, toolStripSeparator7, remoteConnectToolStripMenuItem });
+            contextMenuStrip_widget.Items.AddRange(new ToolStripItem[] { updateIntervalToolStripMenuItem, diagramColorToolStripMenuItem, toolStripMenuItem_opacity, showUsageToolStripMenuItem, alwaysOnTopToolStripMenuItem, trafficThresholdToolStripMenuItem, toolStripSeparator5, driveSpeedTestToolStripMenuItem, toolStripSeparator1, toolStripMenuItem_loadLlamaCppServer, toolStripMenuItem_execModelLoadBat, toolStripMenuItem_loadOnnxGenaiServer, rerouteAPILlamacppOllamaToolStripMenuItem, smartPromptOptimizationsToolStripMenuItem, toolStripSeparator2, toolStripMenuItem_remapAnyKey, toolStripSeparator6, openDebugConsoleToolStripMenuItem, toolStripSeparator7, cloudIpUpdatesToolStripMenuItem, toolStripSeparator8, remoteConnectToolStripMenuItem });
             contextMenuStrip_widget.Name = "contextMenuStrip_widget";
             contextMenuStrip_widget.Size = new Size(291, 358);
             contextMenuStrip_widget.Text = "Settings";
@@ -1271,6 +1273,18 @@
             toolStripSeparator7.Name = "toolStripSeparator7";
             toolStripSeparator7.Size = new Size(287, 6);
             //
+            // cloudIpUpdatesToolStripMenuItem
+            //
+            cloudIpUpdatesToolStripMenuItem.Name = "cloudIpUpdatesToolStripMenuItem";
+            cloudIpUpdatesToolStripMenuItem.Size = new Size(290, 22);
+            cloudIpUpdatesToolStripMenuItem.Text = "IP-Updates via Cloud Drive ...";
+            cloudIpUpdatesToolStripMenuItem.ToolTipText = "Upload the current WAN IPv4/IPv6 address to Google Drive or OneDrive.";
+            //
+            // toolStripSeparator8
+            //
+            toolStripSeparator8.Name = "toolStripSeparator8";
+            toolStripSeparator8.Size = new Size(287, 6);
+            //
             // remoteConnectToolStripMenuItem
             //
             remoteConnectToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[] { remoteAllowAllConnectionsToolStripMenuItem, remoteStartHostingToolStripMenuItem });
@@ -1608,6 +1622,8 @@
         private ToolStripComboBox toolStripComboBox_reasoningEffort;
         private ToolStripSeparator toolStripSeparator6;
         private ToolStripSeparator toolStripSeparator7;
+        private ToolStripMenuItem cloudIpUpdatesToolStripMenuItem;
+        private ToolStripSeparator toolStripSeparator8;
         private ToolStripMenuItem remoteConnectToolStripMenuItem;
         private ToolStripMenuItem remoteAllowAllConnectionsToolStripMenuItem;
         private ToolStripMenuItem remoteStartHostingToolStripMenuItem;

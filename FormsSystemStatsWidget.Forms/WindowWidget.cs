@@ -116,6 +116,7 @@ namespace FormsSystemStatsWidget.Forms
             this.InitializeRemoteMenu();
             this.DoubleBuffered = true;
             this._persistentSettings = WidgetPersistentSettingsStore.Load();
+            this.InitializeCloudIpSyncMenu();
             // Initialize FontSizeScale from persistent settings (default 1.0f if not set)
             this.FontSizeScale = this._persistentSettings.FontSizeScale != 0f ? this._persistentSettings.FontSizeScale : 1.0f;
             // Initialize LoopDetectionService
@@ -877,6 +878,7 @@ namespace FormsSystemStatsWidget.Forms
         {
             this._closing = true;
             this.UpdateTimer.Stop();
+            this.StopCloudIpSync();
             this.StopRemoteHosting();
             Logger.MessageLogged -= this.HandleLoggerMessageLogged;
 
@@ -1722,6 +1724,8 @@ namespace FormsSystemStatsWidget.Forms
             bool isHosting = this.IsRemoteHosting;
             this.remoteStartHostingToolStripMenuItem.Checked = isHosting;
             this.remoteStartHostingToolStripMenuItem.Text = isHosting ? "Stop hosting" : "Start hosting";
+
+            this.UpdateCloudIpSyncMenuState();
         }
 
         private void toolStripTextBox_opacity_KeyDown(object sender, KeyEventArgs e)
