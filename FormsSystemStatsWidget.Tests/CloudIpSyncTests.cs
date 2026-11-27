@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -76,6 +77,19 @@ namespace FormsSystemStatsWidget.Tests
             Assert.AreEqual(
                 "GoogleDrive",
                 CloudIpSyncProvider.GoogleDrive.ToStorageValue());
+        }
+
+        [TestMethod]
+        public void ProviderInfo_ParsesLocalDirectoryStorageValue()
+        {
+            Assert.AreEqual(
+                CloudIpSyncProvider.LocalDirectory,
+                CloudIpSyncProviderInfo.Parse("LocalDirectory"));
+            Assert.AreEqual(
+                "LocalDirectory",
+                CloudIpSyncProvider.LocalDirectory.ToStorageValue());
+            Assert.IsTrue(CloudIpSyncProvider.LocalDirectory.IsLocalDirectory());
+            Assert.IsFalse(CloudIpSyncProvider.OneDrive.IsLocalDirectory());
         }
 
         [TestMethod]
@@ -222,6 +236,131 @@ namespace FormsSystemStatsWidget.Tests
 
             Assert.AreEqual(options.TenantId, restored.TenantId);
             Assert.AreEqual(options.Provider, restored.Provider);
+        }
+
+        [TestMethod]
+        public void SettingsMapper_RoundTripsLocalDirectoryTarget()
+        {
+            var settings = new WidgetPersistentSettings();
+            var options = new CloudIpSyncOptions
+            {
+                Provider = CloudIpSyncProvider.LocalDirectory,
+                LocalDirectory = @"C:\Users\test\OneDrive\IP Updates",
+                LocalFileName = "MyPC.ipdata"
+            };
+
+            CloudIpSyncSettingsMapper.ApplyToPersistent(settings, options);
+            CloudIpSyncOptions restored = CloudIpSyncSettingsMapper.FromPersistent(settings);
+
+            Assert.AreEqual(CloudIpSyncProvider.LocalDirectory, restored.Provider);
+            Assert.AreEqual(options.LocalDirectory, restored.LocalDirectory);
+            Assert.AreEqual(options.LocalFileName, restored.LocalFileName);
+            Assert.IsTrue(CloudIpSyncSettingsMapper.IsConfigured(settings));
+        }
+
+        [TestMethod]
+        public void SettingsMapper_LocalDirectoryRequiresOnlyTheFolder()
+        {
+            var options = new CloudIpSyncOptions
+            {
+                Provider = CloudIpSyncProvider.LocalDirectory,
+                ClientId = "client-id",
+                RefreshToken = "refresh-token"
+            };
+
+            Assert.IsFalse(CloudIpSyncSettingsMapper.IsConfigured(options));
+
+            options.LocalDirectory = @"C:\SyncFolder";
+            Assert.IsTrue(CloudIpSyncSettingsMapper.IsConfigured(options));
+        }
+
+        [TestMethod]
+        public void LocalUpload_WritesFileAndCreatesDirectory()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "fsswidget-test-" + Guid.NewGuid().ToString("N"));
+            string targetDirectory = Path.Combine(tempRoot, "sub", "IP Updates");
+            try
+            {
+                var options = new CloudIpSyncOptions
+                {
+                    Provider = CloudIpSyncProvider.LocalDirectory,
+                    LocalDirectory = targetDirectory,
+                    LocalFileName = string.Empty
+                };
+
+                CloudUploadOutcome outcome = CloudIpSyncUploader.UploadAsync(
+                    options,
+                    "Host: TESTPC\nWAN IPv4: 203.0.113.9\n",
+                    "TESTPC.ipdata",
+                    CancellationToken.None).GetAwaiter().GetResult();
+
+                Assert.IsTrue(outcome.Success, "Outcome: " + outcome.Message);
+                Assert.IsTrue(Directory.Exists(targetDirectory));
+
+                string written = File.ReadAllText(Path.Combine(targetDirectory, "TESTPC.ipdata"));
+                StringAssert.Contains(written, "203.0.113.9");
+
+                // The temporary file must not remain behind.
+                Assert.IsFalse(File.Exists(Path.Combine(targetDirectory, "TESTPC.ipdata.tmp")));
+            }
+            finally
+            {
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void LocalUpload_UsesConfiguredFileName()
+        {
+            string tempRoot = Path.Combine(Path.GetTempPath(), "fsswidget-test-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var options = new CloudIpSyncOptions
+                {
+                    Provider = CloudIpSyncProvider.LocalDirectory,
+                    LocalDirectory = tempRoot,
+                    LocalFileName = "ip-update.txt"
+                };
+
+                CloudUploadOutcome outcome = CloudIpSyncUploader.UploadAsync(
+                    options,
+                    "content",
+                    "ignored-name.ipdata",
+                    CancellationToken.None).GetAwaiter().GetResult();
+
+                Assert.IsTrue(outcome.Success, "Outcome: " + outcome.Message);
+                Assert.IsTrue(File.Exists(Path.Combine(tempRoot, "ip-update.txt")));
+                Assert.IsFalse(File.Exists(Path.Combine(tempRoot, "ignored-name.ipdata")));
+            }
+            finally
+            {
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+            }
+        }
+
+        [TestMethod]
+        public void LocalUpload_FailsWithoutDirectory()
+        {
+            var options = new CloudIpSyncOptions
+            {
+                Provider = CloudIpSyncProvider.LocalDirectory,
+                LocalDirectory = string.Empty
+            };
+
+            CloudUploadOutcome outcome = CloudIpSyncUploader.UploadAsync(
+                options,
+                "content",
+                "TESTPC.ipdata",
+                CancellationToken.None).GetAwaiter().GetResult();
+
+            Assert.IsFalse(outcome.Success);
+            StringAssert.Contains(outcome.Message, "local directory");
         }
 
         [TestMethod]

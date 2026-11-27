@@ -76,9 +76,9 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.SetCloudIpSyncStatus(new CloudIpSyncStatus(
                     CloudIpSyncState.NeedsConfiguration,
-                    "Sign-in required. Open Config..."));
+                    this.CloudNeedsConfigurationMessage()));
 
-                // The user enabled uploads earlier but never finished (or lost) the sign-in.
+                // The user enabled uploads earlier but never finished (or lost) the configuration.
                 // Finish the setup right away instead of failing silently in the background.
                 this.BeginInvoke(new Action(this.PromptForCloudConfigurationAtStartup));
                 return;
@@ -105,7 +105,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.SetCloudIpUpdatesEnabled(false);
                 this.SetCloudIpSyncStatus(new CloudIpSyncStatus(
                     CloudIpSyncState.NeedsConfiguration,
-                    "Sign-in required. Open Config..."));
+                    this.CloudNeedsConfigurationMessage()));
             }
         }
 
@@ -118,7 +118,7 @@ namespace FormsSystemStatsWidget.Forms
             {
                 this.SetCloudIpSyncStatus(new CloudIpSyncStatus(
                     CloudIpSyncState.NeedsConfiguration,
-                    "Sign-in required. Open Config..."));
+                    this.CloudNeedsConfigurationMessage()));
                 return;
             }
 
@@ -206,7 +206,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.SetCloudIpUpdatesEnabled(false);
                 this.SetCloudIpSyncStatus(new CloudIpSyncStatus(
                     CloudIpSyncState.NeedsConfiguration,
-                    "Sign-in required. Open Config..."));
+                    this.CloudNeedsConfigurationMessage()));
                 return;
             }
 
@@ -274,7 +274,7 @@ namespace FormsSystemStatsWidget.Forms
                 this.SavePersistentSettings();
                 this.SetCloudIpSyncStatus(new CloudIpSyncStatus(
                     CloudIpSyncState.NeedsConfiguration,
-                    "Sign-in required. Open Config..."));
+                    this.CloudNeedsConfigurationMessage()));
                 return false;
             }
 
@@ -357,7 +357,9 @@ namespace FormsSystemStatsWidget.Forms
             this._cloudStatusMenuItem.Text = BuildCloudStatusText(status);
             this._cloudStatusMenuItem.ForeColor = status.State switch
             {
-                CloudIpSyncState.Error or CloudIpSyncState.NeedsSignIn => Color.Firebrick,
+                CloudIpSyncState.Error
+                    or CloudIpSyncState.NeedsSignIn
+                    or CloudIpSyncState.NeedsConfiguration => Color.Firebrick,
                 CloudIpSyncState.Synced => Color.ForestGreen,
                 _ => SystemColors.GrayText
             };
@@ -391,6 +393,16 @@ namespace FormsSystemStatsWidget.Forms
             this._cloudStatusMenuItem.Text = BuildCloudStatusText(this._cloudIpSyncStatus);
         }
 
+        private string CloudNeedsConfigurationMessage()
+        {
+            bool isLocal = CloudIpSyncSettingsMapper
+                .FromPersistent(this._persistentSettings)
+                .Provider.IsLocalDirectory();
+            return isLocal
+                ? "A local directory is required. Open Config..."
+                : "Sign-in required. Open Config...";
+        }
+
         private static string BuildCloudStatusText(CloudIpSyncStatus status)
         {
             string message = status.Message ?? string.Empty;
@@ -404,10 +416,10 @@ namespace FormsSystemStatsWidget.Forms
                 CloudIpSyncState.Disabled => message.Length == 0 || string.Equals(message, "Off", StringComparison.Ordinal)
                     ? "Status: off"
                     : "Status: " + message,
-                CloudIpSyncState.NeedsConfiguration => "Status: sign-in required",
+                CloudIpSyncState.NeedsConfiguration => "Status: " + message,
                 CloudIpSyncState.NeedsSignIn => "Status: sign-in expired",
                 CloudIpSyncState.Starting => "Status: starting...",
-                CloudIpSyncState.Syncing => "Status: uploading...",
+                CloudIpSyncState.Syncing => "Status: writing...",
                 CloudIpSyncState.Synced => "Status: " + message,
                 _ => "Status: " + message
             };

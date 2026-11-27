@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,6 +34,15 @@ namespace FormsSystemStatsWidget.Forms
         private readonly Button _saveButton;
         private readonly Button _cancelButton;
         private readonly Label _resultLabel;
+
+        // Local (sync) directory target.
+        private readonly GroupBox _localGroup;
+        private readonly GroupBox _oauthSignInGroup;
+        private readonly GroupBox _manualCredentialsGroup;
+        private readonly TextBox _localDirectoryTextBox;
+        private readonly Button _localBrowseButton;
+        private readonly TextBox _localFileNameTextBox;
+        private readonly Label _localFileHintLabel;
 
         private readonly CloudIpSyncOptions _options;
         private string? _authorizationUrl;
@@ -122,6 +132,7 @@ namespace FormsSystemStatsWidget.Forms
             };
             this._providerCombo.Items.Add(new ProviderItem(CloudIpSyncProvider.GoogleDrive, "Google Drive"));
             this._providerCombo.Items.Add(new ProviderItem(CloudIpSyncProvider.OneDrive, "Microsoft OneDrive"));
+            this._providerCombo.Items.Add(new ProviderItem(CloudIpSyncProvider.LocalDirectory, "Local directory (sync)"));
             this._providerCombo.SelectedIndexChanged += this.ProviderCombo_SelectedIndexChanged;
 
             this._providerHintLabel = new Label
@@ -146,7 +157,7 @@ namespace FormsSystemStatsWidget.Forms
             AddRootRow(root, providerGroup);
 
             // ----- OAuth client + browser sign-in -----
-            var oauthGroup = CreateGroup("OAuth sign-in");
+            this._oauthSignInGroup = CreateGroup("OAuth sign-in");
             var oauthTable = CreateFormTable();
 
             this._clientIdTextBox = new TextBox
@@ -268,11 +279,81 @@ namespace FormsSystemStatsWidget.Forms
             AddFullRow(oauthTable, this._signInStatusLabel);
             AddFullRow(oauthTable, this._accountLabel);
             AddFullRow(oauthTable, redirectHint);
-            oauthGroup.Controls.Add(oauthTable);
-            AddRootRow(root, oauthGroup);
+            this._oauthSignInGroup.Controls.Add(oauthTable);
+            AddRootRow(root, this._oauthSignInGroup);
+
+            // ----- Local (sync) directory target -----
+            this._localGroup = CreateGroup("Local directory target (no OAuth sign-in)");
+            var localTable = CreateFormTable();
+
+            var localHint = new Label
+            {
+                Text = "FSSWidget writes the .ipdata file directly into this folder, without any cloud "
+                    + "API or sign-in. For other PCs to receive the updates, the folder should be "
+                    + "synchronized by a cloud client already installed on this machine, e.g. the "
+                    + "OneDrive or Google Drive sync folder (or any folder mirrored by another tool). "
+                    + "The folder is created automatically if it does not exist yet.",
+                AutoSize = true,
+                MaximumSize = new Size(560, 0),
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(0, 0, 0, 4)
+            };
+
+            this._localDirectoryTextBox = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                PlaceholderText = @"C:\Users\<user>\OneDrive\IP Updates",
+                Margin = new Padding(0, 3, 0, 3)
+            };
+
+            this._localBrowseButton = new Button
+            {
+                Text = "Browse...",
+                AutoSize = true,
+                MinimumSize = new Size(80, 30),
+                Margin = new Padding(8, 3, 0, 3)
+            };
+            this._localBrowseButton.Click += this.LocalBrowseButton_Click;
+
+            var directoryRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 2,
+                RowCount = 1,
+                Margin = new Padding(0),
+                Padding = new Padding(0)
+            };
+            directoryRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            directoryRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            directoryRow.Controls.Add(this._localDirectoryTextBox, 0, 0);
+            directoryRow.Controls.Add(this._localBrowseButton, 1, 0);
+
+            this._localFileNameTextBox = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 3, 0, 3)
+            };
+
+            this._localFileHintLabel = new Label
+            {
+                AutoSize = true,
+                MaximumSize = new Size(560, 0),
+                ForeColor = SystemColors.GrayText,
+                Margin = new Padding(0, 4, 0, 0)
+            };
+
+            AddFullRow(localTable, localHint);
+            AddRow(localTable, MakeLabel("Directory:"), directoryRow);
+            AddRow(localTable, MakeLabel("File name:"), this._localFileNameTextBox);
+            AddFullRow(localTable, this._localFileHintLabel);
+            this._localFileNameTextBox.TextChanged += (_, _) => this.UpdateLocalFileNameHint();
+            this._localGroup.Controls.Add(localTable);
+            AddRootRow(root, this._localGroup);
 
             // ----- Manual fallback -----
-            var manualGroup = CreateGroup("Manual credentials (optional fallback)");
+            this._manualCredentialsGroup = CreateGroup("Manual credentials (optional fallback)");
             var manualTable = CreateFormTable();
 
             var manualHint = new Label
@@ -288,8 +369,8 @@ namespace FormsSystemStatsWidget.Forms
 
             AddFullRow(manualTable, manualHint);
             AddRow(manualTable, MakeLabel("Refresh token:"), this._refreshTokenTextBox);
-            manualGroup.Controls.Add(manualTable);
-            AddRootRow(root, manualGroup);
+            this._manualCredentialsGroup.Controls.Add(manualTable);
+            AddRootRow(root, this._manualCredentialsGroup);
 
             // ----- Result + buttons (pinned, never scrolled away) -----
             this._resultLabel = new Label
@@ -372,6 +453,8 @@ namespace FormsSystemStatsWidget.Forms
             this._tenantTextBox.Text = string.IsNullOrWhiteSpace(this._options.TenantId) ? "common" : this._options.TenantId;
             this._clientSecretTextBox.Text = this._options.ClientSecret;
             this._refreshTokenTextBox.Text = this._options.RefreshToken;
+            this._localDirectoryTextBox.Text = this._options.LocalDirectory;
+            this._localFileNameTextBox.Text = this._options.LocalFileName;
 
             if (!string.IsNullOrWhiteSpace(this._options.AccountDisplayName))
             {
@@ -409,10 +492,12 @@ namespace FormsSystemStatsWidget.Forms
                 return;
             }
 
-            bool hasCredentials = !string.IsNullOrWhiteSpace(this._clientIdTextBox.Text)
-                || !string.IsNullOrWhiteSpace(this._clientSecretTextBox.Text)
-                || !string.IsNullOrWhiteSpace(this._refreshTokenTextBox.Text)
-                || !string.IsNullOrWhiteSpace(this._options.AccountDisplayName);
+            bool switchingToCloud = !newProvider.IsLocalDirectory();
+            bool hasCredentials = switchingToCloud
+                && (!string.IsNullOrWhiteSpace(this._clientIdTextBox.Text)
+                    || !string.IsNullOrWhiteSpace(this._clientSecretTextBox.Text)
+                    || !string.IsNullOrWhiteSpace(this._refreshTokenTextBox.Text)
+                    || !string.IsNullOrWhiteSpace(this._options.AccountDisplayName));
 
             if (hasCredentials
                 && MessageBox.Show(
@@ -466,18 +551,32 @@ namespace FormsSystemStatsWidget.Forms
         private void UpdateProviderUi()
         {
             CloudIpSyncProvider provider = this.SelectedProvider;
+            bool isLocal = provider.IsLocalDirectory();
             this._providerHintLabel.Text = provider.GetSetupHint();
-            this._consoleLink.Text = provider == CloudIpSyncProvider.OneDrive
-                ? "Open Microsoft Entra app registrations..."
-                : "Open Google Cloud credentials...";
-            this._consoleLink.Tag = provider.GetConsoleUrl();
-            this._clientSecretLabel.Text = provider.RequiresClientSecret()
-                ? "Client secret:"
-                : "Client secret (optional):";
 
-            bool showTenant = provider == CloudIpSyncProvider.OneDrive;
-            this._tenantLabel.Visible = showTenant;
-            this._tenantTextBox.Visible = showTenant;
+            // The OAuth sign-in and the manual credential fallback only apply to the cloud providers.
+            this._oauthSignInGroup.Visible = !isLocal;
+            this._manualCredentialsGroup.Visible = !isLocal;
+            this._localGroup.Visible = isLocal;
+
+            if (!isLocal)
+            {
+                this._consoleLink.Text = provider == CloudIpSyncProvider.OneDrive
+                    ? "Open Microsoft Entra app registrations..."
+                    : "Open Google Cloud credentials...";
+                this._consoleLink.Tag = provider.GetConsoleUrl();
+                this._clientSecretLabel.Text = provider.RequiresClientSecret()
+                    ? "Client secret:"
+                    : "Client secret (optional):";
+
+                bool showTenant = provider == CloudIpSyncProvider.OneDrive;
+                this._tenantLabel.Visible = showTenant;
+                this._tenantTextBox.Visible = showTenant;
+            }
+            else
+            {
+                this.UpdateLocalFileNameHint();
+            }
         }
 
         private void ShowSecretsCheckBox_CheckedChanged(object? sender, EventArgs e)
@@ -485,6 +584,40 @@ namespace FormsSystemStatsWidget.Forms
             bool show = this._showSecretsCheckBox.Checked;
             this._clientSecretTextBox.UseSystemPasswordChar = !show;
             this._refreshTokenTextBox.UseSystemPasswordChar = !show;
+        }
+
+        private void LocalBrowseButton_Click(object? sender, EventArgs e)
+        {
+            using var dialog = new FolderBrowserDialog
+            {
+                Description = "Choose the folder FSSWidget should write the .ipdata file to. "
+                    + "Best: a folder synchronized by a cloud client installed on this machine "
+                    + "(e.g. the OneDrive or Google Drive sync folder).",
+                UseDescriptionForTitle = true
+            };
+
+            string current = this._localDirectoryTextBox.Text.Trim();
+            if (current.Length > 0 && Directory.Exists(current))
+            {
+                dialog.SelectedPath = current;
+            }
+
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+
+            this._localDirectoryTextBox.Text = dialog.SelectedPath;
+            this.UpdateLocalFileNameHint();
+        }
+
+        private void UpdateLocalFileNameHint()
+        {
+            string configured = this._localFileNameTextBox.Text.Trim();
+            this._localFileHintLabel.Text = configured.Length > 0
+                ? "File name in use: " + CloudIpSyncHelpers.SanitizeFileName(configured)
+                : "Leave empty to use the default name: "
+                    + CloudIpSyncHelpers.GetIpDataFileName();
         }
 
         private async Task SignInAsync()
@@ -651,7 +784,10 @@ namespace FormsSystemStatsWidget.Forms
                 }
 
                 string hostName = CloudIpSyncHelpers.GetHostName();
-                string fileName = CloudIpSyncHelpers.GetIpDataFileName(hostName);
+                string fileName = options.Provider.IsLocalDirectory()
+                    && !string.IsNullOrWhiteSpace(options.LocalFileName)
+                        ? options.LocalFileName
+                        : CloudIpSyncHelpers.GetIpDataFileName(hostName);
                 string content = CloudIpDataFormatter.Build(hostName, ips.Ipv4, ips.Ipv6, DateTime.UtcNow);
 
                 this.SetResult("Uploading test file...", isError: false);
@@ -709,6 +845,21 @@ namespace FormsSystemStatsWidget.Forms
         {
             CloudIpSyncOptions options = this._options.Clone();
             options.Provider = this.SelectedProvider;
+            options.LocalDirectory = this._localDirectoryTextBox.Text.Trim();
+            options.LocalFileName = this._localFileNameTextBox.Text.Trim();
+
+            if (options.Provider.IsLocalDirectory())
+            {
+                // No OAuth fields are shown in local mode; do not carry stale credentials over.
+                options.ClientId = string.Empty;
+                options.ClientSecret = string.Empty;
+                options.RefreshToken = string.Empty;
+                options.AccessToken = string.Empty;
+                options.AccessTokenExpiresUtc = DateTime.MinValue;
+                options.AccountDisplayName = string.Empty;
+                return options;
+            }
+
             options.TenantId = string.IsNullOrWhiteSpace(this._tenantTextBox.Text)
                 ? "common"
                 : this._tenantTextBox.Text.Trim();
@@ -735,6 +886,38 @@ namespace FormsSystemStatsWidget.Forms
 
         private static bool ValidateOptions(CloudIpSyncOptions options, out string error)
         {
+            if (options.Provider.IsLocalDirectory())
+            {
+                if (string.IsNullOrWhiteSpace(options.LocalDirectory))
+                {
+                    error = "Enter the local directory (or pick one with Browse...).";
+                    return false;
+                }
+
+                try
+                {
+                    Path.GetFullPath(Environment.ExpandEnvironmentVariables(options.LocalDirectory));
+                }
+                catch (Exception ex)
+                {
+                    error = "The directory path is invalid: " + ex.Message;
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(options.LocalFileName))
+                {
+                    string safeName = CloudIpSyncHelpers.SanitizeFileName(options.LocalFileName);
+                    if (string.IsNullOrWhiteSpace(safeName))
+                    {
+                        error = "The file name contains only invalid characters.";
+                        return false;
+                    }
+                }
+
+                error = string.Empty;
+                return true;
+            }
+
             if (string.IsNullOrWhiteSpace(options.ClientId))
             {
                 error = "Enter the OAuth client ID.";
@@ -838,6 +1021,9 @@ namespace FormsSystemStatsWidget.Forms
             this._clientSecretTextBox.Enabled = !busy;
             this._refreshTokenTextBox.Enabled = !busy;
             this._showSecretsCheckBox.Enabled = !busy;
+            this._localDirectoryTextBox.Enabled = !busy;
+            this._localBrowseButton.Enabled = !busy;
+            this._localFileNameTextBox.Enabled = !busy;
             this._testButton.Enabled = !busy;
             this._saveButton.Enabled = !busy;
             this._cancelButton.Enabled = true;

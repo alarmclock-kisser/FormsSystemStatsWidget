@@ -12,31 +12,51 @@ namespace FormsSystemStatsWidget.Forms
     internal enum CloudIpSyncProvider
     {
         GoogleDrive,
-        OneDrive
+        OneDrive,
+        LocalDirectory
     }
 
     internal static class CloudIpSyncProviderInfo
     {
         public const string GoogleDriveStorageValue = "GoogleDrive";
         public const string OneDriveStorageValue = "OneDrive";
+        public const string LocalDirectoryStorageValue = "LocalDirectory";
 
         public static CloudIpSyncProvider Parse(string? value)
         {
-            return string.Equals(value, OneDriveStorageValue, StringComparison.OrdinalIgnoreCase)
-                ? CloudIpSyncProvider.OneDrive
+            if (string.Equals(value, OneDriveStorageValue, StringComparison.OrdinalIgnoreCase))
+            {
+                return CloudIpSyncProvider.OneDrive;
+            }
+
+            return string.Equals(value, LocalDirectoryStorageValue, StringComparison.OrdinalIgnoreCase)
+                ? CloudIpSyncProvider.LocalDirectory
                 : CloudIpSyncProvider.GoogleDrive;
         }
 
         public static string ToStorageValue(this CloudIpSyncProvider provider)
         {
-            return provider == CloudIpSyncProvider.OneDrive
-                ? OneDriveStorageValue
-                : GoogleDriveStorageValue;
+            return provider switch
+            {
+                CloudIpSyncProvider.OneDrive => OneDriveStorageValue,
+                CloudIpSyncProvider.LocalDirectory => LocalDirectoryStorageValue,
+                _ => GoogleDriveStorageValue
+            };
         }
 
         public static string GetDisplayName(this CloudIpSyncProvider provider)
         {
-            return provider == CloudIpSyncProvider.OneDrive ? "Microsoft OneDrive" : "Google Drive";
+            return provider switch
+            {
+                CloudIpSyncProvider.OneDrive => "Microsoft OneDrive",
+                CloudIpSyncProvider.LocalDirectory => "Local directory (sync)",
+                _ => "Google Drive"
+            };
+        }
+
+        public static bool IsLocalDirectory(this CloudIpSyncProvider provider)
+        {
+            return provider == CloudIpSyncProvider.LocalDirectory;
         }
 
         public static string GetAuthorizationEndpoint(this CloudIpSyncProvider provider, string? tenantId = null)
@@ -84,6 +104,15 @@ namespace FormsSystemStatsWidget.Forms
 
         public static string GetSetupHint(this CloudIpSyncProvider provider)
         {
+            if (provider.IsLocalDirectory())
+            {
+                return "No OAuth sign-in is needed for a local directory. FSSWidget writes the .ipdata "
+                    + "file directly into the folder below. For other PCs to receive the updates, the folder "
+                    + "should be synchronized by a cloud client already installed on this machine "
+                    + "(e.g. the OneDrive or Google Drive sync folder), or mirrored by another tool. "
+                    + "The folder is created automatically if it does not exist yet.";
+            }
+
             return provider == CloudIpSyncProvider.OneDrive
                 ? "Create an app registration in Microsoft Entra ID. Choose an account type that "
                   + "includes personal Microsoft accounts when using OneDrive personal. Under "
@@ -116,6 +145,11 @@ namespace FormsSystemStatsWidget.Forms
         public DateTime AccessTokenExpiresUtc { get; set; } = DateTime.MinValue;
 
         public string AccountDisplayName { get; set; } = string.Empty;
+
+        // Local (sync) directory target, used only when Provider == LocalDirectory.
+        public string LocalDirectory { get; set; } = string.Empty;
+
+        public string LocalFileName { get; set; } = string.Empty;
 
         public CloudIpSyncOptions Clone()
         {
@@ -248,7 +282,9 @@ namespace FormsSystemStatsWidget.Forms
                 RefreshToken = ProtectedSecretStore.Unprotect(settings.CloudIpSyncRefreshTokenProtected),
                 AccessToken = ProtectedSecretStore.Unprotect(settings.CloudIpSyncAccessTokenProtected),
                 AccessTokenExpiresUtc = settings.CloudIpSyncAccessTokenExpiresUtc,
-                AccountDisplayName = settings.CloudIpSyncAccount ?? string.Empty
+                AccountDisplayName = settings.CloudIpSyncAccount ?? string.Empty,
+                LocalDirectory = settings.CloudIpSyncLocalDirectory ?? string.Empty,
+                LocalFileName = settings.CloudIpSyncLocalFileName ?? string.Empty
             };
         }
 
@@ -262,6 +298,8 @@ namespace FormsSystemStatsWidget.Forms
             settings.CloudIpSyncAccessTokenProtected = ProtectedSecretStore.Protect(options.AccessToken);
             settings.CloudIpSyncAccessTokenExpiresUtc = options.AccessTokenExpiresUtc;
             settings.CloudIpSyncAccount = options.AccountDisplayName ?? string.Empty;
+            settings.CloudIpSyncLocalDirectory = options.LocalDirectory?.Trim() ?? string.Empty;
+            settings.CloudIpSyncLocalFileName = options.LocalFileName?.Trim() ?? string.Empty;
         }
 
         public static bool IsConfigured(WidgetPersistentSettings settings)
@@ -271,6 +309,11 @@ namespace FormsSystemStatsWidget.Forms
 
         public static bool IsConfigured(CloudIpSyncOptions options)
         {
+            if (options.Provider.IsLocalDirectory())
+            {
+                return !string.IsNullOrWhiteSpace(options.LocalDirectory);
+            }
+
             return !string.IsNullOrWhiteSpace(options.ClientId)
                 && !string.IsNullOrWhiteSpace(options.RefreshToken)
                 && (!options.Provider.RequiresClientSecret() || !string.IsNullOrWhiteSpace(options.ClientSecret));

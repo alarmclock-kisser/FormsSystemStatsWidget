@@ -97,6 +97,9 @@ namespace FormsSystemStatsWidget.Forms
         public string CloudIpSyncAccessTokenProtected { get; set; } = string.Empty;
         public DateTime CloudIpSyncAccessTokenExpiresUtc { get; set; } = DateTime.MinValue;
         public string CloudIpSyncAccount { get; set; } = string.Empty;
+        // Local (sync) directory target, used only when CloudIpSyncProvider == "LocalDirectory".
+        public string CloudIpSyncLocalDirectory { get; set; } = string.Empty;
+        public string CloudIpSyncLocalFileName { get; set; } = string.Empty;
         public DateTime CloudIpSyncLastUploadUtc { get; set; } = DateTime.MinValue;
         public string CloudIpSyncLastStatus { get; set; } = string.Empty;
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -179,6 +180,11 @@ namespace FormsSystemStatsWidget.Forms
             string fileName,
             CancellationToken cancellationToken)
         {
+            if (options.Provider.IsLocalDirectory())
+            {
+                return await UploadToLocalDirectoryAsync(options, content, fileName, cancellationToken);
+            }
+
             CloudOAuthTokenResult? updatedToken = null;
 
             try
@@ -237,6 +243,82 @@ namespace FormsSystemStatsWidget.Forms
             catch (Exception ex)
             {
                 return CloudUploadOutcome.Fail("Upload failed: " + ex.Message, updatedToken: updatedToken);
+            }
+        }
+
+        private static async Task<CloudUploadOutcome> UploadToLocalDirectoryAsync(
+            CloudIpSyncOptions options,
+            string content,
+            string fileName,
+            CancellationToken cancellationToken)
+        {
+            string? directory = NormalizeLocalDirectory(options.LocalDirectory);
+            if (directory == null)
+            {
+                return CloudUploadOutcome.Fail(
+                    "The local directory is invalid. Open Config and set a valid folder.");
+            }
+
+            // A configured file name wins over the default <host name>.ipdata name.
+            string configuredName = options.LocalFileName?.Trim() ?? string.Empty;
+            string safeFileName = CloudIpSyncHelpers.SanitizeFileName(
+                configuredName.Length > 0 ? configuredName : fileName);
+            string fullPath = Path.Combine(directory, safeFileName);
+
+            try
+            {
+                // The folder is created automatically so a freshly configured target works right away.
+                Directory.CreateDirectory(directory);
+
+                // Write to a temporary file first and then move it over: readers that watch the
+                // folder (cloud sync clients, other scripts) never see a half-written file.
+                string tempPath = fullPath + ".tmp";
+                await File.WriteAllTextAsync(tempPath, content, Encoding.UTF8, cancellationToken)
+                    .ConfigureAwait(false);
+                File.Move(tempPath, fullPath, overwrite: true);
+
+                return CloudUploadOutcome.Ok($"Wrote {safeFileName} to {directory}.");
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                return CloudUploadOutcome.Fail("The local write timed out.");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return CloudUploadOutcome.Fail(
+                    "No write access to the directory: " + ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return CloudUploadOutcome.Fail("Local write failed: " + ex.Message);
+            }
+        }
+
+        private static string? NormalizeLocalDirectory(string? directory)
+        {
+            string value = directory?.Trim() ?? string.Empty;
+            if (value.Length == 0)
+            {
+                return null;
+            }
+
+            if (value.Contains('\0'))
+            {
+                return null;
+            }
+
+            string expanded = Environment.ExpandEnvironmentVariables(value);
+
+            try
+            {
+                string full = Path.GetFullPath(expanded);
+                return full.Length == 0 ? null : full;
+            }
+            catch
+            {
+                // The path may not be valid on this system (e.g. invalid characters or an
+                // absolute path that is too long).
+                return null;
             }
         }
 

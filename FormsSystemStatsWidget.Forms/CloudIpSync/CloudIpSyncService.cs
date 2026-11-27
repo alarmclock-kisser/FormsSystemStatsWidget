@@ -182,7 +182,10 @@ namespace FormsSystemStatsWidget.Forms
                 }
 
                 string hostName = CloudIpSyncHelpers.GetHostName();
-                string fileName = CloudIpSyncHelpers.GetIpDataFileName(hostName);
+                string fileName = this._options.Provider.IsLocalDirectory()
+                    && !string.IsNullOrWhiteSpace(this._options.LocalFileName)
+                        ? this._options.LocalFileName
+                        : CloudIpSyncHelpers.GetIpDataFileName(hostName);
                 string content = CloudIpDataFormatter.Build(hostName, ips.Ipv4, ips.Ipv6, DateTime.UtcNow);
 
                 CloudUploadOutcome outcome = await CloudIpSyncUploader
@@ -224,7 +227,8 @@ namespace FormsSystemStatsWidget.Forms
                     return success;
                 }
 
-                bool needsSignIn = outcome.NeedsSignIn;
+                // Local directory writes have no sign-in to re-attempt after an hour.
+                bool needsSignIn = outcome.NeedsSignIn && !this._options.Provider.IsLocalDirectory();
                 this._nextRetryUtc = DateTime.UtcNow.Add(needsSignIn ? AuthRetryDelay : RetryDelay);
                 CloudIpSyncStatus error = new(
                     needsSignIn ? CloudIpSyncState.NeedsSignIn : CloudIpSyncState.Error,
